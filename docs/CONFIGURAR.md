@@ -5,11 +5,14 @@ Administrador: `juanjosuecastilloloyola@gmail.com` (el usuario que ya creaste en
 
 ---
 
-## 1. Base de datos
+## 1. Base de datos (y tareas automáticas)
 1. Supabase → **SQL Editor** → **New query**.
-2. Pega **todo** el archivo [`supabase/schema.sql`](../supabase/schema.sql) → **Run**.
-3. Debe terminar con "Success". Se puede volver a correr cuando haya una versión nueva: no borra datos.
+2. Pega el contenido de [`supabase/instalar-corto.sql`](../supabase/instalar-corto.sql) (5 líneas: descarga e instala la versión
+   correcta de [`supabase/instalar.sql`](../supabase/instalar.sql)) → **Run**. Debe decir "Success".
+3. Para actualizar a una versión nueva: lo mismo, con el `instalar-corto.sql` nuevo. No borra datos.
 
+> Si tu repositorio es privado, el atajo no puede descargar el archivo: en ese caso pega el `instalar.sql` completo.
+>
 > Tu usuario administrador queda reconocido solo. Revisa en **Authentication → Users** que tu correo
 > diga "Confirmed". Si no, ábrelo y toca **Confirm email**.
 
@@ -22,21 +25,20 @@ En **Authentication → Sign In / Providers**:
 - **Confirm email**: recomendado **desactivado**, así el cliente entra al tiro. Si lo dejas activado, el
   cliente tendrá que confirmar su correo antes de entrar.
 
-En **Authentication → URL Configuration** (cuando ya tengas la dirección de Cloudflare, paso 7):
-- **Site URL**: `https://TU-DOMINIO.pages.dev`
-- **Redirect URLs**: agrega `https://TU-DOMINIO.pages.dev/**` (sirve para "olvidé mi contraseña").
+En **Authentication → URL Configuration** (sirve para "olvidé mi contraseña"):
+- **Site URL**: la dirección donde está la app. Para probar en GitHub Pages: `https://codefixservice.github.io/Taller/`
+  (después, la de Cloudflare: `https://TU-DOMINIO.pages.dev/`).
+- **Redirect URLs**: agrega `https://codefixservice.github.io/Taller/**` y, cuando la tengas, `https://TU-DOMINIO.pages.dev/**`.
 
-## 3. Tareas automáticas y notificaciones (cron)
-1. **SQL Editor** → **New query** → pega [`supabase/cron.sql`](../supabase/cron.sql) → **Run**.
-2. Esto deja corriendo:
-   - cada 5 minutos: libera las horas que no se pagaron en 30 minutos, recordatorios del día anterior,
-     avisos de Premium por vencer (3 días antes) y la limpieza diaria (4 AM);
-   - cada minuto: envía al celular los avisos nuevos de la campanita.
+## 3. Tareas automáticas
+Ya quedan creadas con el paso 1 (cada 5 minutos: libera horas sin pago, recordatorios, vencimientos y limpieza diaria;
+cada minuto: notificaciones al celular). Si alguna vez quieres reinstalarlas solas, usa [`supabase/cron.sql`](../supabase/cron.sql).
 
 ## 4. Función "servidor" (crear cuentas y enviar notificaciones)
 1. Supabase → **Edge Functions** → **Deploy a new function** → **Via Editor**.
 2. Nombre: **`servidor`** (exacto, en minúscula).
-3. Borra el ejemplo y pega todo [`supabase/functions/servidor/index.ts`](../supabase/functions/servidor/index.ts) → **Deploy**.
+3. Borra el ejemplo y pega la línea de [`supabase/functions/servidor/corto.ts`](../supabase/functions/servidor/corto.ts)
+   (carga la versión correcta de `index.ts` desde GitHub) → **Deploy**. Si el repositorio es privado, pega el `index.ts` completo.
 4. Deja **Verify JWT** como viene (activado).
 
 ## 5. Activar las notificaciones al celular
@@ -85,3 +87,8 @@ El taller, al entrar, ve una lista de lo que le falta: logo y colores, servicios
 - **El cliente no puede crear cuenta** → revisa el paso 2 ("Allow new users to sign up" activado) y que el
   taller no haya llegado a su límite de clientes con cuenta.
 - **No llegan notificaciones al celular** → pasos 3, 4 y 5, y que la persona haya tocado "Activar".
+
+## Versiones y actualizaciones
+- La versión de la app está en `version.json` y `shared/config.js` (se ve al pie de cada pantalla).
+- Cuando se publica una versión nueva, a cada persona le aparece una ventana **"🔄 Hay una versión nueva → Actualizar ahora"**.
+- Si la versión trae cambios en la base de datos, el **Resumen** del admin lo avisa: corre el `instalar-corto.sql` nuevo.

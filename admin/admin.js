@@ -23,8 +23,8 @@
     $('tabPagos').textContent = r.pagos_por_revisar; $('tabPagos').classList.toggle('hidden', !r.pagos_por_revisar);
     const u = r.uso, pct = Math.round(100 * u.db_bytes / u.db_limite);
     const tablas = Object.entries(u.tablas).sort((a, b) => b[1] - a[1]);
-    $('v-resumen').innerHTML = (r.version !== window.BT_CONFIG.VERSION ? '<div class="aviso bad"><div class="grow">⚠️ La base de datos es la versión ' + esc(r.version) +
-        ' y la app la ' + esc(window.BT_CONFIG.VERSION) + '. Vuelve a correr supabase/schema.sql (guía, paso 1).</div></div>' : '') +
+    $('v-resumen').innerHTML = (r.version !== window.BT_CONFIG.DB_VERSION ? '<div class="aviso bad"><div class="grow">⚠️ La base de datos es la versión ' + esc(r.version) +
+        ' y la app necesita la ' + esc(window.BT_CONFIG.DB_VERSION) + '. Vuelve a correr la instalación de la base de datos (guía, paso 1).</div></div>' : '') +
       (r.pagos_por_revisar ? '<div class="aviso warn clic" data-ir="pagos"><div class="grow">💰 Tienes <b>' + r.pagos_por_revisar + '</b> pago(s) Premium por revisar.</div><span>›</span></div>' : '') +
       '<div class="stats">' +
       [['🚲 Talleres', r.talleres], ['⭐ Talleres Premium', r.talleres_premium], ['🟢 Activos 7 días', r.talleres_activos_7d], ['⏳ Vencen en 7 días', r.por_vencer],

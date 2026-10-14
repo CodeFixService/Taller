@@ -314,6 +314,37 @@
   global.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); instalar = e; document.dispatchEvent(new Event('bt:instalable')); });
   async function pedirInstalar() { if (!instalar) return false; instalar.prompt(); await instalar.userChoice; instalar = null; return true; }
 
+  /* ---------- Versión nueva: ventana para actualizar ---------- */
+  const mayor = (a, b) => {
+    const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+    for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+    return false;
+  };
+  let avisada = false;
+  async function revisarVersion() {
+    if (avisada || document.hidden) return;
+    let v = '';
+    try { v = String((await (await fetch(ROOT + 'version.json?_=' + Date.now(), { cache: 'no-store' })).json()).version || ''); } catch (e) { return; }
+    if (!v || !mayor(v, cfg.VERSION)) return;
+    avisada = true;
+    const d = modal('<h2>🔄 Hay una versión nueva</h2><p class="muted" style="margin-top:0">Tienes la v' + esc(cfg.VERSION) + ' y ya está disponible la v' + esc(v) +
+      '. Actualiza para tener las últimas mejoras.</p><div class="btns"><button class="ghost" data-cerrar>Después</button><button id="btActualizar">Actualizar ahora</button></div>');
+    d.querySelector('#btActualizar').onclick = actualizar;
+  }
+  async function actualizar() {
+    const b = document.getElementById('btActualizar');
+    if (b) { b.disabled = true; b.textContent = 'Actualizando…'; }
+    try {
+      if ('caches' in global) { const k = await caches.keys(); await Promise.all(k.map((x) => caches.delete(x))); }
+      const reg = 'serviceWorker' in navigator && await navigator.serviceWorker.getRegistration();
+      if (reg) await reg.update();
+    } catch (e) { /* igual recarga */ }
+    location.reload();
+  }
+  setTimeout(revisarVersion, 3000);
+  setInterval(revisarVersion, 10 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) revisarVersion(); });
+
   function pie() {
     const f = document.createElement('footer');
     f.className = 'pie';
@@ -341,7 +372,7 @@
     sb, ROOT, $, esc, plata, numero, iso, fechaDe, sumarDias, hoy, fCorta, fLarga, fHora, hace, DIAS, telNorm, wa, estrellas, nota,
     toast, modal, confirmar, tema, pintarLogo, friendly, rpc, q, cargarPublica, txt, refrescar, requerir, entrar, salir, crearCuenta,
     clave, mensajeAcceso, comprimirComprobante, comprimirLogo, descargar, verImagen, campana, irA, activarPush, ofrecerPush,
-    pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino,
+    pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino, revisarVersion, actualizar,
     get cuenta() { return cuenta; },
     get publica() { return publica; }
   };

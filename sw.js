@@ -1,7 +1,7 @@
 /* BiciTaller · Service worker: app instalable, funciona con mala señal y recibe notificaciones.
    Siempre intenta traer la versión nueva de internet (así nunca queda una versión vieja);
    si no hay señal, usa la copia guardada. */
-const CACHE = 'bt-v1';
+const CACHE = 'bt-v1.1';
 const BASE = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'shared/app.css', 'shared/app.js', 'shared/config.js', 'shared/vendor/supabase.js', 'shared/vendor/qrcode.js',
   'admin/', 'admin/admin.js', 'taller/', 'taller/taller.js', 'cliente/', 't/', 'r/'];
@@ -15,7 +15,8 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-  e.respondWith(fetch(e.request).then((res) => {
+  const fresco = e.request.mode === 'navigate' ? fetch(e.request.url, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(e.request, { cache: 'no-cache' });
+  e.respondWith(fresco.then((res) => {
     if (res.ok) { const copia = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copia)); }
     return res;
   }).catch(() => caches.match(e.request, { ignoreSearch: true }).then((r) => r || caches.match('index.html'))));

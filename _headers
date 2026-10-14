@@ -9,3 +9,5 @@
   Cache-Control: no-cache
 /shared/*
   Cache-Control: no-cache
+/version.json
+  Cache-Control: no-store
