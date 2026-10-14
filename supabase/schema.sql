@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.1'::text $$;
+language sql immutable as $$ select '1.2'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -1709,7 +1709,7 @@ begin
   if p_publica !~ '^[A-Za-z0-9_-]{80,100}$' or p_privada !~ '^[A-Za-z0-9_-]{40,50}$' then raise exception 'Claves no válidas'; end if;
   insert into public.secretos (clave, valor) values ('vapid_privada', p_privada) on conflict (clave) do update set valor = excluded.valor;
   insert into public.config (clave, valor) values ('vapid_publica', to_jsonb(p_publica)) on conflict (clave) do update set valor = excluded.valor;
-  delete from public.push_subs;  -- las suscripciones con la clave anterior ya no sirven
+  delete from public.push_subs where true;  -- las suscripciones con la clave anterior ya no sirven
   perform public.auditar('push', 'claves nuevas');
 end $$;
 
@@ -1844,7 +1844,13 @@ to authenticated;
 -- Usadas por las políticas de seguridad.
 grant execute on function public.is_admin(), public.taller_de(uuid), public.mi_taller(), public.es_dueno(uuid) to authenticated;
 -- Las de solo-servidor (preparar_cuenta, cancelar_invitacion, push_pendientes, push_borrar_endpoint, tareas_periodicas)
--- quedan sin permiso para la app: las usa la función "servidor" con su clave de servicio y pg_cron.
+-- quedan sin permiso para la app: solo las usa la función "servidor" (rol service_role) y pg_cron.
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    execute 'grant execute on all functions in schema public to service_role';
+  end if;
+end $$;
 
 -- Que la API de Supabase vea las funciones nuevas al instante.
 notify pgrst, 'reload schema';
