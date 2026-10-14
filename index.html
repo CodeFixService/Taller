@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16a34a">
+<title>BiciTaller</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="shared/app.css">
+<style>
+  main { max-width: 440px; padding-top: 8vh; }
+  .marca { text-align: center; margin-bottom: 18px; }
+  .marca .logo { width: 76px; height: 76px; border-radius: 22px; margin: 0 auto 10px; display: grid; place-items: center; font-size: 40px;
+    background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 55%, #000)); color: #fff; }
+  .marca h1 { margin: 0; font-size: 26px; letter-spacing: -.02em; }
+</style>
+</head>
+<body>
+<main>
+  <div class="marca"><div class="logo">🚲</div><h1 id="nombreApp">BiciTaller</h1><p class="muted" id="lema" style="margin:4px 0 0">Reserva tu hora en el taller de bicicletas</p></div>
+
+  <section class="card" id="vEntrar">
+    <h2>Iniciar sesión</h2>
+    <form id="fEntrar">
+      <label for="eEmail">Correo</label><input id="eEmail" type="email" autocomplete="email" required>
+      <label for="ePass">Contraseña</label><input id="ePass" type="password" autocomplete="current-password" required>
+      <div class="btns"><button type="submit" class="block" id="bEntrar">Entrar</button></div>
+      <p class="err" id="eErr"></p>
+    </form>
+    <p class="muted" style="text-align:center;margin:8px 0 0"><a href="#" id="aOlvide">¿Olvidaste tu contraseña?</a></p>
+    <p class="sub" style="text-align:center;margin-top:14px">¿Eres cliente de un taller? Entra al enlace de tu taller para reservar o crear tu cuenta.</p>
+  </section>
+
+  <section class="card hidden" id="vOlvide">
+    <h2>Recuperar contraseña</h2>
+    <p class="muted">Te enviaremos un correo con un enlace para crear una contraseña nueva.</p>
+    <label for="oEmail">Correo</label><input id="oEmail" type="email" autocomplete="email">
+    <div class="btns"><button class="ghost" id="bVolver" type="button">Volver</button><button id="bOlvide" type="button">Enviar enlace</button></div>
+    <p class="err" id="oErr"></p>
+  </section>
+
+  <section class="card hidden" id="vNueva">
+    <h2>Crea tu contraseña nueva</h2>
+    <label for="nPass">Contraseña nueva (mínimo 6 caracteres)</label><input id="nPass" type="password" autocomplete="new-password">
+    <div class="btns"><button id="bNueva" type="button" class="block">Guardar y entrar</button></div>
+    <p class="err" id="nErr"></p>
+  </section>
+</main>
+<script src="shared/config.js"></script>
+<script src="shared/vendor/supabase.js"></script>
+<script src="shared/app.js"></script>
+<script>
+(async function () {
+  const { $ } = App;
+  App.registrarSW();
+  const params = new URLSearchParams(location.search);
+  const volver = params.get('volver');
+  const ver = (id) => ['vEntrar', 'vOlvide', 'vNueva'].forEach((v) => $(v).classList.toggle('hidden', v !== id));
+  App.cargarPublica().then((p) => {
+    if (p.textos.app_nombre) { $('nombreApp').textContent = p.textos.app_nombre; document.title = p.textos.app_nombre; }
+    if (p.textos.app_lema) $('lema').textContent = p.textos.app_lema;
+  });
+  App.pie();
+  function seguir(c) {
+    if (volver && volver.startsWith('/') && !volver.startsWith('//')) location.replace(volver);
+    else location.replace(App.ROOT + App.destino(c));
+  }
+  let recuperando = /type=recovery/.test(location.hash);
+  App.sb.auth.onAuthStateChange((ev) => { if (ev === 'PASSWORD_RECOVERY') { recuperando = true; ver('vNueva'); } });
+  if (recuperando) { ver('vNueva'); return; }
+  try { const c = await App.refrescar(); if (c && !recuperando) { seguir(c); return; } } catch (e) { /* sin sesión */ }
+
+  $('fEntrar').onsubmit = async (e) => {
+    e.preventDefault();
+    const b = $('bEntrar'); $('eErr').textContent = ''; b.disabled = true; b.textContent = 'Entrando…';
+    try { seguir(await App.entrar($('eEmail').value, $('ePass').value)); }
+    catch (err) { $('eErr').textContent = err.message; b.disabled = false; b.textContent = 'Entrar'; }
+  };
+  $('aOlvide').onclick = (e) => { e.preventDefault(); $('oEmail').value = $('eEmail').value; ver('vOlvide'); };
+  $('bVolver').onclick = () => ver('vEntrar');
+  $('bOlvide').onclick = async () => {
+    $('oErr').textContent = '';
+    const { error } = await App.sb.auth.resetPasswordForEmail($('oEmail').value.trim(), { redirectTo: App.ROOT + 'index.html' });
+    if (error) $('oErr').textContent = App.friendly(error); else { App.toast('📧 Revisa tu correo'); ver('vEntrar'); }
+  };
+  $('bNueva').onclick = async () => {
+    $('nErr').textContent = '';
+    const { error } = await App.sb.auth.updateUser({ password: $('nPass').value });
+    if (error) { $('nErr').textContent = App.friendly(error); return; }
+    history.replaceState(null, '', location.pathname);
+    seguir(await App.refrescar());
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,343 @@
+/* BiciTaller · Panel del administrador general. */
+(async function () {
+  'use strict';
+  const { $, esc, plata, rpc, toast, modal, confirmar } = App;
+  App.registrarSW();
+  const yo = await App.requerir(['admin']);
+  let pub = await App.cargarPublica();
+  App.tema('#0f766e');
+  const MB = (b) => (b / 1048576).toFixed(1) + ' MB';
+
+  const show = App.pestanas((v) => {
+    if (v === 'resumen') verResumen();
+    if (v === 'talleres') cargarTalleres();
+    if (v === 'clientes') cargarClientes();
+    if (v === 'pagos') cargarPagos();
+    if (v === 'ajustes') verAjuste(ajuste);
+  });
+
+  /* ---------- Resumen y servidor ---------- */
+  async function verResumen() {
+    let r;
+    try { r = await rpc('admin_resumen'); } catch (e) { $('v-resumen').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    $('tabPagos').textContent = r.pagos_por_revisar; $('tabPagos').classList.toggle('hidden', !r.pagos_por_revisar);
+    const u = r.uso, pct = Math.round(100 * u.db_bytes / u.db_limite);
+    const tablas = Object.entries(u.tablas).sort((a, b) => b[1] - a[1]);
+    $('v-resumen').innerHTML = (r.version !== window.BT_CONFIG.VERSION ? '<div class="aviso bad"><div class="grow">⚠️ La base de datos es la versión ' + esc(r.version) +
+        ' y la app la ' + esc(window.BT_CONFIG.VERSION) + '. Vuelve a correr supabase/schema.sql (guía, paso 1).</div></div>' : '') +
+      (r.pagos_por_revisar ? '<div class="aviso warn clic" data-ir="pagos"><div class="grow">💰 Tienes <b>' + r.pagos_por_revisar + '</b> pago(s) Premium por revisar.</div><span>›</span></div>' : '') +
+      '<div class="stats">' +
+      [['🚲 Talleres', r.talleres], ['⭐ Talleres Premium', r.talleres_premium], ['🟢 Activos 7 días', r.talleres_activos_7d], ['⏳ Vencen en 7 días', r.por_vencer],
+        ['👥 Clientes con cuenta', r.clientes], ['⭐ Clientes Premium', r.clientes_premium], ['🔧 Personas de equipo', r.equipo], ['📅 Reservas este mes', r.reservas_mes],
+        ['📅 Reservas hoy', r.reservas_hoy], ['💰 Ingresos del mes', plata(r.ingresos_mes)]].map((x) => '<div class="card"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>').join('') + '</div>' +
+      '<div class="card"><h2>🖥️ Servidor</h2><div class="sub">Base de datos: ' + MB(u.db_bytes) + ' de ' + MB(u.db_limite) + ' (' + pct + '%) · plan gratis de Supabase</div>' +
+      '<div class="barra"><i class="' + (pct >= 90 ? 'rojo' : pct >= 70 ? 'amarillo' : '') + '" style="width:' + Math.max(pct, 1) + '%"></i></div>' +
+      '<p class="sub">' + (pct >= 90 ? '🔴 Casi lleno: limpia o pasa a Supabase Pro.' : pct >= 70 ? '🟡 Va subiendo: programa una limpieza.' : '🟢 Todo bien.') + '</p>' +
+      '<table>' + tablas.map(([k, v]) => '<tr><td>' + esc(k) + '</td><td class="r">' + MB(v) + '</td></tr>').join('') + '</table>' +
+      '<p class="sub">Comprobantes guardados: ' + u.comprobantes + ' (' + MB(u.comprobantes_bytes) + ') · Logos: ' + MB(u.logos_bytes) + ' · Avisos: ' + u.notificaciones + ' · Reservas: ' + u.reservas + '</p>' +
+      '<h3>🧹 Limpieza</h3><p class="sub" style="margin-top:0">Se hace sola todos los días a las 4 AM. También puedes limpiar ahora:</p>' +
+      '<div class="btns"><button class="ghost small" data-l="comprobantes">Comprobantes revisados</button><button class="ghost small" data-l="notificaciones">Avisos viejos</button>' +
+      '<button class="ghost small" data-l="reservas">Reservas expiradas/rechazadas (+60 días)</button><button class="danger small" data-l="todo">Limpiar todo</button></div>' +
+      '<p class="sub">Versión de la base de datos: ' + esc(r.version) + ' · App: ' + esc(window.BT_CONFIG.VERSION) + '</p></div>';
+    $('v-resumen').onclick = async (e) => {
+      const ir = e.target.closest('[data-ir]'); if (ir) { show(ir.dataset.ir); return; }
+      const b = e.target.closest('[data-l]'); if (!b) return;
+      if (!await confirmar(b.dataset.l === 'comprobantes' ? 'Se borran TODOS los comprobantes ya revisados (los en revisión se mantienen). ¿Seguir?' : '¿Limpiar ahora?')) return;
+      try { const x = await rpc('limpiar', { p_que: b.dataset.l }); toast('🧹 Borrados: ' + x.comprobantes + ' comprobantes, ' + x.notificaciones + ' avisos, ' + x.reservas + ' reservas'); verResumen(); }
+      catch (err) { toast(err.message); }
+    };
+  }
+
+  /* ---------- Talleres ---------- */
+  let talleres = [], tFiltro = '';
+  $('nPass').value = App.clave();
+  $('nRegalo').textContent = (pub.config || {}).dias_regalo_taller || 30;
+  async function cargarTalleres() {
+    try { talleres = await rpc('admin_talleres'); } catch (e) { $('tLista').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    pintarTalleres();
+  }
+  $('tBuscar').oninput = pintarTalleres;
+  $('tSeg').onclick = (e) => { const b = e.target.closest('[data-f]'); if (!b) return; tFiltro = b.dataset.f; $('tSeg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); pintarTalleres(); };
+  function pintarTalleres() {
+    const f = $('tBuscar').value.trim().toLowerCase(), semana = Date.now() - 7 * 864e5, enSiete = Date.now() + 7 * 864e5;
+    const l = talleres.filter((t) => (!f || (t.nombre + ' ' + t.email + ' ' + t.comuna + ' ' + t.dueno).toLowerCase().includes(f)) && (
+      !tFiltro || (tFiltro === 'premium' && t.premium) || (tFiltro === 'free' && !t.premium) || (tFiltro === 'suspendidos' && t.suspendido) ||
+      (tFiltro === 'vence' && t.premium && new Date(t.premium_hasta) < enSiete) || (tFiltro === 'inactivos' && (!t.visto_at || new Date(t.visto_at) < semana))));
+    $('tLista').innerHTML = l.length ? l.map((t) => {
+      const logo = /^data:image/.test(t.logo || '') ? 'background-image:url(\'' + t.logo + '\');' : '';
+      return '<div class="card"><div style="display:flex;gap:12px;align-items:flex-start"><div class="mini-logo" style="background-color:' + esc(t.color) + ';' + logo + '">' + (logo ? '' : esc(t.icono)) + '</div>' +
+        '<div class="grow"><b>' + esc(t.nombre) + '</b> ' + (t.premium ? '<span class="pill pro">PREMIUM</span>' : '<span class="pill">GRATIS</span>') + (t.suspendido ? ' <span class="pill bad">Suspendido</span>' : '') +
+        (t.cobra_abono ? '' : ' <span class="pill warn">Sin link de abono</span>') +
+        '<div class="sub">' + esc(t.dueno || '') + ' · ' + esc(t.email || '') + (t.comuna ? ' · ' + esc(t.comuna) : '') + '</div>' +
+        '<div class="sub">' + (t.premium ? '⭐ Premium hasta ' + new Date(t.premium_hasta).toLocaleDateString('es-CL') : t.premium_hasta ? 'Premium venció el ' + new Date(t.premium_hasta).toLocaleDateString('es-CL') : 'Nunca fue Premium') +
+        ' · 🟢 visto ' + App.hace(t.visto_at) + '</div>' +
+        '<div class="sub">👥 ' + t.clientes + ' clientes (' + t.clientes_cuenta + ' con cuenta) · 🔧 ' + t.equipo + ' equipo · 📅 ' + t.reservas_mes + ' reservas este mes (' + t.reservas_total + ' total) · 🛠️ ' + t.servicios +
+        ' servicios · 🏷️ ' + t.promos + ' promos · ' + App.nota(t.nota) + '</div></div></div>' +
+        '<div class="acc"><select data-prem="' + t.id + '" aria-label="Premium"><option value="">⭐ Premium…</option><option value="7">+7 días</option><option value="30">+30 días</option><option value="90">+90 días</option>' +
+        '<option value="365">+1 año</option><option value="otro">Otro número de días…</option><option value="0">Quitar Premium</option></select>' +
+        '<a class="btn small ghost" target="_blank" rel="noopener" href="../t/?s=' + encodeURIComponent(t.slug) + '">🔗 Página</a>' +
+        (t.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(t.telefono, 'Hola ' + (t.dueno || '') + ' 👋') + '">📲</a>' : '') +
+        '<button class="small ' + (t.suspendido ? 'okb' : 'danger') + '" data-susp="' + t.id + '" data-s="' + (t.suspendido ? 0 : 1) + '">' + (t.suspendido ? 'Reactivar' : 'Suspender') + '</button></div></div>';
+    }).join('') : '<p class="empty">No hay talleres aquí.</p>';
+  }
+  $('tLista').onchange = async (e) => {
+    const s = e.target.closest('[data-prem]'); if (!s || !s.value) return;
+    let dias = s.value === 'otro' ? parseInt(prompt('¿Cuántos días de Premium?'), 10) : +s.value;
+    s.value = '';
+    if (isNaN(dias)) return;
+    if (dias === 0 && !await confirmar('¿Quitar el Premium a este taller? Vuelve a la versión gratis.')) return;
+    try { await rpc('admin_premium', { p_tipo: 'taller', p_id: s.dataset.prem, p_dias: dias }); App.sb.functions.invoke('servidor').catch(() => {}); toast(dias ? '⭐ +' + dias + ' días' : 'Premium quitado'); cargarTalleres(); }
+    catch (err) { toast(err.message); }
+  };
+  $('tLista').onclick = async (e) => {
+    const b = e.target.closest('[data-susp]'); if (!b) return;
+    if (b.dataset.s === '1' && !await confirmar('¿Suspender el taller? Ni el taller ni su equipo podrán entrar y su página se cierra.')) return;
+    try { await rpc('admin_suspender', { p_tipo: 'taller', p_id: b.dataset.susp, p_suspender: b.dataset.s === '1' }); cargarTalleres(); } catch (err) { toast(err.message); }
+  };
+  $('nCrear').onclick = async () => {
+    const b = $('nCrear'); $('nErr').textContent = '';
+    const d = { taller_nombre: $('nTaller').value.trim(), nombre: $('nDueno').value.trim(), email: $('nEmail').value.trim(), telefono: $('nTel').value.trim(), password: $('nPass').value.trim(), rol: 'taller' };
+    if (!d.taller_nombre || !d.nombre || !d.email) { $('nErr').textContent = 'Completa el nombre del taller, del dueño y el correo'; return; }
+    b.disabled = true; b.textContent = 'Creando…';
+    try {
+      await App.crearCuenta(d);
+      const msg = App.mensajeAcceso({ nombre: d.nombre.split(' ')[0], email: d.email, password: d.password, lugar: 'BiciTaller (' + d.taller_nombre + ')' }) +
+        '\n\nTienes ' + ((pub.config || {}).dias_regalo_taller || 30) + ' días de Premium de regalo 🎁';
+      modal('<h2>✅ Taller creado</h2><p class="muted">Envíale sus datos de acceso:</p><pre class="link" style="white-space:pre-wrap;font:inherit">' + esc(msg) + '</pre><div class="btns"><button class="ghost" data-cerrar>Cerrar</button>' +
+        (d.telefono ? '<a class="btn" target="_blank" rel="noopener" href="' + App.wa(d.telefono, msg) + '">📲 Enviar por WhatsApp</a>' : '') + '</div>');
+      ['nTaller', 'nDueno', 'nEmail', 'nTel'].forEach((k) => { $(k).value = ''; }); $('nPass').value = App.clave();
+      cargarTalleres();
+    } catch (e) { $('nErr').textContent = e.message; }
+    b.disabled = false; b.textContent = 'Crear taller';
+  };
+
+  /* ---------- Clientes ---------- */
+  let clientes = [];
+  async function cargarClientes() {
+    try { clientes = await rpc('admin_clientes'); } catch (e) { $('cLista').innerHTML = '<li class="err">' + esc(e.message) + '</li>'; return; }
+    const ts = Array.from(new Map(clientes.map((c) => [c.taller_id, c.taller])).entries());
+    const sel = $('cTaller').value;
+    $('cTaller').innerHTML = '<option value="">Todos los talleres</option>' + ts.map(([id, n]) => '<option value="' + id + '"' + (id === sel ? ' selected' : '') + '>' + esc(n) + '</option>').join('');
+    pintarClientes();
+  }
+  $('cBuscar').oninput = pintarClientes; $('cTaller').onchange = pintarClientes;
+  function pintarClientes() {
+    const f = $('cBuscar').value.trim().toLowerCase(), t = $('cTaller').value;
+    const l = clientes.filter((c) => (!f || (c.nombre + ' ' + c.email + ' ' + c.telefono).toLowerCase().includes(f)) && (!t || c.taller_id === t));
+    $('cCuenta').textContent = l.length + ' clientes · ' + l.filter((c) => c.premium).length + ' Premium';
+    $('cLista').innerHTML = l.length ? l.slice(0, 500).map((c) => '<li><div class="grow"><b>' + esc(c.nombre || c.email) + '</b> ' + (c.premium ? '<span class="pill pro">PREMIUM</span> ' : '') +
+      (c.suspendido ? '<span class="pill bad">Suspendido</span> ' : '') + App.nota(c.nota) + '<div class="sub">' + esc(c.email) + ' · ' + esc(c.telefono) + ' · ' + esc(c.taller || '') + ' · ' + c.visitas + ' visitas · visto ' + App.hace(c.visto_at) +
+      (c.premium ? ' · Premium hasta ' + new Date(c.premium_hasta).toLocaleDateString('es-CL') : '') + '</div></div>' +
+      '<select data-cp="' + c.id + '" style="width:auto" aria-label="Acción"><option value="">Acción…</option><option value="30">⭐ +30 días</option><option value="90">⭐ +90 días</option><option value="0">Quitar Premium</option>' +
+      '<option value="' + (c.suspendido ? 'react' : 'susp') + '">' + (c.suspendido ? 'Reactivar' : 'Suspender') + '</option></select></li>').join('') : '<li class="muted">Sin clientes.</li>';
+  }
+  $('cLista').onchange = async (e) => {
+    const s = e.target.closest('[data-cp]'); if (!s || !s.value) return;
+    const v = s.value; s.value = '';
+    try {
+      if (v === 'susp' || v === 'react') await rpc('admin_suspender', { p_tipo: 'perfil', p_id: s.dataset.cp, p_suspender: v === 'susp' });
+      else await rpc('admin_premium', { p_tipo: 'cliente', p_id: s.dataset.cp, p_dias: +v });
+      toast('Listo'); cargarClientes();
+    } catch (err) { toast(err.message); }
+  };
+
+  /* ---------- Pagos Premium ---------- */
+  let pFiltro = 'en_revision';
+  $('pSeg').onclick = (e) => { const b = e.target.closest('[data-f]'); if (!b) return; pFiltro = b.dataset.f; $('pSeg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); cargarPagos(); };
+  async function cargarPagos() {
+    let l = [];
+    try { l = await rpc('admin_pagos', { p_estado: pFiltro || null }); } catch (e) { $('pLista').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    $('pLista').innerHTML = l.length ? l.map((g) => '<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:flex-start"><div><b>' + esc(g.quien) + '</b> <span class="pill">' +
+      (g.tipo === 'premium_taller' ? '🚲 Taller' : '👤 Cliente') + '</span><div class="sub">' + esc(g.email) + ' · ' + App.fHora(g.created_at) + '</div>' +
+      (g.premium_hasta ? '<div class="sub">Premium actual hasta ' + new Date(g.premium_hasta).toLocaleDateString('es-CL') + '</div>' : '') + (g.nota ? '<div class="sub">Nota: ' + esc(g.nota) + '</div>' : '') +
+      '</div><div style="text-align:right"><span class="precio" style="font-size:20px">' + plata(g.monto) + '</span><div><span class="pill ' + (g.estado === 'aprobado' ? 'ok' : g.estado === 'rechazado' ? 'bad' : 'info') + '">' + g.estado.replace('_', ' ') + '</span></div></div></div>' +
+      '<div class="acc">' + (g.tiene_comprobante ? '<button class="small ghost" data-ver="' + g.id + '">👁️ Comprobante</button>' : '<span class="sub">Comprobante borrado</span>') +
+      (g.estado === 'en_revision' ? '<button class="small okb" data-ok="' + g.id + '">Aprobar</button><button class="small danger" data-no="' + g.id + '">Rechazar</button>' : '') + '</div></div>').join('')
+      : '<p class="empty">Nada por aquí.</p>';
+  }
+  $('pLista').onclick = async (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    try {
+      if (b.dataset.ver) { const img = await rpc('admin_pago_comprobante', { p_id: b.dataset.ver }); if (img) App.verImagen(img, 'Comprobante Premium', 'premium-' + b.dataset.ver.slice(0, 8) + '.jpg'); else toast('Ya fue borrado'); return; }
+      if (b.dataset.ok) {
+        if (!await confirmar('Revisa en tu Mercado Pago que el pago llegó.\n\n¿Aprobar y activar Premium?', 'Sí, aprobar')) return;
+        await rpc('admin_pago_resolver', { p_id: b.dataset.ok, p_aprobar: true, p_nota: null }); toast('⭐ Premium activado');
+      }
+      if (b.dataset.no) {
+        const nota = prompt('Motivo del rechazo (lo verá la persona)', 'No encontramos el pago');
+        if (nota === null) return;
+        await rpc('admin_pago_resolver', { p_id: b.dataset.no, p_aprobar: false, p_nota: nota }); toast('Pago rechazado');
+      }
+      App.sb.functions.invoke('servidor').catch(() => {});
+      cargarPagos();
+    } catch (err) { toast(err.message); }
+  };
+
+  /* ---------- Ajustes ---------- */
+  let ajuste = 'links';
+  $('aSeg').onclick = (e) => { const b = e.target.closest('[data-a]'); if (b) verAjuste(b.dataset.a); };
+  const aBody = () => $('aBody');
+  function verAjuste(a) {
+    ajuste = a;
+    $('aSeg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.a === a));
+    ({ links: verLinks, planes: verPlanes, reglas: verReglas, textos: verTextos, avisos: verAvisos, push: verPush, calif: verCalif, registro: verRegistro, cuenta: verCuenta })[a]();
+  }
+
+  // Precios y links de pago (2 por plan, uno activo)
+  async function verLinks() {
+    let links = [];
+    try { links = await rpc('admin_links'); } catch (e) { aBody().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    const bloque = (tipo, titulo) => '<div class="card"><h2>' + titulo + '</h2><p class="sub" style="margin-top:0">El precio que se publica es el del espacio activo. Para cambiar el precio, edita el monto y su link, o activa el otro espacio.</p>' +
+      [1, 2].map((n) => { const l = links.find((x) => x.tipo === tipo && x.slot === n) || { monto: 0, url: '', texto: '', activo: false };
+        return '<div class="slotpago' + (l.activo ? ' on' : '') + '"><label class="check" style="margin:0"><input type="radio" name="act-' + tipo + '" value="' + n + '"' + (l.activo ? ' checked' : '') + '> <b>Espacio ' + n + '</b>' +
+          (l.activo ? ' <span class="pill ok">Activo</span>' : '') + '</label><div class="row"><div><label>Precio</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="monto" inputmode="numeric" value="' + (l.monto || '') + '"></div>' +
+          '<div><label>Texto de la publicación</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="texto" maxlength="300" value="' + esc(l.texto) + '" placeholder="Pago mensual"></div></div>' +
+          '<label>Link de pago (Mercado Pago)</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="url" value="' + esc(l.url) + '" placeholder="https://mpago.la/…"></div>'; }).join('') +
+      '<div class="btns"><button data-guardar="' + tipo + '">💾 Guardar</button></div></div>';
+    aBody().innerHTML = bloque('premium_taller', '🚲 Premium de talleres') + bloque('premium_cliente', '👤 Premium de clientes') +
+      '<p class="sub">El abono de las reservas lo configura cada taller con su propio link: ese dinero le llega directo al taller y tú no lo ves.</p>';
+    aBody().onclick = async (e) => {
+      const b = e.target.closest('[data-guardar]'); if (!b) return;
+      const tipo = b.dataset.guardar, act = +((aBody().querySelector('input[name="act-' + tipo + '"]:checked') || {}).value || 0);
+      const val = (s, k) => aBody().querySelector('[data-t="' + tipo + '"][data-s="' + s + '"][data-k="' + k + '"]').value.trim();
+      try {
+        for (const s of [1, 2]) await rpc('link_guardar', { p_tipo: tipo, p_slot: s, p_monto: App.numero(val(s, 'monto')), p_url: val(s, 'url'), p_texto: val(s, 'texto'), p_activar: s === act });
+        pub = await App.cargarPublica(); toast('💾 Guardado'); verLinks();
+      } catch (err) { toast(err.message); }
+    };
+  }
+
+  // Planes: nombre, descripción, duración, beneficios y límites
+  const ETIQ = { reservas_mes: 'Reservas online al mes', servicios: 'Servicios', promos: 'Promociones activas', equipo: 'Personas en el equipo', clientes_cuenta: 'Clientes con cuenta',
+    estadisticas: 'Estadísticas', recordatorios: 'Recordatorios de mantención', historial: 'Visitas en el historial', anticipacion_extra: 'Días extra para reservar antes' };
+  async function verPlanes() {
+    pub = await App.cargarPublica();
+    const planes = pub.planes;
+    aBody().innerHTML = ['taller_free', 'taller_premium', 'cliente_free', 'cliente_premium'].map((c) => { const p = planes[c]; return '<div class="card' + (/premium/.test(c) ? ' plan premium' : '') + '" data-plan="' + c + '"><h2>' +
+      ({ taller_free: '🚲 Taller gratis', taller_premium: '🚲⭐ Taller Premium', cliente_free: '👤 Cliente gratis', cliente_premium: '👤⭐ Cliente Premium' })[c] + '</h2>' +
+      '<div class="row"><div><label>Nombre</label><input data-k="nombre" maxlength="40" value="' + esc(p.nombre) + '"></div><div><label>Duración del pago (días)</label><input data-k="duracion" inputmode="numeric" value="' + p.duracion_dias + '"></div></div>' +
+      '<label>Descripción</label><input data-k="descripcion" maxlength="300" value="' + esc(p.descripcion) + '">' +
+      '<label>Beneficios (uno por línea)</label><textarea data-k="beneficios" rows="5">' + esc(p.beneficios.join('\n')) + '</textarea>' +
+      '<h3>Límites</h3><div class="row">' + Object.keys(p.limites).map((k) => typeof p.limites[k] === 'boolean'
+        ? '<label class="check" style="flex:1 1 100%"><input type="checkbox" data-l="' + k + '"' + (p.limites[k] ? ' checked' : '') + '> ' + esc(ETIQ[k] || k) + '</label>'
+        : '<div><label>' + esc(ETIQ[k] || k) + '</label><input data-l="' + k + '" inputmode="numeric" value="' + p.limites[k] + '"></div>').join('') + '</div>' +
+      '<div class="btns"><button data-gp="' + c + '">💾 Guardar plan</button></div></div>'; }).join('');
+    aBody().onclick = async (e) => {
+      const b = e.target.closest('[data-gp]'); if (!b) return;
+      const card = aBody().querySelector('[data-plan="' + b.dataset.gp + '"]'), v = (k) => card.querySelector('[data-k="' + k + '"]').value;
+      const lim = {};
+      card.querySelectorAll('[data-l]').forEach((i) => { lim[i.dataset.l] = i.type === 'checkbox' ? i.checked : App.numero(i.value); });
+      try {
+        await rpc('admin_plan_guardar', { p_codigo: b.dataset.gp, p_nombre: v('nombre'), p_descripcion: v('descripcion'), p_limites: lim,
+          p_beneficios: v('beneficios').split('\n').map((x) => x.trim()).filter(Boolean), p_duracion: App.numero(v('duracion')) });
+        toast('⭐ Plan guardado');
+      } catch (err) { toast(err.message); }
+    };
+  }
+
+  // Reglas (tiempos y días)
+  function verReglas() {
+    const c = pub.config || {};
+    const campos = [['minutos_pago', 'Minutos para pagar el abono y subir el comprobante'], ['minutos_devolucion', 'Minutos para cancelar con devolución del abono'],
+      ['horas_cancelacion', 'Horas mínimas para cancelar/reagendar con saldo a favor'], ['dias_saldo', 'Días que dura el saldo a favor'],
+      ['dias_regalo_taller', 'Días de Premium de regalo al crear un taller'], ['dias_aviso_vencimiento', 'Días antes del vencimiento para avisar'],
+      ['dias_comprobantes', 'Días que se guardan los comprobantes']];
+    aBody().innerHTML = '<div class="card"><h2>⚖️ Reglas</h2>' + campos.map(([k, t]) => '<label>' + esc(t) + '</label><input data-c="' + k + '" inputmode="numeric" value="' + esc(c[k]) + '">').join('') +
+      '<label>Tu WhatsApp de soporte</label><input data-c="soporte_whatsapp" data-txt="1" value="' + esc(c.soporte_whatsapp || '') + '" placeholder="+56 9 …">' +
+      '<div class="btns"><button id="rG">💾 Guardar reglas</button></div></div>';
+    $('rG').onclick = async () => {
+      try {
+        for (const i of aBody().querySelectorAll('[data-c]')) {
+          const val = i.dataset.txt ? i.value.trim() : App.numero(i.value);
+          if (String(c[i.dataset.c]) !== String(val)) await rpc('admin_config_guardar', { p_clave: i.dataset.c, p_valor: val });
+        }
+        pub = await App.cargarPublica(); toast('⚖️ Reglas guardadas');
+      } catch (e) { toast(e.message); }
+    };
+  }
+
+  // Textos de la app
+  const TXT = { app_nombre: 'Nombre de la app', app_lema: 'Frase de bienvenida', reserva_pago: 'Instrucciones del abono (usa {minutos})',
+    reserva_politica: 'Política de cancelación (usa {devolucion} y {horas})', premium_taller_titulo: 'Título Premium taller', premium_taller_texto: 'Texto Premium taller',
+    premium_cliente_titulo: 'Título Premium cliente', premium_cliente_texto: 'Texto Premium cliente', pago_instrucciones: 'Instrucciones para pagar Premium',
+    bienvenida_taller: 'Bienvenida del taller nuevo', terminos: 'Términos (al crear cuenta)' };
+  async function verTextos() {
+    pub = await App.cargarPublica();
+    aBody().innerHTML = '<div class="card"><h2>✏️ Textos</h2>' + Object.keys(TXT).map((k) => '<label>' + esc(TXT[k]) + '</label><textarea data-x="' + k + '" rows="2">' + esc(pub.textos[k] || '') + '</textarea>').join('') +
+      '<div class="btns"><button id="xG">💾 Guardar textos</button></div></div>';
+    $('xG').onclick = async () => {
+      try {
+        for (const i of aBody().querySelectorAll('[data-x]')) if ((pub.textos[i.dataset.x] || '') !== i.value) await rpc('admin_texto_guardar', { p_clave: i.dataset.x, p_valor: i.value });
+        pub = await App.cargarPublica(); toast('✏️ Textos guardados');
+      } catch (e) { toast(e.message); }
+    };
+  }
+
+  // Avisos masivos (campanita + push)
+  function verAvisos() {
+    aBody().innerHTML = '<div class="card"><h2>📣 Enviar aviso</h2><p class="muted" style="margin-top:0">Llega a la campanita de la app y como notificación al celular.</p>' +
+      '<label for="vD">Para</label><select id="vD"><option value="talleres">Dueños de talleres</option><option value="equipos">Talleres y sus equipos</option><option value="clientes">Clientes</option><option value="todos">Todos</option></select>' +
+      '<label for="vT">Título</label><input id="vT" maxlength="90"><label for="vC">Mensaje</label><textarea id="vC" maxlength="240"></textarea>' +
+      '<div class="btns"><button id="vE">📣 Enviar</button></div></div>';
+    $('vE').onclick = async () => {
+      if (!await confirmar('¿Enviar el aviso?')) return;
+      try { const n = await rpc('admin_aviso', { p_destino: $('vD').value, p_titulo: $('vT').value, p_cuerpo: $('vC').value }); App.sb.functions.invoke('servidor').catch(() => {}); toast('📣 Enviado a ' + n + ' personas'); $('vT').value = ''; $('vC').value = ''; }
+      catch (e) { toast(e.message); }
+    };
+  }
+
+  // Notificaciones push: claves
+  function verPush() {
+    const pubk = (pub.config || {}).vapid_publica;
+    aBody().innerHTML = '<div class="card"><h2>🔔 Notificaciones al celular</h2><p class="muted" style="margin-top:0">' + (pubk ? '✅ Las claves están creadas.' : '⚠️ Falta crear las claves.') +
+      ' La función "servidor" las usa para enviar los avisos (guía, pasos 4 y 5).</p><div class="btns"><button id="kG" class="' + (pubk ? 'ghost' : '') + '">' + (pubk ? 'Crear claves nuevas' : 'Crear claves') + '</button>' +
+      '<button class="alt" id="kP">Probar función servidor</button></div><div id="kPush"></div><p class="sub" id="kR"></p></div>';
+    App.ofrecerPush($('kPush'));
+    $('kG').onclick = async () => {
+      if (pubk && !await confirmar('Al crear claves nuevas, todos deberán activar las notificaciones de nuevo. ¿Seguir?')) return;
+      try {
+        const k = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+        const raw = new Uint8Array(await crypto.subtle.exportKey('raw', k.publicKey)), jwk = await crypto.subtle.exportKey('jwk', k.privateKey);
+        const b64u = (u) => btoa(String.fromCharCode.apply(null, u)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        await rpc('admin_push_claves', { p_publica: b64u(raw), p_privada: jwk.d });
+        pub = await App.cargarPublica(); toast('🔔 Claves creadas'); verPush();
+      } catch (e) { toast(e.message); }
+    };
+    $('kP').onclick = async () => {
+      const { data, error } = await App.sb.functions.invoke('servidor', { body: { accion: 'ping' } });
+      $('kR').textContent = error ? '❌ No responde: créala en Supabase (guía, paso 4).' : data && data.servicio ? '✅ Funciona (versión ' + data.version + ').' : '⚠️ Responde, pero sin clave de servicio.';
+    };
+  }
+
+  async function verCalif() {
+    let l = [];
+    try { l = await rpc('admin_calificaciones'); } catch (e) { aBody().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    aBody().innerHTML = '<div class="card"><h2>⭐ Calificaciones</h2><p class="muted" style="margin-top:0">Borra las injustas u ofensivas. Los comentarios solo los ves tú.</p><ul class="list">' +
+      (l.map((q) => '<li><div class="grow"><span class="stars">' + App.estrellas(q.estrellas) + '</span> ' + (q.autor === 'cliente' ? esc(q.cliente) + ' → ' + esc(q.taller) : esc(q.taller) + ' → ' + esc(q.cliente)) +
+        (q.comentario ? '<div class="sub">“' + esc(q.comentario) + '”</div>' : '') + '<div class="sub">' + App.fHora(q.created_at) + '</div></div><button class="small danger" data-x="' + q.id + '">Borrar</button></li>').join('') || '<li class="muted">Sin calificaciones.</li>') + '</ul></div>';
+    aBody().onclick = async (e) => {
+      const b = e.target.closest('[data-x]'); if (!b || !await confirmar('¿Borrar la calificación?')) return;
+      try { await rpc('admin_calificacion_borrar', { p_id: b.dataset.x }); verCalif(); } catch (err) { toast(err.message); }
+    };
+  }
+
+  async function verRegistro() {
+    let l = [];
+    try { l = await rpc('admin_auditoria'); } catch (e) { aBody().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    aBody().innerHTML = '<div class="card"><h2>📜 Registro de cambios</h2><ul class="list">' + (l.map((a) => '<li><div class="grow"><b>' + esc(a.accion) + '</b> <span class="sub">' + esc(a.detalle) + '</span></div><span class="sub">' + App.fHora(a.created_at) + '</span></li>').join('') ||
+      '<li class="muted">Sin registros.</li>') + '</ul></div>';
+  }
+
+  function verCuenta() {
+    aBody().innerHTML = '<div class="card"><h2>👤 Mi cuenta</h2><p class="muted" style="margin-top:0">' + esc(yo.email) + '</p><label for="uP">Contraseña nueva</label><input id="uP" type="password" autocomplete="new-password">' +
+      '<div class="btns"><button class="alt" id="uPG">Cambiar contraseña</button><button class="danger" id="uS">Cerrar sesión</button></div></div>';
+    $('uPG').onclick = async () => { const { error } = await App.sb.auth.updateUser({ password: $('uP').value }); toast(error ? App.friendly(error) : '🔑 Contraseña cambiada'); };
+    $('uS').onclick = () => App.salir();
+  }
+
+  $('cargando').classList.add('hidden');
+  App.campana($('campana'));
+  App.pie();
+  const h = location.hash.slice(1);
+  show(['resumen', 'talleres', 'clientes', 'pagos', 'ajustes'].includes(h) ? h : 'resumen');
+})();

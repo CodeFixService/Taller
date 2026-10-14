@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16a34a">
+<title>Mi reserva</title>
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icons/icon-192.png">
+<link rel="stylesheet" href="../shared/app.css">
+<style>
+  .estrellas-in { display: flex; gap: 6px; font-size: 34px; }
+  .estrellas-in button { background: none; color: var(--line); padding: 0 2px; font-size: 34px; }
+  .estrellas-in button.on { color: var(--gold); }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  td { padding: 7px 0; border-bottom: 1px solid var(--line); }
+  td.r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; padding-left: 10px; }
+  tr.tot td { border: 0; font-weight: 800; }
+  tr.sub2 td { border: 0; color: var(--muted); padding: 2px 0; }
+  .prev img { max-height: 260px; width: auto; display: block; margin: 10px auto 0; border-radius: 12px; border: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<main>
+  <p class="empty" id="cargando">Cargando…</p>
+  <div class="hidden" id="todo">
+    <div class="card">
+      <div class="hero"><div class="logo" id="logo"></div><div class="grow"><b id="taller" style="font-size:18px"></b><div class="sub" id="dir"></div></div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">
+        <div><div class="sub">Tu reserva</div><h2 style="margin:2px 0 0" id="cuando"></h2><div class="muted" id="queServ"></div></div>
+        <span class="pill" id="estado"></span>
+      </div>
+      <div id="bloque" style="margin-top:12px"></div>
+    </div>
+    <div class="card hidden" id="cTrabajo"><h2>🔧 Tu bici</h2><ul class="tl" id="tl"></ul><div id="detalle"></div></div>
+    <div class="card hidden" id="cCalif"></div>
+    <div class="btns">
+      <a class="btn alt hidden" id="bWsp" target="_blank" rel="noopener">📲 Escribir al taller</a>
+      <a class="btn ghost" id="bOtra">📅 Otra reserva</a>
+    </div>
+    <p class="sub" style="text-align:center;margin-top:14px">Guarda este enlace: aquí ves, cancelas o reagendas tu reserva.</p>
+  </div>
+</main>
+<script src="../shared/config.js"></script>
+<script src="../shared/vendor/supabase.js"></script>
+<script src="../shared/app.js"></script>
+<script>
+(async function () {
+  'use strict';
+  const { $, esc, plata } = App;
+  App.registrarSW();
+  const token = new URLSearchParams(location.search).get('t') || '';
+  if (token.length < 20) { $('cargando').textContent = 'Enlace no válido.'; return; }
+  await App.cargarPublica();
+  const ESTADO = {
+    por_pagar: ['💳 Falta pagar el abono', 'warn'], en_revision: ['🧾 Comprobante en revisión', 'info'], confirmada: ['✅ Confirmada', 'ok'],
+    recibida: ['🚲 Bici recibida', 'info'], en_reparacion: ['🔧 En reparación', 'info'], esperando_repuesto: ['📦 Esperando repuesto', 'warn'],
+    lista: ['✅ ¡Lista para retirar!', 'ok'], completada: ['🎉 Completada', 'ok'], no_asistio: ['🚫 No asististe', 'bad'],
+    rechazada: ['❌ Comprobante rechazado', 'bad'], expirada: ['⌛ Tiempo de pago vencido', 'bad'], cancelada: ['❌ Cancelada', 'bad']
+  };
+  const PASOS = [['confirmada', '✅ Confirmada'], ['recibida', '🚲 Recibida en el taller'], ['en_reparacion', '🔧 En reparación'], ['lista', '✅ Lista para retirar'], ['completada', '🎉 Entregada']];
+  const ORDEN = { confirmada: 0, recibida: 1, en_reparacion: 2, esperando_repuesto: 2, lista: 3, completada: 4 };
+  let r = null, reloj = null, sondeo = null, imagen = null;
+
+  async function cargar() {
+    try { r = await App.rpc('reserva_ver', { p_token: token }); } catch (e) { $('cargando').textContent = '⚠️ ' + e.message; return; }
+    if (!r) { $('cargando').textContent = 'No encontramos esta reserva.'; return; }
+    pintar();
+  }
+  function pintar() {
+    const t = r.taller;
+    App.tema(t.color); App.pintarLogo($('logo'), t);
+    document.title = 'Mi reserva · ' + t.nombre;
+    $('taller').textContent = t.nombre;
+    $('dir').textContent = [t.direccion, t.comuna].filter(Boolean).join(', ');
+    $('cuando').textContent = App.fLarga(r.fecha) + ' · ' + r.hora;
+    $('queServ').textContent = [r.servicio, r.bici].filter(Boolean).join(' · ');
+    const e = ESTADO[r.estado] || [r.estado, ''];
+    $('estado').textContent = e[0]; $('estado').className = 'pill ' + e[1];
+    $('bWsp').classList.toggle('hidden', !t.telefono);
+    if (t.telefono) $('bWsp').href = App.wa(t.telefono, 'Hola 👋 Soy ' + r.nombre + ', tengo reserva el ' + App.fLarga(r.fecha) + ' a las ' + r.hora + '.');
+    $('bOtra').href = '../t/?s=' + encodeURIComponent(t.slug);
+    clearInterval(reloj); clearInterval(sondeo);
+    const b = $('bloque');
+    const pol = App.txt('reserva_politica', { devolucion: r.minutos_devolucion, horas: r.horas_cancelacion });
+
+    if (r.estado === 'por_pagar') {
+      b.innerHTML = '<div class="aviso warn"><div class="grow">⏳ Te quedan <span class="cuenta-atras" id="cr">--:--</span> para pagar y subir el comprobante. Si no, la hora se libera.</div></div>' +
+        '<p style="margin:0 0 8px">' + esc(App.txt('reserva_pago', { minutos: (App.publica.config || {}).minutos_pago || 30 })) + '</p>' +
+        '<div class="stats" style="grid-template-columns:1fr"><div class="card"><span>Abono (se descuenta del total)</span><b>' + plata(r.abono_monto) + '</b></div></div>' +
+        '<a class="btn block" target="_blank" rel="noopener" id="bPagar" href="' + esc(r.pagar_url || '#') + '">1️⃣ Pagar abono en Mercado Pago</a>' +
+        '<label for="fComp" class="btn alt block" style="margin-top:10px;color:var(--brand)">2️⃣ Subir foto del comprobante</label>' +
+        '<input type="file" id="fComp" accept="image/*" class="hidden">' +
+        '<div class="prev" id="prev"></div><button class="block hidden" id="bEnviar" style="margin-top:10px">Enviar comprobante</button><p class="err" id="cErr"></p>' +
+        '<div class="btns"><button class="danger small" id="bCancelar">Cancelar reserva</button></div>';
+      const fin = new Date(r.expira_at).getTime();
+      const tic = () => {
+        const s = Math.max(0, Math.round((fin - Date.now()) / 1000));
+        const el = $('cr'); if (el) el.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+        if (!s) { clearInterval(reloj); cargar(); }
+      };
+      tic(); reloj = setInterval(tic, 1000);
+      $('fComp').onchange = async (ev) => {
+        const f = ev.target.files[0]; if (!f) return;
+        $('cErr').textContent = '';
+        try { imagen = await App.comprimirComprobante(f); $('prev').innerHTML = '<img alt="Comprobante" src="' + imagen + '">'; $('bEnviar').classList.remove('hidden'); }
+        catch (err) { $('cErr').textContent = err.message; }
+      };
+      $('bEnviar').onclick = async () => {
+        const bt = $('bEnviar'); bt.disabled = true; bt.textContent = 'Enviando…';
+        try {
+          const x = await App.rpc('reserva_comprobante', { p_token: token, p_imagen: imagen });
+          if (!x.ok) throw new Error(x.error);
+          App.sb.functions.invoke('servidor').catch(() => {});
+          App.toast('🧾 Comprobante enviado'); cargar();
+        } catch (err) { $('cErr').textContent = err.message; bt.disabled = false; bt.textContent = 'Enviar comprobante'; }
+      };
+    } else if (r.estado === 'en_revision') {
+      b.innerHTML = '<div class="aviso"><div class="grow">🧾 Recibimos tu comprobante. El taller lo revisa y tu hora queda <b>apartada</b> mientras tanto. ' +
+        'Esta página se actualiza sola.</div></div><div class="btns"><button class="danger small" id="bCancelar">Cancelar reserva</button></div>';
+    } else if (r.estado === 'confirmada') {
+      b.innerHTML = '<div class="aviso"><div class="grow">✅ ¡Listo! Te esperamos. Abono pagado: <b>' + plata(r.abono_monto) + '</b> (se descuenta del total).</div></div>' +
+        '<p class="sub">' + esc(pol) + '</p><div class="btns">' + (r.reagendar ? '<button class="alt" id="bReagendar">🔁 Cambiar día u hora</button>' : '') +
+        '<button class="danger" id="bCancelar">Cancelar</button></div>';
+    } else if (r.estado === 'cancelada' && r.abono_estado === 'saldo') {
+      b.innerHTML = '<div class="aviso"><div class="grow">💚 Tienes <b>' + plata(r.abono_monto) + ' de saldo a favor</b> hasta el ' + App.fLarga((r.saldo_hasta || '').slice(0, 10)) +
+        '. Úsalo para reagendar cuando quieras.</div></div>' + (r.reagendar ? '<button class="block" id="bReagendar">📅 Reagendar con mi saldo</button>' : '');
+    } else if (r.estado === 'cancelada') {
+      b.innerHTML = '<p class="muted" style="margin:0">' + ({ devolver: '💸 Cancelaste a tiempo: el taller te devolverá el abono.', devuelto: '💸 El taller ya te devolvió el abono.',
+        perdido: 'Cancelaste con menos de ' + r.horas_cancelacion + ' horas: el abono no se devuelve.' }[r.abono_estado] || 'Reserva cancelada.') + '</p>';
+    } else if (r.estado === 'rechazada') {
+      b.innerHTML = '<p class="muted" style="margin:0">El taller rechazó el comprobante' + (r.motivo ? ': <b>' + esc(r.motivo) + '</b>' : '') + '. Puedes reservar de nuevo o escribirle.</p>';
+    } else if (r.estado === 'expirada') {
+      b.innerHTML = '<p class="muted" style="margin:0">Se acabó el tiempo para pagar y la hora se liberó. Puedes reservar de nuevo.</p>';
+    } else if (r.estado === 'no_asistio') {
+      b.innerHTML = '<p class="muted" style="margin:0">No llegaste a tu hora, así que el abono no se devuelve.</p>';
+    } else b.innerHTML = '';
+
+    // Trabajo: línea de tiempo y detalle
+    const enTrabajo = r.estado in ORDEN;
+    $('cTrabajo').classList.toggle('hidden', !enTrabajo || r.estado === 'confirmada');
+    if (enTrabajo) {
+      const n = ORDEN[r.estado], cuando = {};
+      r.historial.forEach((h) => { cuando[h.estado] = h.at; });
+      $('tl').innerHTML = PASOS.map((p, i) => '<li class="' + (i <= n ? 'ok' : '') + '">' + p[1] + (i === n && r.estado === 'esperando_repuesto' ? ' · 📦 esperando repuesto' : '') +
+        (cuando[p[0]] && i <= n ? '<div class="sub">' + App.fHora(cuando[p[0]]) + '</div>' : '') + '</li>').join('');
+      const items = r.items || [];
+      const abonoAplica = ['pagado', 'aplicado'].includes(r.abono_estado) ? r.abono_monto : 0;
+      $('detalle').innerHTML = (r.diagnostico ? '<p style="margin:6px 0">🔍 ' + esc(r.diagnostico) + '</p>' : '') + (items.length ? '<table>' +
+        items.map((it) => '<tr><td>' + esc(it.nombre) + (Number(it.cant) !== 1 ? ' × ' + it.cant : '') + '</td><td class="r">' + plata(it.cant * it.precio) + '</td></tr>').join('') +
+        '<tr class="tot"><td>Total</td><td class="r">' + plata(r.total) + '</td></tr>' +
+        (abonoAplica ? '<tr class="sub2"><td>Abono pagado</td><td class="r">−' + plata(abonoAplica) + '</td></tr><tr class="sub2"><td><b>Saldo a pagar</b></td><td class="r"><b>' +
+          plata(Math.max(r.total - abonoAplica, 0)) + '</b></td></tr>' : '') + '</table>' : '') +
+        (r.proxima_mantencion && r.estado === 'completada' ? '<p class="sub">🔔 Próxima mantención recomendada: ' + App.fLarga(r.proxima_mantencion) + '</p>' : '');
+    }
+
+    // Calificar al taller
+    const puedeCalif = ['completada', 'lista'].includes(r.estado) && !r.calificada;
+    $('cCalif').classList.toggle('hidden', !puedeCalif);
+    if (puedeCalif) {
+      let n = 0;
+      $('cCalif').innerHTML = '<h2>⭐ ¿Cómo te atendieron?</h2><div class="estrellas-in" id="est">' + [1, 2, 3, 4, 5].map((i) => '<button type="button" data-n="' + i + '" aria-label="' + i + ' estrellas">★</button>').join('') + '</div>' +
+        '<textarea id="calTxt" maxlength="300" placeholder="Comentario (opcional, solo lo ve el taller)" style="margin-top:8px"></textarea><div class="btns"><button id="bCal">Enviar calificación</button></div>';
+      $('est').onclick = (ev) => { const x = ev.target.closest('[data-n]'); if (!x) return; n = +x.dataset.n; $('est').querySelectorAll('button').forEach((y) => y.classList.toggle('on', +y.dataset.n <= n)); };
+      $('bCal').onclick = async () => {
+        if (!n) { App.toast('Elige las estrellas'); return; }
+        try { const x = await App.rpc('reserva_calificar', { p_token: token, p_estrellas: n, p_comentario: $('calTxt').value }); if (!x.ok) throw new Error(x.error); App.toast('¡Gracias! ⭐'); cargar(); }
+        catch (err) { App.toast(err.message); }
+      };
+    }
+
+    const bc = $('bCancelar'); if (bc) bc.onclick = cancelar;
+    const br = $('bReagendar'); if (br) br.onclick = reagendar;
+    $('cargando').classList.add('hidden'); $('todo').classList.remove('hidden');
+    // Se actualiza sola mientras espera el pago o la revisión.
+    if (['por_pagar', 'en_revision', 'confirmada', 'recibida', 'en_reparacion', 'esperando_repuesto', 'lista'].includes(r.estado)) {
+      sondeo = setInterval(async () => {
+        if (document.hidden) return;
+        try { const n = await App.rpc('reserva_ver', { p_token: token }); if (n && (n.estado !== r.estado || n.abono_estado !== r.abono_estado || n.total !== r.total)) { r = n; pintar(); } } catch (e) { /* sin red */ }
+      }, 20000);
+    }
+  }
+
+  async function cancelar() {
+    const msg = {
+      libre: 'Tu hora se libera. Aún no has pagado nada.',
+      devolucion: 'Estás dentro de los primeros ' + r.minutos_devolucion + ' minutos: el taller te devolverá el abono.',
+      saldo: 'Faltan ' + r.horas_cancelacion + ' horas o más: tu abono queda como SALDO A FAVOR para reagendar (no se devuelve en dinero).',
+      pierde: 'Faltan menos de ' + r.horas_cancelacion + ' horas: si cancelas PIERDES el abono.'
+    }[r.cancelar];
+    if (!msg || !await App.confirmar(msg + '\n\n¿Cancelar la reserva?', 'Sí, cancelar')) return;
+    try {
+      const x = await App.rpc('reserva_cancelar', { p_token: token });
+      if (!x.ok) throw new Error(x.error);
+      App.sb.functions.invoke('servidor').catch(() => {});
+      App.toast('Reserva cancelada'); cargar();
+    } catch (e) { App.toast(e.message); }
+  }
+
+  async function reagendar() {
+    const d = App.modal('<h2>📅 Elige el nuevo día y hora</h2><div class="dias" id="rDias"><span class="muted">Buscando…</span></div><div class="horas" id="rHoras"></div>' +
+      '<div class="btns"><button class="ghost" data-cerrar>Cerrar</button><button id="rOk" disabled>Confirmar cambio</button></div><p class="err" id="rErr"></p>');
+    let dia = null, hora = null;
+    const durMin = r.minutos || null;
+    let ds = [];
+    try { ds = await App.rpc('dias_libres', { p_taller: r.taller.id, p_min: durMin }); } catch (e) { d.querySelector('#rErr').textContent = e.message; return; }
+    const rd = d.querySelector('#rDias'), rh = d.querySelector('#rHoras');
+    rd.innerHTML = ds.length ? ds.map((f) => '<button type="button" data-f="' + f + '">' + App.DIAS[App.fechaDe(f).getDay()] + '<b>' + App.fechaDe(f).getDate() + '</b></button>').join('') : '<span class="muted">Sin días disponibles.</span>';
+    rd.onclick = async (e) => {
+      const b = e.target.closest('[data-f]'); if (!b) return;
+      dia = b.dataset.f; hora = null; d.querySelector('#rOk').disabled = true;
+      rd.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+      const hs = await App.rpc('horas_libres', { p_taller: r.taller.id, p_fecha: dia, p_min: durMin, p_excluir: null });
+      rh.innerHTML = hs.map((h) => '<button type="button" data-h="' + h + '">' + h + '</button>').join('') || '<span class="muted">Sin horas.</span>';
+    };
+    rh.onclick = (e) => { const b = e.target.closest('[data-h]'); if (!b) return; hora = b.dataset.h; rh.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); d.querySelector('#rOk').disabled = false; };
+    d.querySelector('#rOk').onclick = async () => {
+      try {
+        const x = await App.rpc('reserva_reagendar', { p_token: token, p_fecha: dia, p_hora: hora });
+        if (!x.ok) throw new Error(x.error);
+        d.close(); App.toast('🔁 Reserva reagendada'); App.sb.functions.invoke('servidor').catch(() => {}); cargar();
+      } catch (e) { d.querySelector('#rErr').textContent = e.message; }
+    };
+  }
+
+  cargar();
+  App.pie();
+})();
+</script>
+</body>
+</html>

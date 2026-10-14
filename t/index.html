@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16a34a">
+<title>Reservar hora</title>
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icons/icon-192.png">
+<link rel="apple-touch-icon" href="../icons/icon-192.png">
+<link rel="stylesheet" href="../shared/app.css">
+<style>
+  .paso { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--brand); color: var(--brand-ink); font-size: 13px; }
+  .promo { border-left: 4px solid var(--brand); }
+  .info-linea { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <p class="empty" id="cargando">Cargando…</p>
+
+  <div class="hidden" id="todo">
+    <div class="card">
+      <div class="hero"><div class="logo" id="logo"></div>
+        <div class="grow"><h1 id="nombre"></h1><div id="nota"></div><div class="sub" id="dir"></div></div></div>
+      <p id="desc" class="hidden" style="margin:12px 0 0"></p>
+      <p class="sub" id="horario" style="margin:8px 0 0"></p>
+      <div class="info-linea" id="contacto"></div>
+    </div>
+
+    <div id="promos"></div>
+
+    <div class="card hidden" id="cerrado"><p style="margin:0" id="cerradoTxt"></p></div>
+
+    <div id="form">
+      <div class="card">
+        <h2><span class="paso">1</span> ¿Qué necesita tu bici?</h2>
+        <div id="servs"></div>
+      </div>
+      <div class="card">
+        <h2><span class="paso">2</span> Elige el día y la hora</h2>
+        <div class="dias" id="dias"></div>
+        <div class="horas" id="horas"></div>
+      </div>
+      <div class="card">
+        <h2><span class="paso">3</span> Tus datos</h2>
+        <div id="datosYo" class="aviso hidden"></div>
+        <div id="datos">
+          <div class="row">
+            <div><label for="fNom">Nombre</label><input id="fNom" maxlength="80" autocomplete="name"></div>
+            <div><label for="fTel">WhatsApp</label><input id="fTel" inputmode="tel" maxlength="30" autocomplete="tel" placeholder="+56 9 1234 5678"></div>
+          </div>
+          <label for="fEmail">Correo (opcional)</label><input id="fEmail" type="email" maxlength="120" autocomplete="email">
+        </div>
+        <label for="fBici">Tu bici (marca y modelo)</label><input id="fBici" maxlength="120" placeholder="Ej.: Trek Marlin 5, aro 29">
+        <label for="fNota">¿Qué le pasa? (opcional)</label><textarea id="fNota" maxlength="500" placeholder="Ej.: frena poco y el cambio salta"></textarea>
+        <div class="aviso" style="margin-top:14px"><div class="grow">
+          <b>💳 Abono para confirmar: <span id="abono"></span></b> <span class="sub">(se descuenta del total)</span>
+          <div class="sub" id="politica" style="margin-top:6px"></div></div></div>
+        <button id="bReservar" type="button" class="block">Reservar</button>
+        <p class="err" id="fErr"></p>
+      </div>
+    </div>
+
+    <div class="card" id="cCuenta">
+      <h2>👤 Tu cuenta en <span id="nomCuenta"></span></h2>
+      <div id="yaCuenta" class="hidden"></div>
+      <div id="sinCuenta">
+        <p class="muted" style="margin-top:0">No necesitas cuenta para reservar. Con una cuenta guardas tus datos, ves el estado de tu bici,
+          tu historial y te llegan los avisos al celular.</p>
+        <div id="premiumTeaser"></div>
+        <details id="dRegistro"><summary class="clic" style="font-weight:700;margin:6px 0">Crear mi cuenta</summary>
+          <div class="row">
+            <div><label for="rNom">Nombre</label><input id="rNom" maxlength="80" autocomplete="name"></div>
+            <div><label for="rTel">WhatsApp</label><input id="rTel" inputmode="tel" maxlength="30" autocomplete="tel"></div>
+          </div>
+          <label for="rEmail">Correo</label><input id="rEmail" type="email" autocomplete="email">
+          <label for="rPass">Contraseña (mínimo 6)</label><input id="rPass" type="password" autocomplete="new-password">
+          <label class="check"><input type="checkbox" id="rAcepto"> <span id="terminos" class="sub"></span></label>
+          <div class="btns"><button id="bRegistro" type="button">Crear cuenta</button></div>
+          <p class="err" id="rErr"></p>
+        </details>
+        <p class="sub" style="margin-bottom:0">¿Ya tienes cuenta? <a id="aEntrar" href="#">Inicia sesión</a></p>
+      </div>
+    </div>
+  </div>
+</main>
+<script src="../shared/config.js"></script>
+<script src="../shared/vendor/supabase.js"></script>
+<script src="../shared/app.js"></script>
+<script>
+(async function () {
+  'use strict';
+  const { $, esc, plata } = App;
+  App.registrarSW();
+  const slug = new URLSearchParams(location.search).get('s') || '';
+  if (!slug) { $('cargando').textContent = 'Enlace no válido. Pídele al taller su enlace.'; return; }
+  const [pub] = await Promise.all([App.cargarPublica()]);
+  let t;
+  try { t = await App.rpc('taller_publico', { p_slug: slug }); } catch (e) { $('cargando').textContent = '⚠️ ' + e.message; return; }
+  if (!t) { $('cargando').textContent = 'Este taller no está disponible.'; return; }
+  let yo = null;
+  try { yo = await App.refrescar(); } catch (e) { yo = null; }
+  const esMio = !!(yo && yo.rol === 'cliente' && yo.taller_id === t.id);
+
+  document.title = t.nombre + ' · Reservar hora';
+  App.tema(t.color);
+  App.pintarLogo($('logo'), t);
+  $('nombre').textContent = t.nombre;
+  $('nota').innerHTML = App.nota(t.nota);
+  $('dir').textContent = [t.direccion, t.comuna].filter(Boolean).join(', ');
+  if (t.descripcion) { $('desc').textContent = t.descripcion; $('desc').classList.remove('hidden'); }
+  $('horario').textContent = '🕐 ' + t.dias.slice().sort().map((d) => App.DIAS[d]).join(', ') + ' · ' + t.abre + ' a ' + t.cierra +
+    (t.colacion_desde ? ' (colación ' + t.colacion_desde + '–' + t.colacion_hasta + ')' : '');
+  $('contacto').innerHTML = (t.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(t.telefono, 'Hola ' + t.nombre + ' 👋') + '">📲 WhatsApp</a>' : '') +
+    (t.instagram ? '<a class="btn small ghost" target="_blank" rel="noopener" href="https://instagram.com/' + esc(t.instagram.replace(/^@/, '')) + '">📷 Instagram</a>' : '') +
+    (t.direccion ? '<a class="btn small ghost" target="_blank" rel="noopener" href="https://maps.google.com/?q=' + encodeURIComponent(t.direccion + ' ' + t.comuna) + '">📍 Cómo llegar</a>' : '');
+  $('promos').innerHTML = t.promos.map((p) => '<div class="card promo"><b>🏷️ ' + esc(p.titulo) + '</b>' +
+    (p.precio != null ? ' <span class="precio">' + plata(p.precio) + '</span>' : '') + (p.precio_antes != null ? '<span class="antes">' + plata(p.precio_antes) + '</span>' : '') +
+    (p.texto ? '<div class="sub">' + esc(p.texto) + '</div>' : '') + (p.hasta ? '<div class="sub">Hasta el ' + App.fLarga(p.hasta) + '</div>' : '') + '</div>').join('');
+  const c = pub.config || {};
+  $('politica').textContent = App.txt('reserva_politica', { devolucion: c.minutos_devolucion || 10, horas: c.horas_cancelacion || 24 });
+  $('abono').textContent = plata(t.abono);
+  $('nomCuenta').textContent = t.nombre;
+  $('terminos').textContent = App.txt('terminos') || 'Acepto los términos de uso';
+  $('cargando').classList.add('hidden'); $('todo').classList.remove('hidden');
+
+  if (!t.reservas_online) {
+    $('form').classList.add('hidden'); $('cerrado').classList.remove('hidden');
+    $('cerradoTxt').innerHTML = 'Este taller aún no recibe reservas online.' + (t.telefono ? ' <a href="' + App.wa(t.telefono, 'Hola, quiero reservar una hora 🚲') + '">Escríbele por WhatsApp</a>.' : '');
+  }
+
+  // Cuenta del cliente
+  if (esMio) {
+    $('sinCuenta').classList.add('hidden'); $('yaCuenta').classList.remove('hidden');
+    $('yaCuenta').innerHTML = '<p class="muted" style="margin-top:0">Hola ' + esc(yo.nombre) + ', reservas con tu cuenta.</p><a class="btn alt" href="../cliente/">Ir a mi cuenta</a>';
+    $('datos').classList.add('hidden'); $('datosYo').classList.remove('hidden');
+    $('datosYo').innerHTML = '<div class="grow">👤 Reservas como <b>' + esc(yo.nombre || yo.email) + '</b> · ' + esc(yo.telefono || '') + '</div>';
+  } else if (yo && yo.rol !== 'cliente') {
+    $('cCuenta').classList.add('hidden');
+  } else if (!t.acepta_cuentas) {
+    $('dRegistro').classList.add('hidden');
+  }
+  const pc = pub.premium_cliente, plan = (pub.planes || {}).cliente_premium;
+  if (pc && plan) {
+    $('premiumTeaser').innerHTML = '<div class="aviso"><div class="grow"><b>⭐ ' + esc(App.txt('premium_cliente_titulo') || 'Cliente Premium') + ' · ' + plata(pc.monto) +
+      ' al mes</b><div class="sub">' + esc(plan.beneficios.join(' · ')) + '</div></div></div>';
+  }
+  $('aEntrar').href = App.ROOT + 'index.html?volver=' + encodeURIComponent(location.pathname + location.search);
+
+  // 1) Servicio
+  let serv = null, mins = null;
+  $('servs').innerHTML = t.servicios.map((s) => '<button class="opc" type="button" data-s="' + s.id + '" data-m="' + s.duracion_min + '"><span class="grow"><b>' + esc(s.nombre) + '</b>' +
+    (s.descripcion ? '<small>' + esc(s.descripcion) + '</small>' : '') + '<small>⏱️ ' + s.duracion_min + ' min</small></span><b>' + (s.precio ? plata(s.precio) : '') + '</b></button>').join('') +
+    '<button class="opc" type="button" data-s="" data-m=""><span class="grow"><b>Revisión general</b><small>No sé qué necesita: que la revisen en el taller.</small></span></button>';
+  $('servs').onclick = (e) => {
+    const b = e.target.closest('[data-s]'); if (!b) return;
+    serv = b.dataset.s || null; mins = b.dataset.m ? +b.dataset.m : null;
+    $('servs').querySelectorAll('.opc').forEach((x) => x.classList.toggle('on', x === b));
+    cargarDias();
+  };
+
+  // 2) Día y hora
+  let dia = null, hora = null;
+  async function cargarDias() {
+    dia = null; hora = null; $('horas').innerHTML = '';
+    $('dias').innerHTML = '<span class="muted">Buscando días…</span>';
+    let ds = [];
+    try { ds = await App.rpc('dias_libres', { p_taller: t.id, p_min: mins }); } catch (e) { $('dias').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; return; }
+    $('dias').innerHTML = ds.length ? ds.map((f) => '<button type="button" data-f="' + f + '">' + App.DIAS[App.fechaDe(f).getDay()] + '<b>' + App.fechaDe(f).getDate() + '</b>' +
+      App.fechaDe(f).toLocaleDateString('es-CL', { month: 'short' }) + '</button>').join('') : '<span class="muted">No quedan horas disponibles. Escríbele al taller.</span>';
+    if (ds.length) elegirDia(ds[0]);
+  }
+  $('dias').onclick = (e) => { const b = e.target.closest('[data-f]'); if (b) elegirDia(b.dataset.f); };
+  async function elegirDia(f) {
+    dia = f; hora = null;
+    $('dias').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.f === f));
+    $('horas').innerHTML = '<span class="muted">Buscando horas…</span>';
+    let hs = [];
+    try { hs = await App.rpc('horas_libres', { p_taller: t.id, p_fecha: f, p_min: mins }); } catch (e) { $('horas').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; return; }
+    $('horas').innerHTML = hs.length ? hs.map((h) => '<button type="button" data-h="' + h + '">' + h + '</button>').join('') : '<span class="muted" style="grid-column:1/-1">Sin horas este día.</span>';
+  }
+  $('horas').onclick = (e) => {
+    const b = e.target.closest('[data-h]'); if (!b) return;
+    hora = b.dataset.h;
+    $('horas').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+  };
+  if (t.reservas_online) cargarDias();
+
+  // 3) Reservar
+  $('bReservar').onclick = async () => {
+    const b = $('bReservar'); $('fErr').textContent = '';
+    if (!dia || !hora) { $('fErr').textContent = 'Elige el día y la hora'; return; }
+    if (!esMio && !$('fNom').value.trim()) { $('fErr').textContent = 'Escribe tu nombre'; return; }
+    if (!esMio && App.telNorm($('fTel').value).length < 11) { $('fErr').textContent = 'Escribe tu WhatsApp (ej.: +56 9 1234 5678)'; return; }
+    b.disabled = true; b.textContent = 'Reservando…';
+    try {
+      const r = await App.rpc('reservar', { p_taller: t.id, p_servicio: serv, p_fecha: dia, p_hora: hora, p_nombre: $('fNom').value,
+        p_telefono: $('fTel').value, p_email: $('fEmail').value, p_bici: $('fBici').value, p_nota: $('fNota').value });
+      if (!r.ok) throw new Error(r.error);
+      try { const l = JSON.parse(localStorage.getItem('bt:reservas') || '[]'); l.unshift(r.token); localStorage.setItem('bt:reservas', JSON.stringify(l.slice(0, 20))); } catch (e) { /* sin espacio */ }
+      location.href = '../r/?t=' + r.token;
+    } catch (e) {
+      $('fErr').textContent = e.message; b.disabled = false; b.textContent = 'Reservar';
+      if (/ya no está disponible/.test(e.message)) elegirDia(dia);
+    }
+  };
+
+  // Crear cuenta (queda asociada a este taller)
+  $('bRegistro').onclick = async () => {
+    const b = $('bRegistro'); $('rErr').textContent = '';
+    const d = { nombre: $('rNom').value.trim(), telefono: $('rTel').value.trim(), email: $('rEmail').value.trim(), pass: $('rPass').value };
+    if (!d.nombre || App.telNorm(d.telefono).length < 11) { $('rErr').textContent = 'Escribe tu nombre y tu WhatsApp'; return; }
+    if (!$('rAcepto').checked) { $('rErr').textContent = 'Acepta los términos para continuar'; return; }
+    b.disabled = true; b.textContent = 'Creando…';
+    const { data, error } = await App.sb.auth.signUp({ email: d.email, password: d.pass,
+      options: { data: { rol: 'cliente', taller: t.id, nombre: d.nombre, telefono: d.telefono }, emailRedirectTo: App.ROOT + 'cliente/' } });
+    b.disabled = false; b.textContent = 'Crear cuenta';
+    if (error) { $('rErr').textContent = App.friendly(error); return; }
+    if (data.session) { location.href = '../cliente/'; return; }
+    $('rErr').textContent = '';
+    App.modal('<h2>📧 Revisa tu correo</h2><p>Te enviamos un enlace para confirmar tu cuenta. Después inicia sesión.</p><div class="btns"><button data-cerrar>Listo</button></div>');
+  };
+  App.pie();
+})();
+</script>
+</body>
+</html>

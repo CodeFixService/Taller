@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<meta name="robots" content="noindex">
+<title>Administración · BiciTaller</title>
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icons/icon-192.png">
+<link rel="stylesheet" href="../shared/app.css">
+<style>
+  :root { --brand: #0f766e; }
+  .barra { height: 10px; border-radius: 99px; background: var(--line); overflow: hidden; margin-top: 6px; }
+  .barra i { display: block; height: 100%; background: var(--ok); }
+  .barra i.amarillo { background: var(--warn); } .barra i.rojo { background: var(--bad); }
+  .mini-logo { width: 42px; height: 42px; border-radius: 12px; flex: none; display: grid; place-items: center; font-size: 22px; background: var(--brand) center / cover no-repeat; color: #fff; }
+  .slotpago { border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 10px; }
+  .slotpago.on { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+  .acc { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .acc > * { flex: 1 1 auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 6px 0; border-bottom: 1px solid var(--line); }
+  td.r { text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body class="con-tabs">
+<header class="top">
+  <div class="logo">🛡️</div><h1>Administración</h1><span class="pill dark">ADMIN</span>
+  <button class="icon-btn" id="campana" type="button"></button>
+</header>
+<main>
+  <p class="empty" id="cargando">Cargando…</p>
+  <section class="view" id="v-resumen"></section>
+  <section class="view" id="v-talleres">
+    <div class="card"><h2>➕ Crear taller</h2><p class="muted" style="margin-top:0">Solo tú creas talleres. Parten con <b id="nRegalo">30</b> días de Premium de regalo.</p>
+      <div class="row"><div><label for="nTaller">Nombre del taller</label><input id="nTaller" maxlength="80" placeholder="Bici Sur"></div><div><label for="nDueno">Nombre del dueño</label><input id="nDueno" maxlength="80"></div></div>
+      <div class="row"><div><label for="nEmail">Correo del dueño</label><input id="nEmail" type="email" autocomplete="off"></div><div><label for="nTel">WhatsApp</label><input id="nTel" inputmode="tel"></div></div>
+      <label for="nPass">Contraseña inicial</label><input id="nPass" autocomplete="off">
+      <div class="btns"><button id="nCrear">Crear taller</button></div><p class="err" id="nErr"></p></div>
+    <input id="tBuscar" placeholder="Buscar taller…" aria-label="Buscar taller" style="margin-bottom:10px">
+    <div class="seg" id="tSeg"><button data-f="" class="on">Todos</button><button data-f="premium">⭐ Premium</button><button data-f="free">Gratis</button><button data-f="vence">⏳ Por vencer</button><button data-f="inactivos">💤 Sin actividad 7 días</button><button data-f="suspendidos">⛔ Suspendidos</button></div>
+    <div class="grid" id="tLista"></div>
+  </section>
+  <section class="view" id="v-clientes">
+    <input id="cBuscar" placeholder="Buscar cliente…" aria-label="Buscar cliente" style="margin-bottom:10px">
+    <select id="cTaller" aria-label="Filtrar por taller" style="margin-bottom:10px"></select>
+    <p class="sub" id="cCuenta"></p>
+    <div class="card"><ul class="list" id="cLista"></ul></div>
+  </section>
+  <section class="view" id="v-pagos">
+    <div class="seg" id="pSeg"><button data-f="en_revision" class="on">🧾 Por revisar</button><button data-f="aprobado">✅ Aprobados</button><button data-f="rechazado">❌ Rechazados</button><button data-f="">Todos</button></div>
+    <div class="grid" id="pLista"></div>
+  </section>
+  <section class="view" id="v-ajustes">
+    <div class="seg" id="aSeg">
+      <button data-a="links" class="on">💳 Precios y links</button><button data-a="planes">⭐ Planes</button><button data-a="reglas">⚖️ Reglas</button>
+      <button data-a="textos">✏️ Textos</button><button data-a="avisos">📣 Avisos</button><button data-a="push">🔔 Notificaciones</button>
+      <button data-a="calif">⭐ Calificaciones</button><button data-a="registro">📜 Registro</button><button data-a="cuenta">👤 Mi cuenta</button>
+    </div>
+    <div id="aBody"></div>
+  </section>
+</main>
+<nav class="tabs">
+  <button data-v="resumen"><span class="i">📊</span>Resumen</button>
+  <button data-v="talleres"><span class="i">🚲</span>Talleres</button>
+  <button data-v="clientes"><span class="i">👥</span>Clientes</button>
+  <button data-v="pagos"><span class="i">💰</span>Pagos<span class="badge hidden" id="tabPagos"></span></button>
+  <button data-v="ajustes"><span class="i">⚙️</span>Ajustes</button>
+</nav>
+<script src="../shared/config.js"></script>
+<script src="../shared/vendor/supabase.js"></script>
+<script src="../shared/app.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>
