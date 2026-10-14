@@ -1845,3 +1845,6 @@ to authenticated;
 grant execute on function public.is_admin(), public.taller_de(uuid), public.mi_taller(), public.es_dueno(uuid) to authenticated;
 -- Las de solo-servidor (preparar_cuenta, cancelar_invitacion, push_pendientes, push_borrar_endpoint, tareas_periodicas)
 -- quedan sin permiso para la app: las usa la función "servidor" con su clave de servicio y pg_cron.
+
+-- Que la API de Supabase vea las funciones nuevas al instante.
+notify pgrst, 'reload schema';

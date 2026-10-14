@@ -92,6 +92,7 @@
     if (/Password should be/i.test(m)) return 'La contraseña debe tener al menos 6 caracteres';
     if (/rate limit|too many/i.test(m)) return 'Demasiados intentos. Espera unos minutos.';
     if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Sin conexión. Revisa tu internet.';
+    if (/Could not find the function|schema cache|does not exist/i.test(m)) return 'Falta instalar la base de datos: corre supabase/schema.sql en Supabase → SQL Editor (guía, paso 1).';
     if (/Database error saving new user/i.test(m)) return 'No se pudo crear la cuenta: el taller no recibe clientes nuevos o el registro está cerrado.';
     return m.replace(/^\w*Error:\s*/, '') || 'Error';
   }
