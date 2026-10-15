@@ -10,7 +10,10 @@
 <link rel="icon" href="../icons/icon-192.png">
 <link rel="apple-touch-icon" href="../icons/icon-192.png">
 <link rel="stylesheet" href="../shared/app.css">
-<style>.promo { border-left: 4px solid var(--brand); }</style>
+<style>.promo { border-left: 4px solid var(--brand); }
+  .ayuda { position: fixed; right: 16px; bottom: calc(86px + env(safe-area-inset-bottom)); z-index: 9; border-radius: 99px; padding: 12px 16px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .25); }
+  .tienes { display: block; text-align: center; font-size: 13px; margin: -6px 0 12px; }</style>
 </head>
 <body class="con-tabs">
 <header class="top">
@@ -22,6 +25,7 @@
 <main>
   <p class="empty" id="cargando">Cargando…</p>
 
+  <a class="tienes hidden" id="tienes" target="_blank" rel="noopener">🏪 ¿Tienes un taller? Súmalo a BiciTaller</a>
   <section class="view" id="v-inicio">
     <div class="card">
       <div class="hero"><div class="logo" id="tLogo"></div><div class="grow"><h1 id="tNombre" style="font-size:20px"></h1><div id="tNota"></div><div class="sub" id="tDir"></div></div></div>
@@ -54,6 +58,7 @@
     </div>
   </section>
 </main>
+<button class="ayuda" id="ayuda" type="button">🚀 ¿Necesitas ayuda?</button>
 <nav class="tabs">
   <button data-v="inicio"><span class="i">🏠</span>Inicio</button>
   <button data-v="historial"><span class="i">🚲</span>Mi bici</button>
@@ -139,6 +144,9 @@
   document.querySelector('nav.tabs [data-v="' + ir + '"]').click();
   App.campana($('campana'));
   App.chatBoton($('chatBtn'));
+  $('ayuda').onclick = () => App.abrirChat(yo.taller_id, yo.id, D.taller.nombre);
+  const sop = (pub.config || {}).soporte_whatsapp;
+  if (sop) { $('tienes').href = App.wa(sop, 'Hola 👋 Tengo un taller de bicicletas y quiero usar BiciTaller.'); $('tienes').classList.remove('hidden'); }
   App.ofrecerPush($('cPush'));
   $('cG').onclick = async () => { try { await rpc('mi_perfil_guardar', { p_nombre: $('cN').value, p_telefono: $('cT').value }); toast('💾 Guardado'); } catch (e) { toast(e.message); } };
   $('cPG').onclick = async () => { const { error } = await App.sb.auth.updateUser({ password: $('cP').value }); toast(error ? App.friendly(error) : '🔑 Contraseña cambiada'); };

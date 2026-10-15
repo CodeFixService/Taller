@@ -275,7 +275,7 @@
   // Reserva que toma el taller (por teléfono o en el mesón): sin abono.
   function reservaManual(fecha, hora) {
     const d = modal('<h2>📅 Nueva reserva</h2><p class="sub" style="margin-top:0">Para clientes que reservan por teléfono o en el taller (sin abono).</p>' +
-      '<label for="mS">Servicio</label><select id="mS"><option value="">Revisión general</option>' + servicios.filter((s) => s.activo).map((s) => '<option value="' + s.id + '">' + esc(s.nombre) + ' · ' + s.duracion_min + ' min</option>').join('') + '</select>' +
+      '<label for="mS">Servicio</label><select id="mS"><option value="">Revisión general</option>' + servicios.filter((s) => s.activo && !s.adicional).map((s) => '<option value="' + s.id + '">' + esc(s.nombre) + ' · ' + s.duracion_min + ' min</option>').join('') + '</select>' +
       '<div class="row"><div><label for="mF">Fecha</label><input type="date" id="mF" value="' + fecha + '"></div><div><label for="mH">Hora</label><input type="time" id="mH" value="' + hora + '" step="300"></div></div>' +
       '<div class="row"><div><label for="mN">Nombre</label><input id="mN" maxlength="80"></div><div><label for="mT">WhatsApp</label><input id="mT" inputmode="tel" maxlength="30"></div></div>' +
       '<label for="mB">Bici</label><input id="mB" maxlength="120"><label for="mO">Nota</label><input id="mO" maxlength="500">' +
@@ -546,7 +546,7 @@
     body().innerHTML = '<div class="card"><h2>🛠️ Servicios <span class="pill">' + servicios.length + ' de ' + lim + '</span></h2><ul class="list" id="sLista"></ul>' +
       '<div class="btns"><button id="sNuevo">＋ Nuevo servicio</button>' + (servicios.length ? '' : '<button class="alt" id="sTipicos">✨ Cargar servicios típicos</button>') + '</div></div>';
     $('sLista').innerHTML = servicios.length ? servicios.map((s) => '<li' + (s.activo ? '' : ' style="opacity:.55"') + '><div class="grow"><b>' + esc(s.nombre) + '</b> <span class="precio">' + plata(s.precio) + '</span>' +
-      '<div class="sub">⏱️ ' + s.duracion_min + ' min' + (s.descripcion ? ' · ' + esc(s.descripcion) : '') + (s.activo ? '' : ' · pausado') + '</div></div>' +
+      (s.adicional ? ' <span class="pill info">Adicional</span>' : '') + '<div class="sub">' + (s.adicional ? '' : '⏱️ ' + s.duracion_min + ' min') + (s.descripcion ? ' · ' + esc(s.descripcion) : '') + (s.activo ? '' : ' · pausado') + '</div></div>' +
       '<button class="small ghost" data-e="' + s.id + '">✏️</button></li>').join('') : '<li class="muted">Agrega lo que ofreces: mantención, pinchazo, ajuste de frenos…</li>';
     $('sNuevo').onclick = () => editarServicio(null);
     $('sLista').onclick = (e) => { const b = e.target.closest('[data-e]'); if (b) editarServicio(servicios.find((s) => s.id === b.dataset.e)); };
@@ -565,10 +565,11 @@
       '<div class="row"><div><label for="eP">Precio</label><input id="eP" inputmode="numeric" value="' + (s ? s.precio : '') + '"></div><div><label for="eD">Duración (min)</label><input id="eD" inputmode="numeric" value="' + (s ? s.duracion_min : 60) + '"></div></div>' +
       '<label for="eDs">Descripción</label><textarea id="eDs" maxlength="300">' + esc(s ? s.descripcion : '') + '</textarea>' +
       '<label class="check"><input type="checkbox" id="eA"' + (!s || s.activo ? ' checked' : '') + '> Disponible para reservar</label>' +
+      '<label class="check"><input type="checkbox" id="eX2"' + (s && s.adicional ? ' checked' : '') + '> Es adicional (se suma a otro servicio, ej.: cambio de cámara)</label>' +
       '<div class="btns">' + (s ? '<button class="danger" id="eX">Eliminar</button>' : '') + '<button class="ghost" data-cerrar>Cancelar</button><button id="eOk">Guardar</button></div><p class="err" id="eErr"></p>');
     d.querySelector('#eOk').onclick = async () => {
       const row = { taller_id: T, nombre: d.querySelector('#eN').value.trim(), precio: Math.max(App.numero(d.querySelector('#eP').value), 0),
-        duracion_min: Math.min(Math.max(App.numero(d.querySelector('#eD').value) || 60, 10), 480), descripcion: d.querySelector('#eDs').value.trim(), activo: d.querySelector('#eA').checked };
+        duracion_min: Math.min(Math.max(App.numero(d.querySelector('#eD').value) || 60, 10), 480), descripcion: d.querySelector('#eDs').value.trim(), activo: d.querySelector('#eA').checked, adicional: d.querySelector('#eX2').checked };
       if (!row.nombre) { d.querySelector('#eErr').textContent = 'Escribe el nombre'; return; }
       try { if (s) await q(sb.from('servicios').update(row).eq('id', s.id)); else await q(sb.from('servicios').insert(row)); d.close(); await cargarCatalogo(); await cargarPanel(); verServicios(); toast('🛠️ Guardado'); }
       catch (e) { d.querySelector('#eErr').textContent = e.message; }

@@ -152,13 +152,24 @@
 
   // 1) Servicio
   let serv = null, mins = null;
-  $('servs').innerHTML = t.servicios.map((s) => '<button class="opc" type="button" data-s="' + s.id + '" data-m="' + s.duracion_min + '"><span class="grow"><b>' + esc(s.nombre) + '</b>' +
+  const extras = t.servicios.filter((s) => s.adicional);
+  $('servs').innerHTML = t.servicios.filter((s) => !s.adicional).map((s) => '<button class="opc" type="button" data-s="' + s.id + '" data-m="' + s.duracion_min + '"><span class="grow"><b>' + esc(s.nombre) + '</b>' +
     (s.descripcion ? '<small>' + esc(s.descripcion) + '</small>' : '') + '<small>⏱️ ' + s.duracion_min + ' min</small></span><b>' + (s.precio ? plata(s.precio) : '') + '</b></button>').join('') +
-    '<button class="opc" type="button" data-s="" data-m=""><span class="grow"><b>Revisión general</b><small>No sé qué necesita: que la revisen en el taller.</small></span></button>';
+    '<button class="opc" type="button" data-s="" data-m=""><span class="grow"><b>Revisión general</b><small>No sé qué necesita: que la revisen en el taller.</small></span></button>' +
+    (extras.length ? '<h3>➕ ¿Algo más? <span class="sub">(opcional)</span></h3>' + extras.map((s) => '<label class="check opc" style="margin:0 0 8px"><input type="checkbox" data-x="' + s.id +
+      '" data-p="' + s.precio + '"><span class="grow"><b>' + esc(s.nombre) + '</b>' + (s.descripcion ? '<small>' + esc(s.descripcion) + '</small>' : '') + '</span><b>' + plata(s.precio) + '</b></label>').join('') : '') +
+    '<p class="muted hidden" id="totalServ" style="margin:8px 0 0"></p>';
+  function totalServ() {
+    const b = $('servs').querySelector('.opc.on[data-s]'), base = b && b.dataset.s ? +((t.servicios.find((s) => s.id === b.dataset.s) || {}).precio || 0) : 0;
+    const ex = Array.from($('servs').querySelectorAll('[data-x]:checked')).reduce((a, i) => a + +i.dataset.p, 0);
+    $('totalServ').classList.toggle('hidden', !(base + ex)); $('totalServ').innerHTML = 'Total estimado: <b>' + plata(base + ex) + '</b>';
+  }
+  $('servs').addEventListener('change', totalServ);
   $('servs').onclick = (e) => {
     const b = e.target.closest('[data-s]'); if (!b) return;
     serv = b.dataset.s || null; mins = b.dataset.m ? +b.dataset.m : null;
-    $('servs').querySelectorAll('.opc').forEach((x) => x.classList.toggle('on', x === b));
+    $('servs').querySelectorAll('.opc[data-s]').forEach((x) => x.classList.toggle('on', x === b));
+    totalServ();
     cargarDias();
   };
 
@@ -198,7 +209,8 @@
     b.disabled = true; b.textContent = 'Reservando…';
     try {
       const r = await App.rpc('reservar', { p_taller: t.id, p_servicio: serv, p_fecha: dia, p_hora: hora, p_nombre: $('fNom').value,
-        p_telefono: $('fTel').value, p_email: $('fEmail').value, p_bici: $('fBici').value, p_nota: $('fNota').value });
+        p_telefono: $('fTel').value, p_email: $('fEmail').value, p_bici: $('fBici').value, p_nota: $('fNota').value,
+        p_extras: Array.from($('servs').querySelectorAll('[data-x]:checked')).map((i) => i.dataset.x) });
       if (!r.ok) throw new Error(r.error);
       try { const l = JSON.parse(localStorage.getItem('bt:reservas') || '[]'); l.unshift(r.token); localStorage.setItem('bt:reservas', JSON.stringify(l.slice(0, 20))); } catch (e) { /* sin espacio */ }
       location.href = '../r/?t=' + r.token;

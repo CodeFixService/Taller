@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.3'::text $$;
+language sql immutable as $$ select '1.4'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -376,6 +376,7 @@ create table if not exists public.servicios (
 );
 create index if not exists servicios_t_idx on public.servicios (taller_id);
 alter table public.servicios enable row level security;
+alter table public.servicios add column if not exists adicional boolean not null default false;  -- se suma a un servicio principal
 
 create table if not exists public.promos (
   id            uuid primary key default gen_random_uuid(),
@@ -771,7 +772,7 @@ language sql stable security definer set search_path = '' as $$
     'acepta_cuentas', (select count(*) from public.perfiles where taller_id = t.id and rol = 'cliente')
                       < coalesce((public.limite_taller(t.id, 'clientes_cuenta'))::int, 30),
     'servicios', (select coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'nombre', s.nombre, 'descripcion', s.descripcion,
-                    'precio', s.precio, 'duracion_min', s.duracion_min) order by s.orden, s.nombre), '[]')
+                    'precio', s.precio, 'duracion_min', s.duracion_min, 'adicional', s.adicional) order by s.adicional, s.orden, s.nombre), '[]')
                   from public.servicios s where s.taller_id = t.id and s.activo),
     'promos', (select coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'titulo', o.titulo, 'texto', o.texto, 'precio', o.precio,
                  'precio_antes', o.precio_antes, 'hasta', o.hasta) order by o.created_at desc), '[]')
@@ -865,10 +866,12 @@ $$;
 -- ---------------------------------------------------------------------
 -- 11. Reservar (sin cuenta o con cuenta de cliente)
 -- ---------------------------------------------------------------------
+drop function if exists public.reservar(uuid, uuid, date, text, text, text, text, text, text);
 create or replace function public.reservar(p_taller uuid, p_servicio uuid, p_fecha date, p_hora text,
-  p_nombre text, p_telefono text, p_email text, p_bici text, p_nota text) returns jsonb
+  p_nombre text, p_telefono text, p_email text, p_bici text, p_nota text, p_extras uuid[] default null) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
+  ex jsonb; ex_nombres text; ex_precio int;
   c public.talleres; s public.servicios; me public.perfiles; l public.links_pago;
   hoy date; extra int := 0; mins int; nom text; tel text; r public.reservas; n int;
 begin
@@ -884,7 +887,7 @@ begin
   if nom = '' then return jsonb_build_object('ok', false, 'error', 'Escribe tu nombre'); end if;
   if length(public.tel_norm(tel)) < 9 then return jsonb_build_object('ok', false, 'error', 'Escribe tu WhatsApp'); end if;
   if p_servicio is not null then
-    select * into s from public.servicios where id = p_servicio and taller_id = p_taller and activo;
+    select * into s from public.servicios where id = p_servicio and taller_id = p_taller and activo and not adicional;
     if s.id is null then return jsonb_build_object('ok', false, 'error', 'Elige un servicio'); end if;
   end if;
   hoy := (now() at time zone c.zona)::date;
@@ -910,14 +913,21 @@ begin
     return jsonb_build_object('ok', false, 'error', 'Esa hora ya no está disponible. Elige otra.');
   end if;
   mins := (ceil(mins::numeric / c.bloque_min) * c.bloque_min)::int;
+  -- Servicios adicionales (suman precio, no tiempo de agenda).
+  select coalesce(jsonb_agg(jsonb_build_object('nombre', x.nombre, 'cant', 1, 'precio', x.precio) order by x.nombre), '[]'),
+         string_agg(x.nombre, ' + ' order by x.nombre), coalesce(sum(x.precio), 0)
+    into ex, ex_nombres, ex_precio
+  from public.servicios x where x.taller_id = p_taller and x.activo and x.adicional and x.id = any (coalesce(p_extras, '{}'));
   insert into public.reservas (taller_id, servicio_id, servicio_nombre, precio, fecha, hora, hora_fin, nombre, telefono, tel_norm,
-    email, bici, nota, cliente_id, origen, estado, expira_at, abono_monto, abono_estado, historial)
-  values (p_taller, s.id, coalesce(s.nombre, 'Revisión general'), coalesce(s.precio, 0), p_fecha, p_hora::time,
+    email, bici, nota, cliente_id, origen, estado, expira_at, abono_monto, abono_estado, historial, items, total)
+  values (p_taller, s.id, left(coalesce(s.nombre, 'Revisión general') || coalesce(' + ' || ex_nombres, ''), 300), coalesce(s.precio, 0) + ex_precio, p_fecha, p_hora::time,
     p_hora::time + make_interval(mins => mins), nom, tel, public.tel_norm(tel),
     left(lower(trim(coalesce(nullif(p_email, ''), me.email, ''))), 120), left(trim(coalesce(p_bici, '')), 120),
     left(trim(coalesce(p_nota, '')), 500), me.id, case when me.id is null then 'online' else 'cliente' end,
     'por_pagar', now() + make_interval(mins => coalesce(public.cfg_int('minutos_pago'), 30)), l.monto, 'pendiente',
-    public.historial_mas('[]', 'por_pagar'))
+    public.historial_mas('[]', 'por_pagar'),
+    case when s.id is null then '[]'::jsonb else jsonb_build_array(jsonb_build_object('nombre', s.nombre, 'cant', 1, 'precio', s.precio)) end || ex,
+    coalesce(s.precio, 0) + ex_precio)
   returning * into r;
   perform public.avisar_taller(p_taller, '📅 Nueva reserva', nom || ' · ' || to_char(p_fecha, 'DD/MM') || ' ' || p_hora ||
     ' · esperando abono', '/taller/#reservas');
@@ -1840,7 +1850,7 @@ revoke execute on all functions in schema public from public, anon, authenticate
 
 grant execute on function
   public.config_publica(), public.taller_publico(text), public.horas_libres(uuid, date, int, uuid), public.dias_libres(uuid, int),
-  public.reservar(uuid, uuid, date, text, text, text, text, text, text), public.reserva_ver(text), public.reserva_comprobante(text, text),
+  public.reservar(uuid, uuid, date, text, text, text, text, text, text, uuid[]), public.reserva_ver(text), public.reserva_comprobante(text, text),
   public.reserva_cancelar(text), public.reserva_reagendar(text, date, text), public.reserva_calificar(text, int, text),
   public.db_version(), public.tel_norm(text)
 to anon, authenticated;
