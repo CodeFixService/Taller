@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.2'::text $$;
+language sql immutable as $$ select '1.3'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -133,6 +133,8 @@ create table if not exists public.talleres (
   check ((colacion_desde is null) = (colacion_hasta is null) and (colacion_hasta is null or colacion_hasta > colacion_desde))
 );
 alter table public.talleres enable row level security;
+alter table public.talleres add column if not exists horarios jsonb not null default '{}';   -- {"6": {"abre": "10:00", "cierra": "14:00"}}
+alter table public.talleres add column if not exists max_dia int not null default 0;         -- 0 = sin límite de bicis por día
 
 create table if not exists public.perfiles (
   id               uuid primary key references auth.users (id) on delete cascade,
@@ -159,7 +161,7 @@ alter table public.talleres add constraint talleres_owner_fk foreign key (owner_
 -- Invitaciones: las crea el servidor (función "servidor") antes de crear la cuenta.
 create table if not exists public.invitaciones (
   email        text primary key,
-  rol          text not null check (rol in ('taller', 'equipo')),
+  rol          text not null check (rol in ('taller', 'equipo', 'cliente')),
   nombre       text not null default '',
   telefono     text not null default '',
   taller_id    uuid references public.talleres (id) on delete cascade,
@@ -168,6 +170,8 @@ create table if not exists public.invitaciones (
   created_at   timestamptz not null default now()
 );
 alter table public.invitaciones enable row level security;
+alter table public.invitaciones drop constraint if exists invitaciones_rol_check;
+alter table public.invitaciones add constraint invitaciones_rol_check check (rol in ('taller', 'equipo', 'cliente'));
 
 -- ---------------------------------------------------------------------
 -- 2. Quién soy
@@ -273,7 +277,7 @@ begin
       values (new.id, em, left(inv.nombre, 80), inv.telefono, 'taller', tid, inv.created_by);
     else
       insert into public.perfiles (id, email, nombre, telefono, rol, taller_id, created_by)
-      values (new.id, em, left(inv.nombre, 80), inv.telefono, 'equipo', inv.taller_id, inv.created_by);
+      values (new.id, em, left(inv.nombre, 80), inv.telefono, inv.rol, inv.taller_id, inv.created_by);
     end if;
     delete from public.invitaciones where email = em;
     return new;
@@ -306,13 +310,15 @@ where lower(u.email) = public.admin_email()
 on conflict (id) do nothing;
 
 -- Lo llama SOLO el servidor antes de crear una cuenta de taller o de equipo.
+drop function if exists public.preparar_cuenta(uuid, text, text, text, text, text);
 create or replace function public.preparar_cuenta(p_caller uuid, p_email text, p_nombre text, p_telefono text,
-  p_rol text, p_taller_nombre text) returns jsonb
+  p_rol text, p_taller_nombre text, p_taller uuid default null) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
   c public.perfiles;
   em text := lower(trim(coalesce(p_email, '')));
   admin boolean;
+  tid uuid;
 begin
   select * into c from public.perfiles where id = p_caller and not suspendido;
   if c.id is null then return jsonb_build_object('ok', false, 'error', 'Sin permiso'); end if;
@@ -329,22 +335,23 @@ begin
     values (em, 'taller', trim(p_nombre), trim(coalesce(p_telefono, '')), trim(p_taller_nombre), c.id)
     on conflict (email) do update set rol = excluded.rol, nombre = excluded.nombre, telefono = excluded.telefono,
       taller_nombre = excluded.taller_nombre, taller_id = null, created_by = excluded.created_by, created_at = now();
-  elsif p_rol = 'equipo' then
-    if c.rol <> 'taller' or public.taller_de(c.id) is null then
-      return jsonb_build_object('ok', false, 'error', 'Solo el dueño del taller crea a su equipo');
-    end if;
-    if (select count(*) from public.perfiles where taller_id = c.taller_id and rol = 'equipo')
-       >= coalesce((public.limite_taller(c.taller_id, 'equipo'))::int, 0) then
-      return jsonb_build_object('ok', false, 'error', case when public.taller_es_premium(c.taller_id)
-        then 'Llegaste al máximo de personas en tu equipo' else 'Tu equipo es una función Premium. Activa Premium para agregar mecánicos.' end);
-    end if;
-    insert into public.invitaciones (email, rol, nombre, telefono, taller_id, created_by)
-    values (em, 'equipo', trim(p_nombre), trim(coalesce(p_telefono, '')), c.taller_id, c.id)
-    on conflict (email) do update set rol = excluded.rol, nombre = excluded.nombre, telefono = excluded.telefono,
-      taller_id = excluded.taller_id, taller_nombre = '', created_by = excluded.created_by, created_at = now();
-  else
-    return jsonb_build_object('ok', false, 'error', 'Tipo de cuenta no válido');
+    return jsonb_build_object('ok', true);
   end if;
+  if p_rol not in ('equipo', 'cliente') then return jsonb_build_object('ok', false, 'error', 'Tipo de cuenta no válido'); end if;
+  -- Equipo y clientes: el admin elige el taller; el dueño, el suyo.
+  tid := case when admin then p_taller when c.rol = 'taller' then public.taller_de(c.id) end;
+  if tid is null or not exists (select 1 from public.talleres where id = tid) then
+    return jsonb_build_object('ok', false, 'error', case when admin then 'Elige el taller' else 'Sin permiso' end);
+  end if;
+  if not admin and p_rol = 'equipo' and (select count(*) from public.perfiles where taller_id = tid and rol = 'equipo')
+     >= coalesce((public.limite_taller(tid, 'equipo'))::int, 0) then
+    return jsonb_build_object('ok', false, 'error', case when public.taller_es_premium(tid)
+      then 'Llegaste al máximo de personas en tu equipo' else 'Tu equipo es una función Premium. Activa Premium para agregar mecánicos.' end);
+  end if;
+  insert into public.invitaciones (email, rol, nombre, telefono, taller_id, created_by)
+  values (em, p_rol, trim(p_nombre), trim(coalesce(p_telefono, '')), tid, c.id)
+  on conflict (email) do update set rol = excluded.rol, nombre = excluded.nombre, telefono = excluded.telefono,
+    taller_id = excluded.taller_id, taller_nombre = '', created_by = excluded.created_by, created_at = now();
   return jsonb_build_object('ok', true);
 end $$;
 
@@ -403,14 +410,18 @@ create or replace function public.limites_catalogo() returns trigger
 language plpgsql security definer set search_path = '' as $$
 declare n int; lim int;
 begin
-  if tg_table_name = 'servicios' and tg_op = 'INSERT' then
-    select count(*) into n from public.servicios where taller_id = new.taller_id;
-    lim := coalesce((public.limite_taller(new.taller_id, 'servicios'))::int, 5);
-    if n >= lim then raise exception 'Tu plan permite % servicios. Activa Premium para tener más.', lim; end if;
-  elsif tg_table_name = 'promos' and new.activa and (tg_op = 'INSERT' or not old.activa) then
-    select count(*) into n from public.promos where taller_id = new.taller_id and activa and id <> new.id;
-    lim := coalesce((public.limite_taller(new.taller_id, 'promos'))::int, 1);
-    if n >= lim then raise exception 'Tu plan permite % promociones activas. Activa Premium para tener más.', lim; end if;
+  if tg_table_name = 'servicios' then
+    if tg_op = 'INSERT' then
+      select count(*) into n from public.servicios where taller_id = new.taller_id;
+      lim := coalesce((public.limite_taller(new.taller_id, 'servicios'))::int, 5);
+      if n >= lim then raise exception 'Tu plan permite % servicios. Activa Premium para tener más.', lim; end if;
+    end if;
+  elsif tg_table_name = 'promos' then
+    if (to_jsonb(new) ->> 'activa')::boolean and (tg_op = 'INSERT' or not (to_jsonb(old) ->> 'activa')::boolean) then
+      select count(*) into n from public.promos where taller_id = new.taller_id and activa and id <> new.id;
+      lim := coalesce((public.limite_taller(new.taller_id, 'promos'))::int, 1);
+      if n >= lim then raise exception 'Tu plan permite % promociones activas. Activa Premium para tener más.', lim; end if;
+    end if;
   end if;
   if tg_op = 'UPDATE' and new.taller_id <> old.taller_id then raise exception 'No se puede cambiar de taller'; end if;
   return new;
@@ -751,6 +762,7 @@ language sql stable security definer set search_path = '' as $$
     'id', t.id, 'nombre', t.nombre, 'slug', t.slug, 'descripcion', t.descripcion, 'direccion', t.direccion,
     'comuna', t.comuna, 'telefono', t.telefono, 'instagram', t.instagram, 'logo', t.logo, 'color', t.color, 'icono', t.icono,
     'dias', t.dias, 'abre', to_char(t.abre, 'HH24:MI'), 'cierra', to_char(t.cierra, 'HH24:MI'),
+    'horarios', t.horarios, 'max_dia', t.max_dia,
     'colacion_desde', to_char(t.colacion_desde, 'HH24:MI'), 'colacion_hasta', to_char(t.colacion_hasta, 'HH24:MI'),
     'anticipacion_dias', t.anticipacion_dias, 'hoy', (now() at time zone t.zona)::date,
     'reservas_online', t.reservas_online and (public.link_activo(t.id, 'abono')).id is not null,
@@ -793,8 +805,11 @@ begin
   ahora := now() at time zone c.zona;
   paso := c.bloque_min;
   dur := (ceil(greatest(coalesce(p_min, paso), 1)::numeric / paso) * paso)::int;
-  ini := (extract(epoch from c.abre) / 60)::int;
-  fin := (extract(epoch from c.cierra) / 60)::int;
+  -- Horario propio del día (si tiene) y cupo máximo de bicis por día.
+  ini := (extract(epoch from coalesce((c.horarios -> (extract(dow from p_fecha)::int)::text ->> 'abre')::time, c.abre)) / 60)::int;
+  fin := (extract(epoch from coalesce((c.horarios -> (extract(dow from p_fecha)::int)::text ->> 'cierra')::time, c.cierra)) / 60)::int;
+  if c.max_dia > 0 and (select count(*) from public.reservas r where r.taller_id = p_taller and r.fecha = p_fecha
+      and public.ocupa_hora(r) and (p_excluir is null or r.id <> p_excluir)) >= c.max_dia then return; end if;
   c_ini := (extract(epoch from c.colacion_desde) / 60)::int;
   c_fin := (extract(epoch from c.colacion_hasta) / 60)::int;
   m := ini;
@@ -1144,8 +1159,14 @@ begin
     cupos = coalesce((p ->> 'cupos')::int, cupos),
     anticipacion_dias = coalesce((p ->> 'anticipacion_dias')::int, anticipacion_dias),
     meses_mantencion = coalesce((p ->> 'meses_mantencion')::int, meses_mantencion),
-    reservas_online = coalesce((p ->> 'reservas_online')::boolean, reservas_online)
+    reservas_online = coalesce((p ->> 'reservas_online')::boolean, reservas_online),
+    horarios = case when p ? 'horarios' and jsonb_typeof(p -> 'horarios') = 'object' then p -> 'horarios' else horarios end,
+    max_dia = coalesce(least(greatest((p ->> 'max_dia')::int, 0), 200), max_dia)
   where id = tid;
+  if exists (select 1 from public.talleres t, jsonb_each(t.horarios) h where t.id = tid
+             and (h.value ->> 'cierra')::time <= (h.value ->> 'abre')::time) then
+    raise exception 'Revisa el horario: el cierre debe ser después de la apertura';
+  end if;
   return public.taller_panel();
 end $$;
 
@@ -1338,7 +1359,7 @@ language sql stable security definer set search_path = '' as $$
         from public.perfiles p, tid where p.taller_id = tid.id and p.rol = 'cliente')
   select coalesce(jsonb_agg(jsonb_build_object(
     'tel_norm', coalesce(r.tel_norm, c.tel_norm), 'nombre', coalesce(c.nombre, r.nombre), 'telefono', coalesce(r.telefono, c.telefono),
-    'email', coalesce(c.email, r.email), 'cuenta', c.id is not null, 'premium', coalesce(c.premium, false),
+    'email', coalesce(c.email, r.email), 'cuenta', c.id is not null, 'cliente_id', c.id, 'premium', coalesce(c.premium, false),
     'visitas', coalesce(r.visitas, 0), 'faltas', coalesce(r.faltas, 0), 'ultima', r.ultima, 'gastado', coalesce(r.gastado, 0),
     'proxima', r.proxima, 'nota', public.nota_cliente(coalesce(r.telefono, c.telefono))) order by coalesce(c.nombre, r.nombre)), '[]')
   from r full join c on c.tel_norm = r.tel_norm
@@ -1505,10 +1526,10 @@ language plpgsql stable security definer set search_path = '' as $$
 begin
   perform public.admin_check();
   return (select coalesce(jsonb_agg(x order by x.created_at desc), '[]') from (
-    select p.id, p.nombre, p.email, p.telefono, p.premium_hasta, p.premium_hasta > now() as premium, p.suspendido, p.visto_at,
+    select p.id, p.rol, p.nombre, p.email, p.telefono, p.premium_hasta, p.premium_hasta > now() as premium, p.suspendido, p.visto_at,
       p.created_at, t.nombre as taller, t.id as taller_id, public.nota_cliente(p.telefono) as nota,
       (select count(*) from public.reservas r where r.cliente_id = p.id and r.estado = 'completada') as visitas
-    from public.perfiles p left join public.talleres t on t.id = p.taller_id where p.rol = 'cliente' limit 5000) x);
+    from public.perfiles p left join public.talleres t on t.id = p.taller_id where p.rol in ('cliente', 'equipo') limit 5000) x);
 end $$;
 
 -- Dar o quitar Premium (días; 0 = quitar).
@@ -1843,8 +1864,151 @@ grant execute on function
 to authenticated;
 -- Usadas por las políticas de seguridad.
 grant execute on function public.is_admin(), public.taller_de(uuid), public.mi_taller(), public.es_dueno(uuid) to authenticated;
+-- (v1.3: chat y borrado en la sección 18, más abajo)
 -- Las de solo-servidor (preparar_cuenta, cancelar_invitacion, push_pendientes, push_borrar_endpoint, tareas_periodicas)
 -- quedan sin permiso para la app: solo las usa la función "servidor" (rol service_role) y pg_cron.
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    execute 'grant execute on all functions in schema public to service_role';
+  end if;
+end $$;
+
+
+-- =====================================================================
+-- 18. (v1.3) Chat: cliente ↔ su taller · taller ↔ administrador
+--     cliente_id vacío = conversación del taller con el administrador.
+-- =====================================================================
+create table if not exists public.mensajes (
+  id          uuid primary key default gen_random_uuid(),
+  taller_id   uuid not null references public.talleres (id) on delete cascade,
+  cliente_id  uuid references public.perfiles (id) on delete cascade,
+  autor       uuid references public.perfiles (id) on delete set null,
+  de_taller   boolean not null,
+  texto       text not null check (length(trim(texto)) between 1 and 1000),
+  leido       boolean not null default false,
+  created_at  timestamptz not null default now()
+);
+create index if not exists mensajes_conv_idx on public.mensajes (taller_id, cliente_id, created_at desc);
+alter table public.mensajes enable row level security;
+
+create or replace function public.chat_puede(t uuid, c uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select public.taller_de(auth.uid()) = t
+      or (c is null and public.is_admin())
+      or (c = auth.uid() and exists (select 1 from public.perfiles p where p.id = c and p.rol = 'cliente' and p.taller_id = t and not p.suspendido))
+$$;
+
+drop policy if exists "ver mensajes" on public.mensajes;
+create policy "ver mensajes" on public.mensajes for select to authenticated using (public.chat_puede(taller_id, cliente_id));
+grant select on public.mensajes to authenticated;
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+     and not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'mensajes') then
+    alter publication supabase_realtime add table public.mensajes;
+  end if;
+end $$;
+
+create or replace function public.chat_enviar(p_taller uuid, p_cliente uuid, p_texto text) returns void
+language plpgsql security definer set search_path = '' as $$
+declare dt boolean; quien text; t public.talleres;
+begin
+  if not public.chat_puede(p_taller, p_cliente) then raise exception 'Sin permiso'; end if;
+  if trim(coalesce(p_texto, '')) = '' then raise exception 'Escribe un mensaje'; end if;
+  if (select count(*) from public.mensajes where autor = auth.uid() and created_at > now() - interval '10 minutes') >= 40 then
+    raise exception 'Muchos mensajes seguidos. Espera unos minutos.';
+  end if;
+  select * into t from public.talleres where id = p_taller;
+  dt := coalesce(public.taller_de(auth.uid()) = p_taller, false);
+  insert into public.mensajes (taller_id, cliente_id, autor, de_taller, texto) values (p_taller, p_cliente, auth.uid(), dt, left(trim(p_texto), 1000));
+  if dt and p_cliente is not null then
+    perform public.avisar(p_cliente, '💬 ' || t.nombre, left(trim(p_texto), 120), '/cliente/#chat');
+  elsif dt then
+    perform public.avisar_admin('💬 ' || t.nombre, left(trim(p_texto), 120), '/admin/#chat');
+  else
+    select coalesce(nullif(nombre, ''), email) into quien from public.perfiles where id = auth.uid();
+    perform public.avisar_taller(p_taller, '💬 ' || case when p_cliente is null then 'BiciTaller (soporte)' else quien end,
+      left(trim(p_texto), 120), '/taller/#chat');
+  end if;
+end $$;
+
+-- Mensajes de una conversación (marca como leídos los recibidos).
+create or replace function public.chat_leer(p_taller uuid, p_cliente uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare dt boolean;
+begin
+  if not public.chat_puede(p_taller, p_cliente) then raise exception 'Sin permiso'; end if;
+  dt := coalesce(public.taller_de(auth.uid()) = p_taller, false);
+  update public.mensajes set leido = true
+  where taller_id = p_taller and cliente_id is not distinct from p_cliente and not leido and de_taller <> dt;
+  return (select coalesce(jsonb_agg(x order by x.created_at), '[]') from (
+    select id, texto, created_at, de_taller = dt as mio from public.mensajes
+    where taller_id = p_taller and cliente_id is not distinct from p_cliente order by created_at desc limit 150) x);
+end $$;
+
+-- Conversaciones de quien entra (con no leídos).
+create or replace function public.chat_lista() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare me public.perfiles; tid uuid := public.taller_de(auth.uid());
+begin
+  select * into me from public.perfiles where id = auth.uid();
+  if tid is not null then
+    return (select coalesce(jsonb_agg(x order by x.ultimo desc nulls last), '[]') from (
+      select null::uuid as cliente_id, 'BiciTaller (soporte)' as nombre, tid as taller_id,
+        (select max(created_at) from public.mensajes m where m.taller_id = tid and m.cliente_id is null) as ultimo,
+        (select count(*) from public.mensajes m where m.taller_id = tid and m.cliente_id is null and not m.leido and not m.de_taller) as no_leidos
+      union all
+      select p.id, coalesce(nullif(p.nombre, ''), p.email), tid, max(m.created_at),
+        count(*) filter (where not m.leido and not m.de_taller)
+      from public.mensajes m join public.perfiles p on p.id = m.cliente_id
+      where m.taller_id = tid group by p.id, p.nombre, p.email) x);
+  elsif public.is_admin() then
+    return (select coalesce(jsonb_agg(x order by x.ultimo desc), '[]') from (
+      select null::uuid as cliente_id, t.nombre, t.id as taller_id, max(m.created_at) as ultimo,
+        count(*) filter (where not m.leido and m.de_taller) as no_leidos
+      from public.mensajes m join public.talleres t on t.id = m.taller_id
+      where m.cliente_id is null group by t.id, t.nombre) x);
+  elsif me.rol = 'cliente' then
+    return jsonb_build_array(jsonb_build_object('cliente_id', me.id, 'taller_id', me.taller_id,
+      'nombre', (select nombre from public.talleres where id = me.taller_id),
+      'no_leidos', (select count(*) from public.mensajes m where m.taller_id = me.taller_id and m.cliente_id = me.id and not m.leido and m.de_taller)));
+  end if;
+  return '[]'::jsonb;
+end $$;
+
+-- =====================================================================
+-- 19. (v1.3) Borrar cuentas (solo el administrador; lo ejecuta la función "servidor")
+-- =====================================================================
+create or replace function public.preparar_borrado(p_caller uuid, p_tipo text, p_id uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare p public.perfiles; ids uuid[];
+begin
+  if not exists (select 1 from public.perfiles where id = p_caller and rol = 'admin' and email = public.admin_email() and not suspendido) then
+    return jsonb_build_object('ok', false, 'error', 'Solo el administrador');
+  end if;
+  if p_tipo = 'taller' then
+    select array_agg(id) into ids from public.perfiles where taller_id = p_id and rol <> 'admin';
+    insert into public.auditoria (quien, accion, detalle)
+    select p_caller, 'borrar_taller', nombre from public.talleres where id = p_id;
+    return jsonb_build_object('ok', true, 'ids', coalesce(to_jsonb(ids), '[]'::jsonb), 'taller', p_id);
+  end if;
+  select * into p from public.perfiles where id = p_id;
+  if p.id is null then return jsonb_build_object('ok', false, 'error', 'Usuario no encontrado'); end if;
+  if p.rol = 'admin' then return jsonb_build_object('ok', false, 'error', 'No puedes borrar al administrador'); end if;
+  if p.rol = 'taller' then return jsonb_build_object('ok', false, 'error', 'Es el dueño: elimina el taller completo'); end if;
+  insert into public.auditoria (quien, accion, detalle) values (p_caller, 'borrar_usuario', p.rol || ' ' || p.email);
+  return jsonb_build_object('ok', true, 'ids', jsonb_build_array(p.id));
+end $$;
+
+create or replace function public.borrar_taller(p_id uuid) returns void
+language sql security definer set search_path = '' as $$ delete from public.talleres where id = p_id $$;
+
+revoke execute on function public.chat_puede(uuid, uuid), public.chat_enviar(uuid, uuid, text), public.chat_leer(uuid, uuid),
+  public.chat_lista(), public.preparar_borrado(uuid, text, uuid), public.borrar_taller(uuid),
+  public.preparar_cuenta(uuid, text, text, text, text, text, uuid) from public, anon, authenticated;
+grant execute on function public.chat_puede(uuid, uuid), public.chat_enviar(uuid, uuid, text), public.chat_leer(uuid, uuid),
+  public.chat_lista() to authenticated;
 do $$
 begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then

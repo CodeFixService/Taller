@@ -245,6 +245,7 @@
       if (ids.length) sb.from('notificaciones').update({ leida: true }).in('id', ids).then(() => cargar());
     };
     await cargar();
+    insistirPush();
     if (canal) sb.removeChannel(canal);
     canal = sb.channel('avisos-' + cuenta.id)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notificaciones', filter: 'para=eq.' + cuenta.id }, (p) => {
@@ -303,6 +304,94 @@
     el.querySelector('button').onclick = async () => {
       try { await activarPush(); toast('✅ Notificaciones activadas'); ofrecerPush(el); } catch (e) { toast(e.message); }
     };
+  }
+
+  /* ---------- Notificaciones: insistir hasta que se activen ---------- */
+  async function insistirPush() {
+    if (!cuenta || sessionStorage.getItem('bt:pushPedido')) return;
+    if (await subActual()) return;
+    sessionStorage.setItem('bt:pushPedido', '1');
+    const ios = /iPhone|iPad/.test(navigator.userAgent), instalada = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+    const negado = 'Notification' in global && Notification.permission === 'denied';
+    const msg = ios && !instalada ? 'Para recibir avisos en iPhone: toca Compartir → "Agregar a inicio" y abre la app desde ese ícono.'
+      : negado ? 'Las notificaciones están bloqueadas. Actívalas en los ajustes del navegador (candado junto a la dirección → Notificaciones → Permitir).'
+      : 'Actívalas para enterarte al instante de reservas, pagos, mensajes y cuando tu bici esté lista.';
+    const d = modal('<h2>🔔 Activa las notificaciones</h2><p class="muted" style="margin-top:0">' + esc(msg) + '</p><div class="btns"><button class="ghost" data-cerrar>Ahora no</button>' +
+      (!negado && !(ios && !instalada) ? '<button id="btPushSi">Activar</button>' : '') + '</div>');
+    const b = d.querySelector('#btPushSi');
+    if (b) b.onclick = async () => { try { await activarPush(); toast('✅ Notificaciones activadas'); d.close(); } catch (e) { toast(e.message); } };
+  }
+
+  /* ---------- Chat (cliente ↔ taller · taller ↔ administrador) ---------- */
+  let chatCanal = null;
+  async function chatBoton(btn) {
+    if (!btn || !cuenta) return;
+    btn.innerHTML = '💬<span class="badge hidden"></span>'; btn.setAttribute('aria-label', 'Mensajes');
+    const badge = btn.querySelector('.badge');
+    let lista = [];
+    async function cargar() {
+      try { lista = await rpc('chat_lista'); } catch (e) { return; }
+      const n = lista.reduce((a, c) => a + (+c.no_leidos || 0), 0);
+      badge.textContent = n; badge.classList.toggle('hidden', !n);
+    }
+    btn.onclick = async () => { await cargar(); abrirLista(); };
+    function abrirLista() {
+      if (cuenta.rol === 'cliente' && lista[0]) { abrirChat(lista[0].taller_id, lista[0].cliente_id, lista[0].nombre, cargar); return; }
+      const d = modal('<div style="display:flex;align-items:center;gap:8px"><h2 style="flex:1;margin:0">💬 Mensajes</h2><button class="small ghost" data-cerrar>Cerrar</button></div><ul class="list" id="btChats">' +
+        (lista.length ? lista.map((c, i) => '<li class="clic" data-i="' + i + '"><span class="grow"><b>' + esc(c.nombre) + '</b><div class="sub">' + (c.ultimo ? hace(c.ultimo) : 'Sin mensajes') + '</div></span>' +
+          (+c.no_leidos ? '<span class="pill bad">' + c.no_leidos + '</span>' : '') + '</li>').join('') : '<li class="muted">Sin conversaciones todavía.</li>') + '</ul>');
+      d.querySelector('#btChats').onclick = (e) => { const li = e.target.closest('[data-i]'); if (!li) return; const c = lista[+li.dataset.i]; d.close(); abrirChat(c.taller_id, c.cliente_id, c.nombre, cargar); };
+    }
+    await cargar();
+    if (chatCanal) sb.removeChannel(chatCanal);
+    chatCanal = sb.channel('chat-' + cuenta.id).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mensajes' }, () => cargar()).subscribe();
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) cargar(); });
+    if (location.hash === '#chat') abrirLista();
+    window.addEventListener('hashchange', () => { if (location.hash === '#chat') abrirLista(); });
+  }
+  function abrirChat(taller, cliente, titulo, alCerrar) {
+    const d = modal('<div style="display:flex;align-items:center;gap:8px"><h2 style="flex:1;margin:0">💬 ' + esc(titulo || 'Mensajes') + '</h2><button class="small ghost" data-cerrar>Cerrar</button></div>' +
+      '<div id="btMsgs" style="height:55vh;overflow:auto;display:flex;flex-direction:column;gap:6px;padding:8px 0"></div>' +
+      '<div class="row" style="flex-wrap:nowrap"><input id="btTxt" maxlength="1000" placeholder="Escribe un mensaje…" style="flex:1"><button id="btEnv" style="flex:0 0 auto">Enviar</button></div>');
+    const box = d.querySelector('#btMsgs'), txt = d.querySelector('#btTxt');
+    async function leer() {
+      let m = [];
+      try { m = await rpc('chat_leer', { p_taller: taller, p_cliente: cliente }); } catch (e) { box.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+      box.innerHTML = m.length ? m.map((x) => '<div style="max-width:80%;padding:8px 12px;border-radius:14px;' + (x.mio ? 'align-self:flex-end;background:var(--brand);color:var(--brand-ink)' : 'align-self:flex-start;background:var(--field);border:1px solid var(--line)') +
+        '">' + esc(x.texto) + '<div style="font-size:11px;opacity:.7;margin-top:2px">' + hace(x.created_at) + '</div></div>').join('') : '<p class="empty">Escribe el primer mensaje 👋</p>';
+      box.scrollTop = box.scrollHeight;
+    }
+    const can = sb.channel('conv-' + taller + (cliente || '')).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mensajes', filter: 'taller_id=eq.' + taller }, leer).subscribe();
+    d.addEventListener('close', () => { sb.removeChannel(can); if (alCerrar) alCerrar(); });
+    async function enviar() {
+      const t = txt.value.trim(); if (!t) return;
+      txt.value = '';
+      try { await rpc('chat_enviar', { p_taller: taller, p_cliente: cliente, p_texto: t }); sb.functions.invoke('servidor').catch(() => {}); leer(); }
+      catch (e) { toast(e.message); txt.value = t; }
+    }
+    d.querySelector('#btEnv').onclick = enviar;
+    txt.onkeydown = (e) => { if (e.key === 'Enter') enviar(); };
+    leer(); setTimeout(() => txt.focus(), 100);
+  }
+
+  // Solo el administrador: borra un usuario o un taller completo (lo hace el servidor).
+  async function borrarCuenta(tipo, id) {
+    const { data, error } = await sb.functions.invoke('servidor', { body: { accion: 'borrar', tipo, id } });
+    if (error) throw new Error('No se pudo conectar con la función "servidor".');
+    if (!data || !data.ok) throw new Error((data && data.error) || 'No se pudo borrar');
+    return data;
+  }
+
+  // Horario legible: "Lun–Vie 10:00–19:00 · Sáb 10:00–14:00"
+  function horarioTxt(t) {
+    const h = t.horarios || {}, a = String(t.abre).slice(0, 5), c = String(t.cierra).slice(0, 5);
+    const g = [];
+    [1, 2, 3, 4, 5, 6, 0].filter((d) => t.dias.includes(d)).forEach((d) => {
+      const r = (h[d] ? String(h[d].abre).slice(0, 5) + '–' + String(h[d].cierra).slice(0, 5) : a + '–' + c);
+      const u = g[g.length - 1];
+      if (u && u.r === r && u.fin === (d === 0 ? 6 : d - 1)) { u.fin = d; u.n++; } else g.push({ ini: d, fin: d, r, n: 1 });
+    });
+    return g.map((x) => DIAS[x.ini] + (x.n > 1 ? '–' + DIAS[x.fin] : '') + ' ' + x.r).join(' · ');
   }
 
   /* ---------- App instalable ---------- */
@@ -372,7 +461,7 @@
     sb, ROOT, $, esc, plata, numero, iso, fechaDe, sumarDias, hoy, fCorta, fLarga, fHora, hace, DIAS, telNorm, wa, estrellas, nota,
     toast, modal, confirmar, tema, pintarLogo, friendly, rpc, q, cargarPublica, txt, refrescar, requerir, entrar, salir, crearCuenta,
     clave, mensajeAcceso, comprimirComprobante, comprimirLogo, descargar, verImagen, campana, irA, activarPush, ofrecerPush,
-    pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino, revisarVersion, actualizar,
+    pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino, revisarVersion, actualizar, chatBoton, abrirChat, borrarCuenta, horarioTxt,
     get cuenta() { return cuenta; },
     get publica() { return publica; }
   };

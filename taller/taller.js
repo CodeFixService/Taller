@@ -222,7 +222,8 @@
     const delDia = agRes.filter((r) => r.fecha === agFecha && !['cancelada', 'rechazada', 'expirada'].includes(r.estado));
     const tramos = agBloq.filter((b) => b.fecha === agFecha && b.desde);
     const horas = [];
-    for (let m = mins(t.abre); m + t.bloque_min <= mins(t.cierra); m += t.bloque_min) horas.push(m);
+    const hd = (t.horarios || {})[d.getDay()] || { abre: t.abre, cierra: t.cierra };
+    for (let m = mins(hd.abre); m + t.bloque_min <= mins(hd.cierra); m += t.bloque_min) horas.push(m);
     delDia.forEach((r) => { const m = mins(r.hora); if (!horas.includes(m)) horas.push(m); });
     horas.sort((a, b) => a - b);
     const col = t.colacion_desde ? [mins(t.colacion_desde), mins(t.colacion_hasta)] : null;
@@ -432,6 +433,7 @@
     pintarClientes();
   }
   $('cBuscar').oninput = pintarClientes;
+  $('cLista').onclick = (e) => { const b = e.target.closest('[data-chat]'); if (b) App.abrirChat(T, b.dataset.chat, b.dataset.n); };
   function pintarClientes() {
     const f = $('cBuscar').value.trim().toLowerCase();
     const l = clientes.filter((c) => !f || (c.nombre + ' ' + c.telefono + ' ' + c.email).toLowerCase().includes(f));
@@ -440,6 +442,7 @@
       (c.premium ? '<span class="pill pro">Premium</span> ' : '') + App.nota(c.nota) +
       '<div class="sub">' + esc(c.telefono || '') + ' · ' + c.visitas + ' visita' + (c.visitas === 1 ? '' : 's') + (c.faltas ? ' · 🚫 ' + c.faltas + ' falta' + (c.faltas > 1 ? 's' : '') : '') +
       (c.gastado ? ' · ' + plata(c.gastado) : '') + (c.ultima ? ' · última ' + App.fCorta(c.ultima) : '') + '</div></div>' +
+      (c.cliente_id ? '<button class="small" data-chat="' + c.cliente_id + '" data-n="' + esc(c.nombre || '') + '">💬</button>' : '') +
       (c.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(c.telefono, 'Hola ' + (c.nombre || '').split(' ')[0] + ' 👋 Te escribimos de ' + P.taller.nombre + '.') + '">📲</a>' : '') + '</li>').join('')
       : '<li class="muted">' + (f ? 'Nadie con ese dato.' : 'Tus clientes aparecen aquí cuando reservan.') + '</li>';
   }
@@ -501,9 +504,12 @@
   // ---- Horario
   function verHorario() {
     const t = P.taller;
-    body().innerHTML = '<div class="card"><h2>⏰ Horario y reservas</h2><label>Días de atención</label><div class="chips" id="hDias">' +
-      App.DIAS.map((d, i) => '<label><input type="checkbox" data-d="' + i + '"' + (t.dias.includes(i) ? ' checked' : '') + '> ' + d + '</label>').join('') + '</div>' +
-      '<div class="row"><div><label for="hAbre">Abre</label><input type="time" id="hAbre" value="' + t.abre.slice(0, 5) + '"></div><div><label for="hCierra">Cierra</label><input type="time" id="hCierra" value="' + t.cierra.slice(0, 5) + '"></div></div>' +
+    const hd = (i) => (t.horarios || {})[i] || { abre: t.abre.slice(0, 5), cierra: t.cierra.slice(0, 5) };
+    body().innerHTML = '<div class="card"><h2>⏰ Horario y reservas</h2><label>Días y horario (cada día con su propio horario)</label><div id="hDias">' +
+      [1, 2, 3, 4, 5, 6, 0].map((i) => '<div class="row" style="align-items:center;flex-wrap:nowrap;margin-bottom:6px"><label class="check" style="margin:0;flex:0 0 76px"><input type="checkbox" data-d="' + i + '"' +
+        (t.dias.includes(i) ? ' checked' : '') + '> ' + App.DIAS[i] + '</label><input type="time" data-a="' + i + '" value="' + String(hd(i).abre).slice(0, 5) + '" aria-label="Abre ' + App.DIAS[i] + '">' +
+        '<input type="time" data-c="' + i + '" value="' + String(hd(i).cierra).slice(0, 5) + '" aria-label="Cierra ' + App.DIAS[i] + '"></div>').join('') + '</div>' +
+      '<label for="hMax">Máximo de bicis que recibes por día (0 = sin límite)</label><input id="hMax" inputmode="numeric" value="' + (t.max_dia || 0) + '">' +
       '<div class="row"><div><label for="hCd">Colación desde</label><input type="time" id="hCd" value="' + (t.colacion_desde || '').slice(0, 5) + '"></div><div><label for="hCh">Colación hasta</label><input type="time" id="hCh" value="' + (t.colacion_hasta || '').slice(0, 5) + '"></div></div>' +
       '<div class="row"><div><label for="hBl">Cada cuánto (minutos)</label><select id="hBl">' + [15, 20, 30, 45, 60, 90, 120].map((m) => '<option' + (m === t.bloque_min ? ' selected' : '') + '>' + m + '</option>').join('') + '</select></div>' +
       '<div><label for="hCu">Bicis a la vez</label><input id="hCu" inputmode="numeric" value="' + t.cupos + '"></div></div>' +
@@ -517,8 +523,16 @@
       const cd = $('hCd').value, ch = $('hCh').value;
       if ((cd && !ch) || (!cd && ch)) { $('hErr').textContent = 'Completa la colación (desde y hasta) o déjala vacía'; return; }
       try {
-        P = await rpc('taller_guardar', { p: { dias: Array.from($('hDias').querySelectorAll('input:checked')).map((i) => +i.dataset.d),
-          abre: $('hAbre').value, cierra: $('hCierra').value, colacion_desde: cd, colacion_hasta: ch, bloque_min: +$('hBl').value,
+        // Horario "normal" = el más repetido; los días distintos se guardan aparte.
+        const dias = Array.from($('hDias').querySelectorAll('input[data-d]:checked')).map((i) => +i.dataset.d);
+        if (!dias.length) { $('hErr').textContent = 'Marca al menos un día'; return; }
+        const par = (i) => $('hDias').querySelector('[data-a="' + i + '"]').value + '-' + $('hDias').querySelector('[data-c="' + i + '"]').value;
+        const cuenta = {}; dias.forEach((i) => { cuenta[par(i)] = (cuenta[par(i)] || 0) + 1; });
+        const normal = Object.keys(cuenta).sort((a, b) => cuenta[b] - cuenta[a])[0].split('-');
+        const horarios = {};
+        [0, 1, 2, 3, 4, 5, 6].forEach((i) => { const [a, c] = par(i).split('-'); if (a && c && par(i) !== normal.join('-')) horarios[i] = { abre: a, cierra: c }; });
+        P = await rpc('taller_guardar', { p: { dias, horarios, max_dia: Math.max(App.numero($('hMax').value), 0),
+          abre: normal[0], cierra: normal[1], colacion_desde: cd, colacion_hasta: ch, bloque_min: +$('hBl').value,
           cupos: Math.min(Math.max(App.numero($('hCu').value) || 1, 1), 20), anticipacion_dias: Math.min(Math.max(App.numero($('hAn').value) || 21, 1), 120),
           meses_mantencion: Math.min(Math.max(App.numero($('hMe').value) || 4, 1), 24), reservas_online: $('hOn').checked } });
         await cargarPanel(); toast('⏰ Horario guardado');
@@ -741,6 +755,7 @@
   catch (e) { $('cargando').textContent = '⚠️ ' + e.message; return; }
   $('cargando').classList.add('hidden');
   App.campana($('campana'));
+  App.chatBoton($('chatBtn'));
   App.pie();
   // Guardar de dónde venimos para el botón "Volver" del detalle.
   const showOrig = show;

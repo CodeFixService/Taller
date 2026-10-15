@@ -110,7 +110,7 @@
   $('nota').innerHTML = App.nota(t.nota);
   $('dir').textContent = [t.direccion, t.comuna].filter(Boolean).join(', ');
   if (t.descripcion) { $('desc').textContent = t.descripcion; $('desc').classList.remove('hidden'); }
-  $('horario').textContent = '🕐 ' + t.dias.slice().sort().map((d) => App.DIAS[d]).join(', ') + ' · ' + t.abre + ' a ' + t.cierra +
+  $('horario').textContent = '🕐 ' + App.horarioTxt(t) +
     (t.colacion_desde ? ' (colación ' + t.colacion_desde + '–' + t.colacion_hasta + ')' : '');
   $('contacto').innerHTML = (t.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(t.telefono, 'Hola ' + t.nombre + ' 👋') + '">📲 WhatsApp</a>' : '') +
     (t.instagram ? '<a class="btn small ghost" target="_blank" rel="noopener" href="https://instagram.com/' + esc(t.instagram.replace(/^@/, '')) + '">📷 Instagram</a>' : '') +
@@ -137,7 +137,9 @@
     $('datos').classList.add('hidden'); $('datosYo').classList.remove('hidden');
     $('datosYo').innerHTML = '<div class="grow">👤 Reservas como <b>' + esc(yo.nombre || yo.email) + '</b> · ' + esc(yo.telefono || '') + '</div>';
   } else if (yo && yo.rol !== 'cliente') {
-    $('cCuenta').classList.add('hidden');
+    $('sinCuenta').classList.add('hidden'); $('yaCuenta').classList.remove('hidden');
+    $('yaCuenta').innerHTML = '<p class="muted" style="margin:0">Tienes la sesión de ' + (yo.rol === 'admin' ? 'administrador' : 'taller') +
+      ' abierta. Para crear una cuenta de cliente abre este enlace en una ventana de incógnito o cierra sesión.</p>';
   } else if (!t.acepta_cuentas) {
     $('dRegistro').classList.add('hidden');
   }

@@ -16,6 +16,7 @@
 <header class="top">
   <div class="logo" id="hLogo"></div><h1 id="hNombre">Mi taller</h1>
   <span class="pill" id="hPlan"></span>
+  <button class="icon-btn" id="chatBtn" type="button"></button>
   <button class="icon-btn" id="campana" type="button"></button>
 </header>
 <main>
@@ -82,7 +83,7 @@
     $('hPlan').textContent = D.premium ? 'PREMIUM' : 'GRATIS'; $('hPlan').className = 'pill ' + (D.premium ? 'pro' : '');
     $('tNota').innerHTML = App.nota(t.nota);
     $('tDir').textContent = [t.direccion, t.comuna].filter(Boolean).join(', ');
-    $('tHorario').textContent = '🕐 ' + t.dias.slice().sort().map((d) => App.DIAS[d]).join(', ') + ' · ' + t.abre + ' a ' + t.cierra;
+    $('tHorario').textContent = '🕐 ' + App.horarioTxt(t);
     $('bReservar').href = '../t/?s=' + encodeURIComponent(t.slug);
     $('bWsp').classList.toggle('hidden', !t.telefono);
     if (t.telefono) $('bWsp').href = App.wa(t.telefono, 'Hola 👋 Soy ' + yo.nombre + '.');
@@ -137,6 +138,7 @@
   const ir = ['inicio', 'historial', 'plan', 'cuenta'].includes(h) ? h : 'inicio';
   document.querySelector('nav.tabs [data-v="' + ir + '"]').click();
   App.campana($('campana'));
+  App.chatBoton($('chatBtn'));
   App.ofrecerPush($('cPush'));
   $('cG').onclick = async () => { try { await rpc('mi_perfil_guardar', { p_nombre: $('cN').value, p_telefono: $('cT').value }); toast('💾 Guardado'); } catch (e) { toast(e.message); } };
   $('cPG').onclick = async () => { const { error } = await App.sb.auth.updateUser({ password: $('cP').value }); toast(error ? App.friendly(error) : '🔑 Contraseña cambiada'); };

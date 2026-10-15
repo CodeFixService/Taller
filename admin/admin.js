@@ -77,7 +77,9 @@
         '<option value="365">+1 año</option><option value="otro">Otro número de días…</option><option value="0">Quitar Premium</option></select>' +
         '<a class="btn small ghost" target="_blank" rel="noopener" href="../t/?s=' + encodeURIComponent(t.slug) + '">🔗 Página</a>' +
         (t.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(t.telefono, 'Hola ' + (t.dueno || '') + ' 👋') + '">📲</a>' : '') +
-        '<button class="small ' + (t.suspendido ? 'okb' : 'danger') + '" data-susp="' + t.id + '" data-s="' + (t.suspendido ? 0 : 1) + '">' + (t.suspendido ? 'Reactivar' : 'Suspender') + '</button></div></div>';
+        '<button class="small ghost" data-chat="' + t.id + '" data-n="' + esc(t.nombre) + '">💬</button><button class="small alt" data-add="' + t.id + '" data-n="' + esc(t.nombre) + '">👤＋</button>' +
+        '<button class="small ' + (t.suspendido ? 'okb' : 'danger') + '" data-susp="' + t.id + '" data-s="' + (t.suspendido ? 0 : 1) + '">' + (t.suspendido ? 'Reactivar' : 'Suspender') + '</button>' +
+        '<button class="small danger" data-del="' + t.id + '" data-n="' + esc(t.nombre) + '">🗑️</button></div></div>';
     }).join('') : '<p class="empty">No hay talleres aquí.</p>';
   }
   $('tLista').onchange = async (e) => {
@@ -90,6 +92,14 @@
     catch (err) { toast(err.message); }
   };
   $('tLista').onclick = async (e) => {
+    const ch = e.target.closest('[data-chat]'); if (ch) { App.abrirChat(ch.dataset.chat, null, ch.dataset.n); return; }
+    const ad = e.target.closest('[data-add]'); if (ad) { agregarUsuario(ad.dataset.add, ad.dataset.n); return; }
+    const dl = e.target.closest('[data-del]');
+    if (dl) {
+      if (!await confirmar('¿ELIMINAR "' + dl.dataset.n + '" con todo: equipo, clientes con cuenta, reservas y comprobantes?\nNo se puede deshacer.', 'Sí, eliminar todo')) return;
+      try { const r = await App.borrarCuenta('taller', dl.dataset.del); toast('🗑️ Taller eliminado (' + r.borrados + ' cuentas)'); cargarTalleres(); } catch (err) { toast(err.message); }
+      return;
+    }
     const b = e.target.closest('[data-susp]'); if (!b) return;
     if (b.dataset.s === '1' && !await confirmar('¿Suspender el taller? Ni el taller ni su equipo podrán entrar y su página se cierra.')) return;
     try { await rpc('admin_suspender', { p_tipo: 'taller', p_id: b.dataset.susp, p_suspender: b.dataset.s === '1' }); cargarTalleres(); } catch (err) { toast(err.message); }
@@ -111,7 +121,27 @@
     b.disabled = false; b.textContent = 'Crear taller';
   };
 
-  /* ---------- Clientes ---------- */
+  // Agregar un mecánico o un cliente a un taller.
+  function agregarUsuario(tid, nombre) {
+    const d = modal('<h2>👤 Agregar a ' + esc(nombre) + '</h2><label for="uR">Tipo</label><select id="uR"><option value="cliente">Cliente</option><option value="equipo">Equipo (mecánico)</option></select>' +
+      '<div class="row"><div><label for="uN">Nombre</label><input id="uN" maxlength="80"></div><div><label for="uT">WhatsApp</label><input id="uT" inputmode="tel"></div></div>' +
+      '<label for="uE">Correo</label><input id="uE" type="email" autocomplete="off"><label for="uP">Contraseña</label><input id="uP" value="' + App.clave() + '">' +
+      '<div class="btns"><button class="ghost" data-cerrar>Cancelar</button><button id="uOk">Crear</button></div><p class="err" id="uErr"></p>');
+    d.querySelector('#uOk').onclick = async () => {
+      const v = (id) => d.querySelector(id).value.trim();
+      const x = { rol: v('#uR'), nombre: v('#uN'), telefono: v('#uT'), email: v('#uE'), password: v('#uP'), taller_id: tid };
+      try {
+        await App.crearCuenta(x);
+        const msg = App.mensajeAcceso({ nombre: x.nombre.split(' ')[0], email: x.email, password: x.password, lugar: nombre });
+        d.close();
+        modal('<h2>✅ Cuenta creada</h2><pre class="link" style="white-space:pre-wrap;font:inherit">' + esc(msg) + '</pre><div class="btns"><button class="ghost" data-cerrar>Cerrar</button>' +
+          (x.telefono ? '<a class="btn" target="_blank" rel="noopener" href="' + App.wa(x.telefono, msg) + '">📲 WhatsApp</a>' : '') + '</div>');
+        cargarTalleres();
+      } catch (err) { d.querySelector('#uErr').textContent = err.message; }
+    };
+  }
+
+  /* ---------- Usuarios (clientes y equipo) ---------- */
   let clientes = [];
   async function cargarClientes() {
     try { clientes = await rpc('admin_clientes'); } catch (e) { $('cLista').innerHTML = '<li class="err">' + esc(e.message) + '</li>'; return; }
@@ -124,18 +154,21 @@
   function pintarClientes() {
     const f = $('cBuscar').value.trim().toLowerCase(), t = $('cTaller').value;
     const l = clientes.filter((c) => (!f || (c.nombre + ' ' + c.email + ' ' + c.telefono).toLowerCase().includes(f)) && (!t || c.taller_id === t));
-    $('cCuenta').textContent = l.length + ' clientes · ' + l.filter((c) => c.premium).length + ' Premium';
-    $('cLista').innerHTML = l.length ? l.slice(0, 500).map((c) => '<li><div class="grow"><b>' + esc(c.nombre || c.email) + '</b> ' + (c.premium ? '<span class="pill pro">PREMIUM</span> ' : '') +
+    $('cCuenta').textContent = l.length + ' usuarios · ' + l.filter((c) => c.premium).length + ' Premium';
+    $('cLista').innerHTML = l.length ? l.slice(0, 500).map((c) => '<li><div class="grow"><b>' + esc(c.nombre || c.email) + '</b> ' + (c.rol === 'equipo' ? '<span class="pill info">Equipo</span> ' : '') + (c.premium ? '<span class="pill pro">PREMIUM</span> ' : '') +
       (c.suspendido ? '<span class="pill bad">Suspendido</span> ' : '') + App.nota(c.nota) + '<div class="sub">' + esc(c.email) + ' · ' + esc(c.telefono) + ' · ' + esc(c.taller || '') + ' · ' + c.visitas + ' visitas · visto ' + App.hace(c.visto_at) +
       (c.premium ? ' · Premium hasta ' + new Date(c.premium_hasta).toLocaleDateString('es-CL') : '') + '</div></div>' +
       '<select data-cp="' + c.id + '" style="width:auto" aria-label="Acción"><option value="">Acción…</option><option value="30">⭐ +30 días</option><option value="90">⭐ +90 días</option><option value="0">Quitar Premium</option>' +
-      '<option value="' + (c.suspendido ? 'react' : 'susp') + '">' + (c.suspendido ? 'Reactivar' : 'Suspender') + '</option></select></li>').join('') : '<li class="muted">Sin clientes.</li>';
+      '<option value="' + (c.suspendido ? 'react' : 'susp') + '">' + (c.suspendido ? 'Reactivar' : 'Suspender') + '</option><option value="del">🗑️ Eliminar</option></select></li>').join('') : '<li class="muted">Sin usuarios.</li>';
   }
   $('cLista').onchange = async (e) => {
     const s = e.target.closest('[data-cp]'); if (!s || !s.value) return;
     const v = s.value; s.value = '';
     try {
-      if (v === 'susp' || v === 'react') await rpc('admin_suspender', { p_tipo: 'perfil', p_id: s.dataset.cp, p_suspender: v === 'susp' });
+      if (v === 'del') {
+        if (!await confirmar('¿Eliminar este usuario? Sus reservas quedan, sin la cuenta. No se puede deshacer.', 'Sí, eliminar')) return;
+        await App.borrarCuenta('perfil', s.dataset.cp);
+      } else if (v === 'susp' || v === 'react') await rpc('admin_suspender', { p_tipo: 'perfil', p_id: s.dataset.cp, p_suspender: v === 'susp' });
       else await rpc('admin_premium', { p_tipo: 'cliente', p_id: s.dataset.cp, p_dias: +v });
       toast('Listo'); cargarClientes();
     } catch (err) { toast(err.message); }
@@ -337,6 +370,7 @@
 
   $('cargando').classList.add('hidden');
   App.campana($('campana'));
+  App.chatBoton($('chatBtn'));
   App.pie();
   const h = location.hash.slice(1);
   show(['resumen', 'talleres', 'clientes', 'pagos', 'ajustes'].includes(h) ? h : 'resumen');
