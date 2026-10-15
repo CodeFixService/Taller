@@ -28,40 +28,6 @@
       <div class="info-linea" id="contacto"></div>
     </div>
 
-    <div id="promos"></div>
-
-    <div class="card hidden" id="cerrado"><p style="margin:0" id="cerradoTxt"></p></div>
-
-    <div id="form">
-      <div class="card">
-        <h2><span class="paso">1</span> ¿Qué necesita tu bici?</h2>
-        <div id="servs"></div>
-      </div>
-      <div class="card">
-        <h2><span class="paso">2</span> Elige el día y la hora</h2>
-        <div class="dias" id="dias"></div>
-        <div class="horas" id="horas"></div>
-      </div>
-      <div class="card">
-        <h2><span class="paso">3</span> Tus datos</h2>
-        <div id="datosYo" class="aviso hidden"></div>
-        <div id="datos">
-          <div class="row">
-            <div><label for="fNom">Nombre</label><input id="fNom" maxlength="80" autocomplete="name"></div>
-            <div><label for="fTel">WhatsApp</label><input id="fTel" inputmode="tel" maxlength="30" autocomplete="tel" placeholder="+56 9 1234 5678"></div>
-          </div>
-          <label for="fEmail">Correo (opcional)</label><input id="fEmail" type="email" maxlength="120" autocomplete="email">
-        </div>
-        <label for="fBici">Tu bici (marca y modelo)</label><input id="fBici" maxlength="120" placeholder="Ej.: Trek Marlin 5, aro 29">
-        <label for="fNota">¿Qué le pasa? (opcional)</label><textarea id="fNota" maxlength="500" placeholder="Ej.: frena poco y el cambio salta"></textarea>
-        <div class="aviso" style="margin-top:14px"><div class="grow">
-          <b>💳 Abono para confirmar: <span id="abono"></span></b> <span class="sub">(se descuenta del total)</span>
-          <div class="sub" id="politica" style="margin-top:6px"></div></div></div>
-        <button id="bReservar" type="button" class="block">Reservar</button>
-        <p class="err" id="fErr"></p>
-      </div>
-    </div>
-
     <div class="card" id="cCuenta">
       <h2>👤 Tu cuenta en <span id="nomCuenta"></span></h2>
       <div id="yaCuenta" class="hidden"></div>
@@ -83,6 +49,42 @@
         <p class="sub" style="margin-bottom:0">¿Ya tienes cuenta? <a id="aEntrar" href="#">Inicia sesión</a></p>
       </div>
     </div>
+
+    <div id="promos"></div>
+
+    <div class="card hidden" id="cerrado"><p style="margin:0" id="cerradoTxt"></p></div>
+
+    <div id="form">
+      <div class="card">
+        <h2><span class="paso">1</span> ¿Qué necesita tu bici?</h2>
+        <div id="servs"></div>
+      </div>
+      <div class="card">
+        <h2><span class="paso">2</span> Elige el día y la hora</h2>
+        <div class="dias" id="dias"></div>
+        <div class="horas" id="horas"></div>
+        <p class="aviso hidden" id="entrega" style="margin:10px 0 0"></p>
+      </div>
+      <div class="card">
+        <h2><span class="paso">3</span> Tus datos</h2>
+        <div id="datosYo" class="aviso hidden"></div>
+        <div id="datos">
+          <div class="row">
+            <div><label for="fNom">Nombre</label><input id="fNom" maxlength="80" autocomplete="name"></div>
+            <div><label for="fTel">WhatsApp</label><input id="fTel" inputmode="tel" maxlength="30" autocomplete="tel" placeholder="+56 9 1234 5678"></div>
+          </div>
+          <label for="fEmail">Correo (opcional)</label><input id="fEmail" type="email" maxlength="120" autocomplete="email">
+        </div>
+        <label for="fBici">Tu bici (marca y modelo)</label><input id="fBici" maxlength="120" placeholder="Ej.: Trek Marlin 5, aro 29">
+        <label for="fNota">¿Qué le pasa? (opcional)</label><textarea id="fNota" maxlength="500" placeholder="Ej.: frena poco y el cambio salta"></textarea>
+        <div class="aviso" style="margin-top:14px"><div class="grow">
+          <b>💳 Abono para confirmar: <span id="abono"></span></b> <span class="sub">(se descuenta del total)</span>
+          <div class="sub" id="politica" style="margin-top:6px"></div></div></div>
+        <button id="bReservar" type="button" class="block">Reservar</button>
+        <p class="err" id="fErr"></p>
+      </div>
+    </div>
+
   </div>
 </main>
 <script src="../shared/config.js"></script>
@@ -197,6 +199,10 @@
     const b = e.target.closest('[data-h]'); if (!b) return;
     hora = b.dataset.h;
     $('horas').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    $('entrega').classList.add('hidden');
+    if (t.capacidad_dia > 0) App.rpc('entrega_estimada', { p_taller: t.id, p_fecha: dia, p_hora: hora }).then((d) => {
+      if (d) { $('entrega').innerHTML = '<span>📦 Dejas tu bici el ' + App.fLarga(dia) + ' a las ' + hora + ' · <b>entrega estimada: ' + App.fLarga(d) + '</b></span>'; $('entrega').classList.remove('hidden'); }
+    }).catch(() => {});
   };
   if (t.reservas_online) cargarDias();
 

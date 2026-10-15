@@ -197,3 +197,21 @@ footer.pie { text-align: center; font-size: 12px; color: var(--muted); padding: 
 .tl li.ok::before { background: var(--brand); }
 .cuenta-atras { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; }
 @media print { header.top, nav.tabs, .btns, .no-print { display: none !important; } body { background: #fff; padding: 0; } }
+.chatwin { position: fixed; right: 12px; bottom: calc(84px + env(safe-area-inset-bottom)); width: min(380px, calc(100vw - 24px)); z-index: 60;
+  background: var(--card); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 16px 40px rgba(0, 0, 0, .3); overflow: hidden; }
+.chathead { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: var(--brand); color: var(--brand-ink); }
+.chathead b { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chathead .icon-btn { width: 32px; height: 32px; font-size: 15px; background: color-mix(in srgb, var(--brand-ink) 18%, transparent); color: var(--brand-ink); }
+.chathead .badge { position: static; }
+.chatwin.min .chatbody { display: none; }
+.chatwin.min { width: auto; max-width: 260px; }
+.chatmsgs { height: min(50vh, 380px); overflow: auto; display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+.burb { max-width: 80%; padding: 8px 12px; border-radius: 14px; align-self: flex-start; background: var(--field); border: 1px solid var(--line); overflow-wrap: anywhere; }
+.burb.mia { align-self: flex-end; background: var(--brand); color: var(--brand-ink); border-color: transparent; }
+.burb img { display: block; max-width: 100%; border-radius: 10px; margin-bottom: 4px; cursor: pointer; }
+.burb .hora { font-size: 11px; opacity: .7; margin-top: 2px; }
+.chatin { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--line); align-items: center; }
+.chatin .chattxt { flex: 1; padding: 10px 12px; }
+.chatin .chatenv { padding: 10px 14px; }
+.flotante { position: fixed; right: 14px; z-index: 9; width: 46px; height: 46px; border-radius: 50%; padding: 0; font-size: 20px; box-shadow: 0 6px 18px rgba(0, 0, 0, .25); }
+.flotante .badge { top: -4px; right: -4px; }

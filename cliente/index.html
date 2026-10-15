@@ -11,21 +11,17 @@
 <link rel="apple-touch-icon" href="../icons/icon-192.png">
 <link rel="stylesheet" href="../shared/app.css">
 <style>.promo { border-left: 4px solid var(--brand); }
-  .ayuda { position: fixed; right: 16px; bottom: calc(86px + env(safe-area-inset-bottom)); z-index: 9; border-radius: 99px; padding: 12px 16px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, .25); }
-  .tienes { display: block; text-align: center; font-size: 13px; margin: -6px 0 12px; }</style>
+</style>
 </head>
 <body class="con-tabs">
 <header class="top">
   <div class="logo" id="hLogo"></div><h1 id="hNombre">Mi taller</h1>
   <span class="pill" id="hPlan"></span>
-  <button class="icon-btn" id="chatBtn" type="button"></button>
   <button class="icon-btn" id="campana" type="button"></button>
 </header>
 <main>
   <p class="empty" id="cargando">Cargando…</p>
 
-  <a class="tienes hidden" id="tienes" target="_blank" rel="noopener">🏪 ¿Tienes un taller? Súmalo a BiciTaller</a>
   <section class="view" id="v-inicio">
     <div class="card">
       <div class="hero"><div class="logo" id="tLogo"></div><div class="grow"><h1 id="tNombre" style="font-size:20px"></h1><div id="tNota"></div><div class="sub" id="tDir"></div></div></div>
@@ -54,11 +50,14 @@
       <label for="cP">Contraseña nueva</label><input id="cP" type="password" autocomplete="new-password">
       <div class="btns"><button class="alt" id="cPG">Cambiar contraseña</button></div>
       <div id="cPush"></div>
+      <h3>⭐ Mi perfil <span class="pill pro">PREMIUM</span></h3>
+      <div id="cEstilo"></div>
       <div class="btns"><button class="danger" id="cSalir">Cerrar sesión</button></div>
     </div>
   </section>
 </main>
-<button class="ayuda" id="ayuda" type="button">🚀 ¿Necesitas ayuda?</button>
+<button class="flotante" id="ayuda" type="button" title="¿Necesitas ayuda? Escríbele al taller" style="bottom:calc(86px + env(safe-area-inset-bottom))"></button>
+<a class="btn flotante alt hidden" id="tienes" target="_blank" rel="noopener" title="¿Tienes un taller? Súmalo a BiciTaller" aria-label="¿Tienes un taller?" style="bottom:calc(140px + env(safe-area-inset-bottom))">🚀</a>
 <nav class="tabs">
   <button data-v="inicio"><span class="i">🏠</span>Inicio</button>
   <button data-v="historial"><span class="i">🚲</span>Mi bici</button>
@@ -83,7 +82,7 @@
   async function cargar() {
     D = await rpc('cliente_inicio');
     const t = D.taller;
-    App.tema(t.color); App.pintarLogo($('hLogo'), t); App.pintarLogo($('tLogo'), t);
+    App.tema(D.premium && yo.color ? yo.color : t.color); App.pintarLogo($('hLogo'), D.premium && (yo.foto || yo.icono) ? { logo: yo.foto, icono: yo.icono || t.icono } : t); App.pintarLogo($('tLogo'), t);
     $('hNombre').textContent = t.nombre; $('tNombre').textContent = t.nombre;
     $('hPlan').textContent = D.premium ? 'PREMIUM' : 'GRATIS'; $('hPlan').className = 'pill ' + (D.premium ? 'pro' : '');
     $('tNota').innerHTML = App.nota(t.nota);
@@ -106,7 +105,33 @@
       (r.proxima_mantencion ? '<div class="sub">🔔 Próxima mantención: ' + App.fCorta(r.proxima_mantencion) + '</div>' : '') +
       (r.estado === 'completada' && !r.calificada ? '<div class="sub" style="color:var(--brand)">⭐ Toca para calificar al taller</div>' : '') + '</a>').join('') : '<p class="muted" style="margin:0">Aún no tienes visitas completadas.</p>';
     $('cEmail').textContent = yo.email; $('cNota').innerHTML = App.nota(D.mi_nota);
+    pintarEstilo();
     $('cN').value = yo.nombre; $('cT').value = yo.telefono;
+  }
+
+  // Perfil Premium: foto, color, ícono y descripción.
+  function pintarEstilo() {
+    const COL = ['#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#db2777', '#dc2626', '#ea580c', '#d97706', '#334155', '#111827'];
+    const ICO = ['🚲', '🚴', '🚵', '🏔️', '⚡', '🏁', '😎', '💪'];
+    let foto = yo.foto || '', color = yo.color || '', icono = yo.icono || '';
+    const el = $('cEstilo');
+    if (!D.premium) { el.innerHTML = '<p class="sub" style="margin:0">Con Premium eliges tus colores, tu ícono o tu foto y una descripción. <a href="#plan">Ver Premium</a></p>'; return; }
+    el.innerHTML = '<div class="hero" style="margin:6px 0"><div class="logo" id="eAv"></div><div><label for="eF" class="btn small alt" style="margin:0;color:var(--brand)">📷 Foto</label>' +
+      '<input type="file" id="eF" accept="image/*" class="hidden"> <button class="small ghost" id="eSF" type="button">Quitar</button></div></div>' +
+      '<div class="swatches" id="eC" style="display:flex;flex-wrap:wrap;gap:8px">' + COL.map((c) => '<button type="button" data-c="' + c + '" style="width:34px;height:34px;padding:0;border-radius:50%;background:' + c + '" aria-label="Color"></button>').join('') + '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px" id="eI">' + ICO.map((i) => '<button type="button" class="small ghost" data-i="' + i + '">' + i + '</button>').join('') + '</div>' +
+      '<label for="eD">Descripción</label><textarea id="eD" maxlength="300" placeholder="Ciclista de ruta los fines de semana 🚴">' + esc(yo.descripcion || '') + '</textarea>' +
+      '<div class="btns"><button id="eG" type="button">💾 Guardar mi perfil</button></div>';
+    const prev = () => { App.pintarLogo($('eAv'), { logo: foto, icono: icono || '🚲' }); $('eAv').style.backgroundColor = color || ''; };
+    prev();
+    $('eF').onchange = async (e) => { const f = e.target.files[0]; if (!f) return; try { foto = await App.comprimirLogo(f); prev(); } catch (err) { toast(err.message); } };
+    $('eSF').onclick = () => { foto = ''; prev(); };
+    $('eC').onclick = (e) => { const b = e.target.closest('[data-c]'); if (b) { color = b.dataset.c; App.tema(color); prev(); } };
+    $('eI').onclick = (e) => { const b = e.target.closest('[data-i]'); if (b) { icono = b.dataset.i; prev(); } };
+    $('eG').onclick = async () => {
+      try { await rpc('cliente_estilo', { p_color: color, p_icono: icono, p_foto: foto, p_descripcion: $('eD').value }); Object.assign(yo, { foto, color, icono, descripcion: $('eD').value }); toast('💾 Perfil guardado'); cargar(); }
+      catch (e) { toast(e.message); }
+    };
   }
 
   async function verPlan() {
@@ -143,8 +168,7 @@
   const ir = ['inicio', 'historial', 'plan', 'cuenta'].includes(h) ? h : 'inicio';
   document.querySelector('nav.tabs [data-v="' + ir + '"]').click();
   App.campana($('campana'));
-  App.chatBoton($('chatBtn'));
-  $('ayuda').onclick = () => App.abrirChat(yo.taller_id, yo.id, D.taller.nombre);
+  App.chatBoton($('ayuda'), '❓');
   const sop = (pub.config || {}).soporte_whatsapp;
   if (sop) { $('tienes').href = App.wa(sop, 'Hola 👋 Tengo un taller de bicicletas y quiero usar BiciTaller.'); $('tienes').classList.remove('hidden'); }
   App.ofrecerPush($('cPush'));

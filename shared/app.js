@@ -324,9 +324,9 @@
 
   /* ---------- Chat (cliente ↔ taller · taller ↔ administrador) ---------- */
   let chatCanal = null;
-  async function chatBoton(btn) {
+  async function chatBoton(btn, icono) {
     if (!btn || !cuenta) return;
-    btn.innerHTML = '💬<span class="badge hidden"></span>'; btn.setAttribute('aria-label', 'Mensajes');
+    btn.innerHTML = (icono || '💬') + '<span class="badge hidden"></span>'; btn.setAttribute('aria-label', 'Mensajes');
     const badge = btn.querySelector('.badge');
     let lista = [];
     async function cargar() {
@@ -349,27 +349,50 @@
     if (location.hash === '#chat') abrirLista();
     window.addEventListener('hashchange', () => { if (location.hash === '#chat') abrirLista(); });
   }
+  // Ventana de chat flotante: se minimiza y sigue recibiendo mensajes en vivo.
+  let chatAbierto = null;
   function abrirChat(taller, cliente, titulo, alCerrar) {
-    const d = modal('<div style="display:flex;align-items:center;gap:8px"><h2 style="flex:1;margin:0">💬 ' + esc(titulo || 'Mensajes') + '</h2><button class="small ghost" data-cerrar>Cerrar</button></div>' +
-      '<div id="btMsgs" style="height:55vh;overflow:auto;display:flex;flex-direction:column;gap:6px;padding:8px 0"></div>' +
-      '<div class="row" style="flex-wrap:nowrap"><input id="btTxt" maxlength="1000" placeholder="Escribe un mensaje…" style="flex:1"><button id="btEnv" style="flex:0 0 auto">Enviar</button></div>');
-    const box = d.querySelector('#btMsgs'), txt = d.querySelector('#btTxt');
+    if (chatAbierto) chatAbierto.cerrar();
+    const w = document.createElement('div');
+    w.className = 'chatwin';
+    w.innerHTML = '<div class="chathead"><b class="grow">💬 ' + esc(titulo || 'Mensajes') + '</b><span class="badge hidden"></span>' +
+      '<button class="icon-btn" data-l title="Limpiar conversación" aria-label="Limpiar">🧹</button><button class="icon-btn" data-m aria-label="Minimizar">–</button>' +
+      '<button class="icon-btn" data-x aria-label="Cerrar">✕</button></div><div class="chatbody"><div class="chatmsgs"></div>' +
+      '<div class="chatin"><label class="icon-btn" title="Adjuntar foto" aria-label="Adjuntar foto">📎<input type="file" accept="image/*" hidden></label>' +
+      '<input class="chattxt" maxlength="1000" placeholder="Escribe un mensaje…"><button class="chatenv">➤</button></div></div>';
+    document.body.appendChild(w);
+    const box = w.querySelector('.chatmsgs'), txt = w.querySelector('.chattxt'), bdg = w.querySelector('.chathead .badge');
+    let min = false, nuevos = 0;
     async function leer() {
+      if (min) { nuevos++; bdg.textContent = nuevos; bdg.classList.remove('hidden'); return; }
       let m = [];
       try { m = await rpc('chat_leer', { p_taller: taller, p_cliente: cliente }); } catch (e) { box.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
-      box.innerHTML = m.length ? m.map((x) => '<div style="max-width:80%;padding:8px 12px;border-radius:14px;' + (x.mio ? 'align-self:flex-end;background:var(--brand);color:var(--brand-ink)' : 'align-self:flex-start;background:var(--field);border:1px solid var(--line)') +
-        '">' + esc(x.texto) + '<div style="font-size:11px;opacity:.7;margin-top:2px">' + hace(x.created_at) + '</div></div>').join('') : '<p class="empty">Escribe el primer mensaje 👋</p>';
+      box.innerHTML = m.length ? m.map((x) => '<div class="burb' + (x.mio ? ' mia' : '') + '">' + (x.imagen ? '<img src="' + x.imagen + '" alt="Foto" data-img>' : '') +
+        (x.texto ? esc(x.texto) : '') + '<div class="hora">' + hace(x.created_at) + '</div></div>').join('') : '<p class="empty">Escribe el primer mensaje 👋</p>';
       box.scrollTop = box.scrollHeight;
     }
     const can = sb.channel('conv-' + taller + (cliente || '')).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mensajes', filter: 'taller_id=eq.' + taller }, leer).subscribe();
-    d.addEventListener('close', () => { sb.removeChannel(can); if (alCerrar) alCerrar(); });
-    async function enviar() {
-      const t = txt.value.trim(); if (!t) return;
+    async function enviar(img) {
+      const t = txt.value.trim(); if (!t && !img) return;
       txt.value = '';
-      try { await rpc('chat_enviar', { p_taller: taller, p_cliente: cliente, p_texto: t }); sb.functions.invoke('servidor').catch(() => {}); leer(); }
+      try { await rpc('chat_enviar', { p_taller: taller, p_cliente: cliente, p_texto: t, p_imagen: img || null }); sb.functions.invoke('servidor').catch(() => {}); leer(); }
       catch (e) { toast(e.message); txt.value = t; }
     }
-    d.querySelector('#btEnv').onclick = enviar;
+    const cerrar = () => { sb.removeChannel(can); w.remove(); chatAbierto = null; if (alCerrar) alCerrar(); };
+    chatAbierto = { cerrar };
+    w.querySelector('[data-x]').onclick = cerrar;
+    w.querySelector('[data-m]').onclick = () => { min = !min; w.classList.toggle('min', min); if (!min) { nuevos = 0; bdg.classList.add('hidden'); leer(); } };
+    w.querySelector('.chathead b').onclick = () => { if (min) w.querySelector('[data-m]').click(); };
+    w.querySelector('[data-l]').onclick = async () => {
+      if (!await confirmar('¿Borrar todos los mensajes de esta conversación?', 'Sí, limpiar')) return;
+      try { await rpc('chat_limpiar', { p_taller: taller, p_cliente: cliente }); leer(); } catch (e) { toast(e.message); }
+    };
+    w.querySelector('input[type=file]').onchange = async (e) => {
+      const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      try { enviar(await achicar(f, 1100, 380000)); } catch (err) { toast(err.message); }
+    };
+    box.onclick = (e) => { const i = e.target.closest('[data-img]'); if (i) verImagen(i.src, 'Foto', 'foto.jpg'); };
+    w.querySelector('.chatenv').onclick = () => enviar();
     txt.onkeydown = (e) => { if (e.key === 'Enter') enviar(); };
     leer(); setTimeout(() => txt.focus(), 100);
   }

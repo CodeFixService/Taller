@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.4'::text $$;
+language sql immutable as $$ select '1.5'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -121,7 +121,7 @@ create table if not exists public.talleres (
   cierra            time not null default '19:00',
   colacion_desde    time,
   colacion_hasta    time,
-  bloque_min        int not null default 60 check (bloque_min in (15, 20, 30, 45, 60, 90, 120)),
+  bloque_min        int not null default 60,
   cupos             int not null default 2 check (cupos between 1 and 20),
   anticipacion_dias int not null default 21 check (anticipacion_dias between 1 and 120),
   meses_mantencion  int not null default 4 check (meses_mantencion between 1 and 24),
@@ -139,6 +139,10 @@ create table if not exists public.talleres (
 alter table public.talleres enable row level security;
 alter table public.talleres add column if not exists horarios jsonb not null default '{}';   -- {"6": {"abre": "10:00", "cierra": "14:00"}}
 alter table public.talleres add column if not exists max_dia int not null default 0;         -- 0 = sin límite de bicis por día
+alter table public.talleres add column if not exists capacidad_dia int not null default 0;   -- mantenciones que se terminan por día (0 = no calcular entrega)
+alter table public.talleres add column if not exists max_espera_dias int not null default 14; -- tope de días hasta la entrega
+alter table public.talleres drop constraint if exists talleres_bloque_min_check;
+alter table public.talleres add constraint talleres_bloque_min_check check (bloque_min in (15, 20, 30, 45, 60, 90, 120, 180, 240));
 
 create table if not exists public.perfiles (
   id               uuid primary key references auth.users (id) on delete cascade,
@@ -522,6 +526,7 @@ create index if not exists reservas_e_idx on public.reservas (taller_id, estado)
 create index if not exists reservas_tel_idx on public.reservas (tel_norm);
 create index if not exists reservas_cli_idx on public.reservas (cliente_id);
 alter table public.reservas enable row level security;
+alter table public.reservas add column if not exists entrega_estimada date;
 
 -- Comprobantes (imagen liviana). Se borran solos después de N días.
 create table if not exists public.comprobantes (
@@ -767,7 +772,7 @@ language sql stable security definer set search_path = '' as $$
     'id', t.id, 'nombre', t.nombre, 'slug', t.slug, 'descripcion', t.descripcion, 'direccion', t.direccion,
     'comuna', t.comuna, 'telefono', t.telefono, 'instagram', t.instagram, 'logo', t.logo, 'color', t.color, 'icono', t.icono,
     'dias', t.dias, 'abre', to_char(t.abre, 'HH24:MI'), 'cierra', to_char(t.cierra, 'HH24:MI'),
-    'horarios', t.horarios, 'max_dia', t.max_dia,
+    'horarios', t.horarios, 'max_dia', t.max_dia, 'capacidad_dia', t.capacidad_dia,
     'colacion_desde', to_char(t.colacion_desde, 'HH24:MI'), 'colacion_hasta', to_char(t.colacion_hasta, 'HH24:MI'),
     'anticipacion_dias', t.anticipacion_dias, 'hoy', (now() at time zone t.zona)::date,
     'reservas_online', t.reservas_online and (public.link_activo(t.id, 'abono')).id is not null,
@@ -875,7 +880,7 @@ create or replace function public.reservar(p_taller uuid, p_servicio uuid, p_fec
   p_nombre text, p_telefono text, p_email text, p_bici text, p_nota text, p_extras uuid[] default null) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
-  ex jsonb; ex_nombres text; ex_precio int;
+  ex jsonb; ex_nombres text; ex_precio int; ent date;
   c public.talleres; s public.servicios; me public.perfiles; l public.links_pago;
   hoy date; extra int := 0; mins int; nom text; tel text; r public.reservas; n int;
 begin
@@ -917,13 +922,18 @@ begin
     return jsonb_build_object('ok', false, 'error', 'Esa hora ya no está disponible. Elige otra.');
   end if;
   mins := (ceil(mins::numeric / c.bloque_min) * c.bloque_min)::int;
+  -- Entrega estimada según la cola del taller (si calcula capacidad diaria).
+  ent := public.estimar_entrega(p_taller, p_fecha, p_hora::time, null);
+  if ent is not null and ent > p_fecha + c.max_espera_dias then
+    return jsonb_build_object('ok', false, 'error', 'Ese día el taller ya tiene la cola llena. Elige otro día.');
+  end if;
   -- Servicios adicionales (suman precio, no tiempo de agenda).
   select coalesce(jsonb_agg(jsonb_build_object('nombre', x.nombre, 'cant', 1, 'precio', x.precio) order by x.nombre), '[]'),
          string_agg(x.nombre, ' + ' order by x.nombre), coalesce(sum(x.precio), 0)
     into ex, ex_nombres, ex_precio
   from public.servicios x where x.taller_id = p_taller and x.activo and x.adicional and x.id = any (coalesce(p_extras, '{}'));
   insert into public.reservas (taller_id, servicio_id, servicio_nombre, precio, fecha, hora, hora_fin, nombre, telefono, tel_norm,
-    email, bici, nota, cliente_id, origen, estado, expira_at, abono_monto, abono_estado, historial, items, total)
+    email, bici, nota, cliente_id, origen, estado, expira_at, abono_monto, abono_estado, historial, items, total, entrega_estimada)
   values (p_taller, s.id, left(coalesce(s.nombre, 'Revisión general') || coalesce(' + ' || ex_nombres, ''), 300), coalesce(s.precio, 0) + ex_precio, p_fecha, p_hora::time,
     p_hora::time + make_interval(mins => mins), nom, tel, public.tel_norm(tel),
     left(lower(trim(coalesce(nullif(p_email, ''), me.email, ''))), 120), left(trim(coalesce(p_bici, '')), 120),
@@ -931,7 +941,7 @@ begin
     'por_pagar', now() + make_interval(mins => coalesce(public.cfg_int('minutos_pago'), 30)), l.monto, 'pendiente',
     public.historial_mas('[]', 'por_pagar'),
     case when s.id is null then '[]'::jsonb else jsonb_build_array(jsonb_build_object('nombre', s.nombre, 'cant', 1, 'precio', s.precio)) end || ex,
-    coalesce(s.precio, 0) + ex_precio)
+    coalesce(s.precio, 0) + ex_precio, ent)
   returning * into r;
   perform public.avisar_taller(p_taller, '📅 Nueva reserva', nom || ' · ' || to_char(p_fecha, 'DD/MM') || ' ' || p_hora ||
     ' · esperando abono', '/taller/#reservas');
@@ -972,7 +982,7 @@ begin
     'expira_at', r.expira_at, 'fecha', r.fecha, 'hora', to_char(r.hora, 'HH24:MI'), 'servicio', r.servicio_nombre,
     'servicio_id', r.servicio_id, 'minutos', (extract(epoch from (r.hora_fin - r.hora)) / 60)::int, 'precio', r.precio, 'nombre', r.nombre, 'telefono', r.telefono, 'bici', r.bici,
     'motivo', r.motivo, 'items', r.items, 'total', r.total, 'diagnostico', r.diagnostico,
-    'proxima_mantencion', r.proxima_mantencion, 'saldo_hasta', r.saldo_hasta, 'created_at', r.created_at,
+    'proxima_mantencion', r.proxima_mantencion, 'saldo_hasta', r.saldo_hasta, 'created_at', r.created_at, 'entrega_estimada', r.entrega_estimada,
     'historial', (select coalesce(jsonb_agg(jsonb_build_object('estado', h ->> 'estado', 'at', h ->> 'at')), '[]') from jsonb_array_elements(r.historial) h),
     'cita', cita, 'cancelar', tipo,
     'reagendar', (r.estado = 'confirmada' and cita - now() >= make_interval(hours => hrs))
@@ -1056,6 +1066,7 @@ begin
   end if;
   update public.reservas set fecha = p_fecha, hora = p_hora::time, hora_fin = p_hora::time + make_interval(mins => mins),
     estado = 'confirmada', abono_estado = 'pagado', saldo_hasta = null, recordado = false, reagendada = reagendada + 1,
+    entrega_estimada = public.estimar_entrega(r.taller_id, p_fecha, p_hora::time, r.id),
     historial = public.historial_mas(historial, 'reagendada'), updated_at = now()
   where id = r.id;
   perform public.avisar_taller(r.taller_id, '🔁 Reserva reagendada', r.nombre || ' · ahora el ' || to_char(p_fecha, 'DD/MM') || ' ' || p_hora,
@@ -1175,7 +1186,9 @@ begin
     meses_mantencion = coalesce((p ->> 'meses_mantencion')::int, meses_mantencion),
     reservas_online = coalesce((p ->> 'reservas_online')::boolean, reservas_online),
     horarios = case when p ? 'horarios' and jsonb_typeof(p -> 'horarios') = 'object' then p -> 'horarios' else horarios end,
-    max_dia = coalesce(least(greatest((p ->> 'max_dia')::int, 0), 200), max_dia)
+    max_dia = coalesce(least(greatest((p ->> 'max_dia')::int, 0), 200), max_dia),
+    capacidad_dia = coalesce(least(greatest((p ->> 'capacidad_dia')::int, 0), 100), capacidad_dia),
+    max_espera_dias = coalesce(least(greatest((p ->> 'max_espera_dias')::int, 1), 120), max_espera_dias)
   where id = tid;
   if exists (select 1 from public.talleres t, jsonb_each(t.horarios) h where t.id = tid
              and (h.value ->> 'cierra')::time <= (h.value ->> 'abre')::time) then
@@ -1218,7 +1231,7 @@ language sql stable security definer set search_path = '' as $$
     select r.id, r.fecha, to_char(r.hora, 'HH24:MI') as hora, to_char(r.hora_fin, 'HH24:MI') as hora_fin, r.nombre, r.telefono,
       r.email, r.bici, r.nota, r.servicio_id, r.servicio_nombre, r.precio, r.estado, r.abono_monto, r.abono_estado, r.expira_at,
       r.origen, r.cliente_id, r.mecanico_id, r.items, r.total, r.diagnostico, r.notas_internas, r.proxima_mantencion,
-      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta,
+      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta, r.entrega_estimada,
       exists (select 1 from public.comprobantes k where k.reserva_id = r.id) as tiene_comprobante,
       public.nota_cliente(r.telefono) as nota_cliente,
       exists (select 1 from public.calificaciones q where q.reserva_id = r.id and q.autor = 'taller') as calificado,
@@ -1326,12 +1339,12 @@ begin
   end if;
   mins := (ceil(mins::numeric / c.bloque_min) * c.bloque_min)::int;
   insert into public.reservas (taller_id, servicio_id, servicio_nombre, precio, fecha, hora, hora_fin, nombre, telefono, tel_norm,
-    bici, nota, origen, estado, abono_monto, abono_estado, historial, items, total)
+    bici, nota, origen, estado, abono_monto, abono_estado, historial, items, total, entrega_estimada)
   values (tid, s.id, coalesce(s.nombre, 'Revisión general'), coalesce(s.precio, 0), p_fecha, p_hora::time, p_hora::time + make_interval(mins => mins),
     left(trim(p_nombre), 80), left(trim(coalesce(p_telefono, '')), 30), public.tel_norm(p_telefono), left(trim(coalesce(p_bici, '')), 120),
     left(trim(coalesce(p_nota, '')), 500), 'taller', 'confirmada', 0, 'sin_abono', public.historial_mas('[]', 'confirmada'),
     case when s.id is null then '[]'::jsonb else jsonb_build_array(jsonb_build_object('nombre', s.nombre, 'cant', 1, 'precio', s.precio)) end,
-    coalesce(s.precio, 0));
+    coalesce(s.precio, 0), public.estimar_entrega(tid, p_fecha, p_hora::time, null));
   return jsonb_build_object('ok', true);
 end $$;
 
@@ -2023,6 +2036,155 @@ revoke execute on function public.chat_puede(uuid, uuid), public.chat_enviar(uui
   public.preparar_cuenta(uuid, text, text, text, text, text, uuid) from public, anon, authenticated;
 grant execute on function public.chat_puede(uuid, uuid), public.chat_enviar(uuid, uuid, text), public.chat_leer(uuid, uuid),
   public.chat_lista() to authenticated;
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    execute 'grant execute on all functions in schema public to service_role';
+  end if;
+end $$;
+
+
+-- =====================================================================
+-- 20. (v1.5) Entrega estimada, chat con fotos y límite, perfil Premium del cliente
+-- =====================================================================
+update public.config set valor = '"+56950868263"' where clave = 'soporte_whatsapp' and valor = '""';
+update public.config set valor = '5' where clave = 'dias_aviso_vencimiento' and valor = '3';
+
+-- Cola: cada día de trabajo el taller termina "capacidad_dia" bicis. La bici entra a la cola
+-- en el orden de su hora de entrega y sale el primer día en que le alcanza la capacidad.
+create or replace function public.estimar_entrega(p_taller uuid, p_fecha date, p_hora time, p_excluir uuid default null) returns date
+language plpgsql stable security definer set search_path = '' as $$
+declare c public.talleres; hoy date; f date[]; k int; hechas int := 0; llegadas int; d date; i int := 0;
+begin
+  select * into c from public.talleres where id = p_taller;
+  if c.id is null or c.capacidad_dia <= 0 then return null; end if;
+  hoy := (now() at time zone c.zona)::date;
+  -- Cola en orden de llegada (fecha y hora de entrega de la bici), incluyendo la nueva.
+  select array_agg(x.fecha order by x.fecha, x.hora) into f from (
+    select r.fecha, r.hora from public.reservas r
+    where r.taller_id = p_taller and public.ocupa_hora(r) and (p_excluir is null or r.id <> p_excluir) and r.fecha >= hoy - 60
+      and r.estado in ('por_pagar', 'en_revision', 'confirmada', 'recibida', 'en_reparacion', 'esperando_repuesto')
+    union all select p_fecha, p_hora) x;
+  k := (select count(*) from unnest(f) WITH ORDINALITY u(fe, n) where u.fe < p_fecha)
+     + (select count(*) from public.reservas r where r.taller_id = p_taller and public.ocupa_hora(r) and (p_excluir is null or r.id <> p_excluir)
+          and r.estado in ('por_pagar', 'en_revision', 'confirmada', 'recibida', 'en_reparacion', 'esperando_repuesto')
+          and r.fecha = p_fecha and r.hora <= p_hora) + 1;
+  -- Cada día de trabajo se terminan "capacidad_dia" bicis de las que ya llegaron.
+  loop
+    d := hoy + i;
+    if extract(dow from d)::int = any (c.dias)
+       and not exists (select 1 from public.bloqueos b where b.taller_id = p_taller and b.fecha = d and b.desde is null) then
+      select count(*) into llegadas from unnest(f) u(fe) where u.fe <= d;
+      hechas := least(hechas + c.capacidad_dia, llegadas);
+      if hechas >= k then return d; end if;
+    end if;
+    i := i + 1;
+    exit when i > 400;
+  end loop;
+  return null;
+end $$;
+
+create or replace function public.entrega_estimada(p_taller uuid, p_fecha date, p_hora text) returns date
+language sql stable security definer set search_path = '' as $$ select public.estimar_entrega(p_taller, p_fecha, p_hora::time, null) $$;
+
+-- Chat: foto adjunta y máximo 3 mensajes seguidos (cliente → taller y taller → administrador).
+alter table public.mensajes add column if not exists imagen text check (imagen is null or (imagen ~ '^data:image/(jpeg|png|webp);base64,' and length(imagen) <= 400000));
+alter table public.mensajes drop constraint if exists mensajes_texto_check;
+alter table public.mensajes add constraint mensajes_texto_check check (length(texto) <= 1000 and (length(trim(texto)) > 0 or imagen is not null));
+
+drop function if exists public.chat_enviar(uuid, uuid, text);
+create or replace function public.chat_enviar(p_taller uuid, p_cliente uuid, p_texto text, p_imagen text default null) returns void
+language plpgsql security definer set search_path = '' as $$
+declare dt boolean; quien text; t public.talleres; n int;
+begin
+  if not public.chat_puede(p_taller, p_cliente) then raise exception 'Sin permiso'; end if;
+  if trim(coalesce(p_texto, '')) = '' and p_imagen is null then raise exception 'Escribe un mensaje'; end if;
+  if p_imagen is not null and (p_imagen !~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' or length(p_imagen) > 400000) then
+    raise exception 'Imagen no válida o muy pesada';
+  end if;
+  dt := coalesce(public.taller_de(auth.uid()) = p_taller, false);
+  -- Máximo 3 seguidos sin respuesta: el cliente al taller y el taller al administrador.
+  if (not dt and p_cliente is not null) or (dt and p_cliente is null) then
+    select count(*) into n from public.mensajes
+    where taller_id = p_taller and cliente_id is not distinct from p_cliente and de_taller = dt
+      and created_at > coalesce((select max(created_at) from public.mensajes where taller_id = p_taller
+                                 and cliente_id is not distinct from p_cliente and de_taller <> dt), '-infinity');
+    if n >= 3 then raise exception 'Ya enviaste 3 mensajes. Espera la respuesta para escribir de nuevo.'; end if;
+  end if;
+  select * into t from public.talleres where id = p_taller;
+  insert into public.mensajes (taller_id, cliente_id, autor, de_taller, texto, imagen)
+  values (p_taller, p_cliente, auth.uid(), dt, left(trim(coalesce(p_texto, '')), 1000), p_imagen);
+  if dt and p_cliente is not null then
+    perform public.avisar(p_cliente, '💬 ' || t.nombre, coalesce(nullif(left(trim(p_texto), 120), ''), '📷 Foto'), '/cliente/#chat');
+  elsif dt then
+    perform public.avisar_admin('💬 ' || t.nombre, coalesce(nullif(left(trim(p_texto), 120), ''), '📷 Foto'), '/admin/#chat');
+  else
+    select coalesce(nullif(nombre, ''), email) into quien from public.perfiles where id = auth.uid();
+    perform public.avisar_taller(p_taller, '💬 ' || case when p_cliente is null then 'BiciTaller (soporte)' else quien end,
+      coalesce(nullif(left(trim(p_texto), 120), ''), '📷 Foto'), '/taller/#chat');
+  end if;
+end $$;
+
+create or replace function public.chat_leer(p_taller uuid, p_cliente uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare dt boolean;
+begin
+  if not public.chat_puede(p_taller, p_cliente) then raise exception 'Sin permiso'; end if;
+  dt := coalesce(public.taller_de(auth.uid()) = p_taller, false);
+  update public.mensajes set leido = true
+  where taller_id = p_taller and cliente_id is not distinct from p_cliente and not leido and de_taller <> dt;
+  return (select coalesce(jsonb_agg(x order by x.created_at), '[]') from (
+    select id, texto, imagen, created_at, de_taller = dt as mio from public.mensajes
+    where taller_id = p_taller and cliente_id is not distinct from p_cliente order by created_at desc limit 150) x);
+end $$;
+
+create or replace function public.chat_limpiar(p_taller uuid, p_cliente uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not public.chat_puede(p_taller, p_cliente) then raise exception 'Sin permiso'; end if;
+  delete from public.mensajes where taller_id = p_taller and cliente_id is not distinct from p_cliente;
+end $$;
+
+-- Perfil del cliente: foto, color, ícono y descripción (Premium).
+alter table public.perfiles add column if not exists foto text check (foto is null or (foto ~ '^data:image/(jpeg|png|webp);base64,' and length(foto) <= 120000));
+alter table public.perfiles add column if not exists color text check (color is null or color ~ '^#[0-9a-fA-F]{6}$');
+alter table public.perfiles add column if not exists icono text check (icono is null or length(icono) <= 8);
+alter table public.perfiles add column if not exists descripcion text not null default '' check (length(descripcion) <= 300);
+
+create or replace function public.cliente_estilo(p_color text, p_icono text, p_foto text, p_descripcion text) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not exists (select 1 from public.perfiles where id = auth.uid() and rol = 'cliente') then raise exception 'Solo clientes'; end if;
+  if not public.cliente_es_premium(auth.uid()) then raise exception 'Personalizar tu perfil es Premium'; end if;
+  update public.perfiles set color = nullif(p_color, ''), icono = nullif(p_icono, ''), foto = nullif(p_foto, ''),
+    descripcion = left(coalesce(p_descripcion, ''), 300) where id = auth.uid();
+end $$;
+
+create or replace function public.mi_cuenta() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object(
+    'id', p.id, 'email', p.email, 'nombre', p.nombre, 'telefono', p.telefono, 'rol', p.rol,
+    'suspendido', p.suspendido or coalesce(t.suspendido, false),
+    'is_admin', public.is_admin(),
+    'taller_id', p.taller_id,
+    'foto', p.foto, 'color', p.color, 'icono', p.icono, 'descripcion', p.descripcion,
+    'taller', case when t.id is null then null else jsonb_build_object(
+       'id', t.id, 'nombre', t.nombre, 'slug', t.slug, 'logo', t.logo, 'color', t.color, 'icono', t.icono,
+       'telefono', t.telefono, 'premium', public.taller_es_premium(t.id), 'premium_hasta', t.premium_hasta) end,
+    'premium', case when p.rol = 'cliente' then public.cliente_es_premium(p.id)
+                    when p.rol in ('taller', 'equipo') then public.taller_es_premium(p.taller_id)
+                    else true end,
+    'premium_hasta', case when p.rol = 'cliente' then p.premium_hasta else t.premium_hasta end)
+  from public.perfiles p left join public.talleres t on t.id = p.taller_id
+  where p.id = auth.uid()
+$$;
+
+revoke execute on function public.estimar_entrega(uuid, date, time, uuid), public.entrega_estimada(uuid, date, text),
+  public.chat_enviar(uuid, uuid, text, text), public.chat_leer(uuid, uuid), public.chat_limpiar(uuid, uuid),
+  public.cliente_estilo(text, text, text, text), public.mi_cuenta() from public, anon, authenticated;
+grant execute on function public.entrega_estimada(uuid, date, text) to anon, authenticated;
+grant execute on function public.chat_enviar(uuid, uuid, text, text), public.chat_leer(uuid, uuid), public.chat_limpiar(uuid, uuid),
+  public.cliente_estilo(text, text, text, text), public.mi_cuenta() to authenticated;
 do $$
 begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then
