@@ -26,7 +26,7 @@
 </head>
 <body class="con-tabs">
 <header class="top">
-  <div class="logo">🛡️</div><h1>Administración</h1><span class="pill dark">ADMIN</span>
+  <div class="logo">🛡️</div><h1>Administración</h1><span class="pill dark" id="hRol">ADMIN</span>
   <button class="icon-btn" id="chatBtn" type="button"></button>
   <button class="icon-btn" id="campana" type="button"></button>
 </header>
@@ -39,7 +39,7 @@
       <div class="aviso hidden" id="rCerrado"><div class="grow">⛔ El registro abierto está apagado. Actívalo en Ajustes → Reglas.</div></div>
       <div class="link" id="rLink"></div>
       <div class="btns"><button id="rCompartir" type="button">📤 Compartir</button><button class="alt" id="rQR" type="button">QR y afiche</button><a class="btn ghost" id="rDir" target="_blank" rel="noopener">🗺️ Directorio</a></div></div>
-    <details class="card"><summary class="clic" style="font-weight:700">➕ Crear un taller yo mismo</summary><p class="muted">Con su correo y una contraseña inicial que le mandas por WhatsApp. Parte con <b class="nRegalo">30</b> días de Premium de regalo.</p>
+    <details class="card solo-admin"><summary class="clic" style="font-weight:700">➕ Crear un taller yo mismo</summary><p class="muted">Con su correo y una contraseña inicial que le mandas por WhatsApp. Parte con <b class="nRegalo">30</b> días de Premium de regalo.</p>
       <div class="row"><div><label for="nTaller">Nombre del taller</label><input id="nTaller" maxlength="80" placeholder="Bici Sur"></div><div><label for="nDueno">Nombre del dueño</label><input id="nDueno" maxlength="80"></div></div>
       <div class="row"><div><label for="nEmail">Correo del dueño</label><input id="nEmail" type="email" autocomplete="off"></div><div><label for="nTel">WhatsApp</label><input id="nTel" inputmode="tel"></div></div>
       <label for="nPass">Contraseña inicial</label><input id="nPass" autocomplete="off">
@@ -61,8 +61,8 @@
   <section class="view" id="v-ajustes">
     <div class="seg" id="aSeg">
       <button data-a="links" class="on">💳 Precios y links</button><button data-a="planes">⭐ Planes</button><button data-a="reglas">⚖️ Reglas</button>
-      <button data-a="textos">✏️ Textos</button><button data-a="avisos">📣 Avisos</button><button data-a="push">🔔 Notificaciones</button>
-      <button data-a="calif">⭐ Calificaciones</button><button data-a="registro">📜 Registro</button><button data-a="cuenta">👤 Mi cuenta</button>
+      <button data-a="textos">✏️ Textos</button><button data-a="avisos" class="solo-admin">📣 Avisos</button><button data-a="push" class="solo-admin">🔔 Notificaciones</button>
+      <button data-a="calif">⭐ Calificaciones</button><button data-a="socios" class="solo-admin">👥 Socios</button><button data-a="registro">📜 Registro</button><button data-a="cuenta">👤 Mi cuenta</button>
     </div>
     <div id="aBody"></div>
   </section>

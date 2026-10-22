@@ -135,7 +135,7 @@
     if (cuenta) sb.rpc('registrar_visto').then(() => {}, () => {});
     return cuenta;
   }
-  const destino = (c) => !c ? 'index.html' : c.rol === 'admin' ? 'admin/' : c.rol === 'cliente' ? 'cliente/' : 'taller/';
+  const destino = (c) => !c ? 'index.html' : c.rol === 'admin' || c.rol === 'socio' ? 'admin/' : c.rol === 'cliente' ? 'cliente/' : 'taller/';
   // Úsalo al abrir cada panel: sin sesión o con otro rol, vuelve al inicio.
   async function requerir(roles) {
     let c = null;

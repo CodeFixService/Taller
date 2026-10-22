@@ -1,12 +1,12 @@
 // BiciTaller · Función "servidor" (Supabase → Edge Functions → nombre: servidor)
-//  1) { accion: 'crear_cuenta' }  El administrador crea talleres; el dueño crea a su equipo.
+//  1) { accion: 'crear_cuenta' }  El administrador crea talleres y socios; el dueño crea a su equipo.
 //  2) { accion: 'borrar' }        Solo el administrador: borra un usuario o un taller completo.
 //  3) { accion: 'ping' }          Diagnóstico.
 //  3) sin acción (cada minuto, pg_cron): envía por push los avisos nuevos de la campanita.
 import webpush from 'npm:web-push@3.6.7';
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 
-const VERSION = '1.5';
+const VERSION = '1.7';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -29,7 +29,7 @@ async function crearCuenta(jwt: string, b: Cuenta) {
   if (password.length < 6) return { ok: false, error: 'La contraseña debe tener al menos 6 caracteres' };
   const { data: prep, error: e1 } = await s.rpc('preparar_cuenta', {
     p_caller: who.user.id, p_email: email, p_nombre: String(b.nombre || ''), p_telefono: String(b.telefono || ''),
-    p_rol: ['taller', 'equipo', 'cliente'].includes(String(b.rol)) ? b.rol : 'equipo', p_taller_nombre: String(b.taller_nombre || ''),
+    p_rol: ['socio', 'taller', 'equipo', 'cliente'].includes(String(b.rol)) ? b.rol : 'equipo', p_taller_nombre: String(b.taller_nombre || ''),
     p_taller: /^[0-9a-f-]{36}$/i.test(String(b.taller_id || '')) ? b.taller_id : null,
   });
   if (e1) return { ok: false, error: e1.message };

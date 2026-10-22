@@ -3,9 +3,27 @@
   'use strict';
   const { $, esc, plata, rpc, toast, modal, confirmar } = App;
   App.registrarSW();
-  const yo = await App.requerir(['admin']);
+  const yo = await App.requerir(['admin', 'socio']);
   let pub = await App.cargarPublica();
   App.tema('#0f766e');
+  // Socio: ve todo, no crea ni elimina, y cada cambio lleva un motivo (te llega como aviso y queda en el Registro).
+  const socio = yo.rol === 'socio';
+  if (socio) { $('hRol').textContent = 'SOCIO'; document.querySelectorAll('.solo-admin').forEach((x) => x.remove()); }
+  function pedirMotivo(que) {
+    if (!socio) return Promise.resolve(null);
+    return new Promise((ok) => {
+      const d = modal('<h2>✏️ Motivo del cambio</h2><p class="muted" style="margin-top:0">' + esc(que) + '. El administrador recibe el aviso con tu motivo.</p>' +
+        '<textarea id="moTxt" maxlength="200" placeholder="Ej.: compensación por una falla del sistema"></textarea><p class="err" id="moErr"></p>' +
+        '<div class="btns"><button class="ghost" data-cerrar>Cancelar</button><button id="moOk">Guardar cambio</button></div>');
+      let r = null;
+      d.querySelector('#moOk').onclick = () => {
+        const v = d.querySelector('#moTxt').value.trim();
+        if (v.length < 5) { d.querySelector('#moErr').textContent = 'Escribe el motivo (mínimo 5 letras)'; return; }
+        r = v; d.close();
+      };
+      d.addEventListener('close', () => ok(r));
+    });
+  }
   const MB = (b) => (b / 1048576).toFixed(1) + ' MB';
 
   const show = App.pestanas((v) => {
@@ -35,10 +53,10 @@
       '<p class="sub">' + (pct >= 90 ? '🔴 Casi lleno: limpia o pasa a Supabase Pro.' : pct >= 70 ? '🟡 Va subiendo: programa una limpieza.' : '🟢 Todo bien.') + '</p>' +
       '<table>' + tablas.map(([k, v]) => '<tr><td>' + esc(k) + '</td><td class="r">' + MB(v) + '</td></tr>').join('') + '</table>' +
       '<p class="sub">Comprobantes guardados: ' + u.comprobantes + ' (' + MB(u.comprobantes_bytes) + ') · Fotos antes/después: ' + u.fotos + ' (' + MB(u.fotos_bytes) + ') · Logos: ' + MB(u.logos_bytes) + ' · Avisos: ' + u.notificaciones + ' · Reservas: ' + u.reservas + '</p>' +
-      '<h3>🧹 Limpieza</h3><p class="sub" style="margin-top:0">Se hace sola todos los días a las 4 AM. También puedes limpiar ahora:</p>' +
+      (socio ? '' : '<h3>🧹 Limpieza</h3><p class="sub" style="margin-top:0">Se hace sola todos los días a las 4 AM. También puedes limpiar ahora:</p>' +
       '<div class="btns"><button class="ghost small" data-l="comprobantes">Comprobantes revisados</button><button class="ghost small" data-l="notificaciones">Avisos viejos</button>' +
       '<button class="ghost small" data-l="fotos">Fotos más antiguas que ' + ((pub.config || {}).dias_fotos || 365) + ' días</button>' +
-      '<button class="ghost small" data-l="reservas">Reservas expiradas/rechazadas (+60 días)</button><button class="danger small" data-l="todo">Limpiar todo</button></div>' +
+      '<button class="ghost small" data-l="reservas">Reservas expiradas/rechazadas (+60 días)</button><button class="danger small" data-l="todo">Limpiar todo</button></div>') +
       '<p class="sub">Versión de la base de datos: ' + esc(r.version) + ' · App: ' + esc(window.BT_CONFIG.VERSION) + '</p></div>';
     $('v-resumen').onclick = async (e) => {
       const ir = e.target.closest('[data-ir]'); if (ir) { show(ir.dataset.ir); return; }
@@ -51,7 +69,7 @@
 
   /* ---------- Talleres ---------- */
   let talleres = [], tFiltro = '';
-  $('nPass').value = App.clave();
+  if (!socio) $('nPass').value = App.clave();
   document.querySelectorAll('.nRegalo').forEach((x) => { x.textContent = (pub.config || {}).dias_regalo_taller || 30; });
   // Registro abierto: link y QR para publicar (un mismo link sirve a talleres y ciclistas).
   const linkRegistro = App.ROOT + 'n/';
@@ -86,9 +104,9 @@
         '<option value="365">+1 año</option><option value="otro">Otro número de días…</option><option value="0">Quitar Premium</option></select>' +
         '<a class="btn small ghost" target="_blank" rel="noopener" href="../t/?s=' + encodeURIComponent(t.slug) + '">🔗 Página</a>' +
         (t.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(t.telefono, 'Hola ' + (t.dueno || '') + ' 👋') + '">📲</a>' : '') +
-        '<button class="small ghost" data-chat="' + t.id + '" data-n="' + esc(t.nombre) + '">💬</button><button class="small alt" data-add="' + t.id + '" data-n="' + esc(t.nombre) + '">👤＋</button>' +
+        '<button class="small ghost" data-chat="' + t.id + '" data-n="' + esc(t.nombre) + '">💬</button>' + (socio ? '' : '<button class="small alt" data-add="' + t.id + '" data-n="' + esc(t.nombre) + '">👤＋</button>') +
         '<button class="small ' + (t.suspendido ? 'okb' : 'danger') + '" data-susp="' + t.id + '" data-s="' + (t.suspendido ? 0 : 1) + '">' + (t.suspendido ? 'Reactivar' : 'Suspender') + '</button>' +
-        '<button class="small danger" data-del="' + t.id + '" data-n="' + esc(t.nombre) + '">🗑️</button></div></div>';
+        (socio ? '' : '<button class="small danger" data-del="' + t.id + '" data-n="' + esc(t.nombre) + '">🗑️</button>') + '</div></div>';
     }).join('') : '<p class="empty">No hay talleres aquí.</p>';
   }
   $('tLista').onchange = async (e) => {
@@ -97,7 +115,8 @@
     s.value = '';
     if (isNaN(dias)) return;
     if (dias === 0 && !await confirmar('¿Quitar el Premium a este taller? Vuelve a la versión gratis.')) return;
-    try { await rpc('admin_premium', { p_tipo: 'taller', p_id: s.dataset.prem, p_dias: dias }); App.sb.functions.invoke('servidor').catch(() => {}); toast(dias ? '⭐ +' + dias + ' días' : 'Premium quitado'); cargarTalleres(); }
+    const motivo = await pedirMotivo(dias ? 'Dar ' + dias + ' días de Premium' : 'Quitar el Premium'); if (socio && !motivo) return;
+    try { await rpc('admin_premium', { p_tipo: 'taller', p_id: s.dataset.prem, p_dias: dias, p_motivo: motivo }); App.sb.functions.invoke('servidor').catch(() => {}); toast(dias ? '⭐ +' + dias + ' días' : 'Premium quitado'); cargarTalleres(); }
     catch (err) { toast(err.message); }
   };
   $('tLista').onclick = async (e) => {
@@ -111,9 +130,10 @@
     }
     const b = e.target.closest('[data-susp]'); if (!b) return;
     if (b.dataset.s === '1' && !await confirmar('¿Suspender el taller? Ni el taller ni su equipo podrán entrar y su página se cierra.')) return;
-    try { await rpc('admin_suspender', { p_tipo: 'taller', p_id: b.dataset.susp, p_suspender: b.dataset.s === '1' }); cargarTalleres(); } catch (err) { toast(err.message); }
+    const motivo = await pedirMotivo(b.dataset.s === '1' ? 'Suspender el taller' : 'Reactivar el taller'); if (socio && !motivo) return;
+    try { await rpc('admin_suspender', { p_tipo: 'taller', p_id: b.dataset.susp, p_suspender: b.dataset.s === '1', p_motivo: motivo }); cargarTalleres(); } catch (err) { toast(err.message); }
   };
-  $('nCrear').onclick = async () => {
+  if (!socio) $('nCrear').onclick = async () => {
     const b = $('nCrear'); $('nErr').textContent = '';
     const d = { taller_nombre: $('nTaller').value.trim(), nombre: $('nDueno').value.trim(), email: $('nEmail').value.trim(), telefono: $('nTel').value.trim(), password: $('nPass').value.trim(), rol: 'taller' };
     if (!d.taller_nombre || !d.nombre || !d.email) { $('nErr').textContent = 'Completa el nombre del taller, del dueño y el correo'; return; }
@@ -168,7 +188,7 @@
       (c.suspendido ? '<span class="pill bad">Suspendido</span> ' : '') + App.nota(c.nota) + '<div class="sub">' + esc(c.email) + ' · ' + esc(c.telefono) + ' · ' + esc(c.taller || '') + ' · ' + c.visitas + ' visitas · visto ' + App.hace(c.visto_at) +
       (c.premium ? ' · Premium hasta ' + new Date(c.premium_hasta).toLocaleDateString('es-CL') : '') + '</div></div>' +
       '<select data-cp="' + c.id + '" style="width:auto" aria-label="Acción"><option value="">Acción…</option><option value="30">⭐ +30 días</option><option value="90">⭐ +90 días</option><option value="0">Quitar Premium</option>' +
-      '<option value="' + (c.suspendido ? 'react' : 'susp') + '">' + (c.suspendido ? 'Reactivar' : 'Suspender') + '</option><option value="del">🗑️ Eliminar</option></select></li>').join('') : '<li class="muted">Sin usuarios.</li>';
+      '<option value="' + (c.suspendido ? 'react' : 'susp') + '">' + (c.suspendido ? 'Reactivar' : 'Suspender') + '</option>' + (socio ? '' : '<option value="del">🗑️ Eliminar</option>') + '</select></li>').join('') : '<li class="muted">Sin usuarios.</li>';
   }
   $('cLista').onchange = async (e) => {
     const s = e.target.closest('[data-cp]'); if (!s || !s.value) return;
@@ -177,8 +197,12 @@
       if (v === 'del') {
         if (!await confirmar('¿Eliminar este usuario? Sus reservas quedan, sin la cuenta. No se puede deshacer.', 'Sí, eliminar')) return;
         await App.borrarCuenta('perfil', s.dataset.cp);
-      } else if (v === 'susp' || v === 'react') await rpc('admin_suspender', { p_tipo: 'perfil', p_id: s.dataset.cp, p_suspender: v === 'susp' });
-      else await rpc('admin_premium', { p_tipo: 'cliente', p_id: s.dataset.cp, p_dias: +v });
+      } else {
+        const motivo = await pedirMotivo(v === 'susp' ? 'Suspender al usuario' : v === 'react' ? 'Reactivar al usuario' : +v ? 'Dar ' + v + ' días de Premium' : 'Quitar el Premium');
+        if (socio && !motivo) return;
+        if (v === 'susp' || v === 'react') await rpc('admin_suspender', { p_tipo: 'perfil', p_id: s.dataset.cp, p_suspender: v === 'susp', p_motivo: motivo });
+        else await rpc('admin_premium', { p_tipo: 'cliente', p_id: s.dataset.cp, p_dias: +v, p_motivo: motivo });
+      }
       toast('Listo'); cargarClientes();
     } catch (err) { toast(err.message); }
   };
@@ -216,13 +240,13 @@
   };
 
   /* ---------- Ajustes ---------- */
-  let ajuste = 'links';
+  let ajuste = socio ? 'planes' : 'links';
   $('aSeg').onclick = (e) => { const b = e.target.closest('[data-a]'); if (b) verAjuste(b.dataset.a); };
   const aBody = () => $('aBody');
   function verAjuste(a) {
     ajuste = a;
     $('aSeg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.a === a));
-    ({ links: verLinks, planes: verPlanes, reglas: verReglas, textos: verTextos, avisos: verAvisos, push: verPush, calif: verCalif, registro: verRegistro, cuenta: verCuenta })[a]();
+    ({ links: verLinks, planes: verPlanes, reglas: verReglas, textos: verTextos, avisos: verAvisos, push: verPush, calif: verCalif, socios: verSocios, registro: verRegistro, cuenta: verCuenta })[a]();
   }
 
   // Precios y links de pago (2 por plan, uno activo)
@@ -235,11 +259,13 @@
           (l.activo ? ' <span class="pill ok">Activo</span>' : '') + '</label><div class="row"><div><label>Precio</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="monto" inputmode="numeric" value="' + (l.monto || '') + '"></div>' +
           '<div><label>Texto de la publicación</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="texto" maxlength="300" value="' + esc(l.texto) + '" placeholder="Pago mensual"></div></div>' +
           '<label>Link de pago (Mercado Pago)</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="url" value="' + esc(l.url) + '" placeholder="https://mpago.la/…"></div>'; }).join('') +
-      '<div class="btns"><button data-guardar="' + tipo + '">💾 Guardar</button></div></div>';
+      (socio ? '' : '<div class="btns"><button data-guardar="' + tipo + '">💾 Guardar</button></div>') + '</div>';
     aBody().innerHTML = bloque('premium_taller', '🚲 Premium de talleres (mensual)') + bloque('premium_taller_anual', '🚲 Premium de talleres · anual (365 días)') +
       bloque('premium_cliente', '👤 Premium de clientes (mensual)') + bloque('premium_cliente_anual', '👤 Premium de clientes · anual (365 días)') +
+      (socio ? '<div class="aviso warn"><div class="grow">🔒 Solo el administrador cambia los links de pago (ahí llega la plata).</div></div>' : '') +
       '<p class="sub">💡 Plan anual: pon como precio 10 meses (pagan 10 y se llevan 12). Si dejas el link anual vacío, solo se ofrece el mensual.</p>' +
       '<p class="sub">El abono de las reservas lo configura cada taller con su propio link: ese dinero le llega directo al taller y tú no lo ves.</p>';
+    if (socio) aBody().querySelectorAll('input').forEach((i) => { i.disabled = true; });
     aBody().onclick = async (e) => {
       const b = e.target.closest('[data-guardar]'); if (!b) return;
       const tipo = b.dataset.guardar, act = +((aBody().querySelector('input[name="act-' + tipo + '"]:checked') || {}).value || 0);
@@ -271,9 +297,10 @@
       const card = aBody().querySelector('[data-plan="' + b.dataset.gp + '"]'), v = (k) => card.querySelector('[data-k="' + k + '"]').value;
       const lim = {};
       card.querySelectorAll('[data-l]').forEach((i) => { lim[i.dataset.l] = i.type === 'checkbox' ? i.checked : App.numero(i.value); });
+      const motivo = await pedirMotivo('Cambiar el plan "' + v('nombre') + '"'); if (socio && !motivo) return;
       try {
         await rpc('admin_plan_guardar', { p_codigo: b.dataset.gp, p_nombre: v('nombre'), p_descripcion: v('descripcion'), p_limites: lim,
-          p_beneficios: v('beneficios').split('\n').map((x) => x.trim()).filter(Boolean), p_duracion: App.numero(v('duracion')) });
+          p_beneficios: v('beneficios').split('\n').map((x) => x.trim()).filter(Boolean), p_duracion: App.numero(v('duracion')), p_motivo: motivo });
         toast('⭐ Plan guardado');
       } catch (err) { toast(err.message); }
     };
@@ -293,11 +320,12 @@
       '<label>Tu WhatsApp de soporte</label><input data-c="soporte_whatsapp" data-txt="1" value="' + esc(c.soporte_whatsapp || '') + '" placeholder="+56 9 …">' +
       '<div class="btns"><button id="rG">💾 Guardar reglas</button></div></div>';
     $('rG').onclick = async () => {
+      const cambios = Array.from(aBody().querySelectorAll('[data-c]')).map((i) => [i.dataset.c, i.dataset.txt ? i.value.trim() : App.numero(i.value)])
+        .filter(([k, val]) => String(c[k]) !== String(val));
+      if (!cambios.length) { toast('Sin cambios'); return; }
+      const motivo = await pedirMotivo('Cambiar ' + cambios.length + ' regla(s)'); if (socio && !motivo) return;
       try {
-        for (const i of aBody().querySelectorAll('[data-c]')) {
-          const val = i.dataset.txt ? i.value.trim() : App.numero(i.value);
-          if (String(c[i.dataset.c]) !== String(val)) await rpc('admin_config_guardar', { p_clave: i.dataset.c, p_valor: val });
-        }
+        for (const [k, val] of cambios) await rpc('admin_config_guardar', { p_clave: k, p_valor: val, p_motivo: motivo });
         pub = await App.cargarPublica(); toast('⚖️ Reglas guardadas');
         $('rCerrado').classList.toggle('hidden', String((pub.config || {}).registro_talleres) !== '0');
       } catch (e) { toast(e.message); }
@@ -314,8 +342,11 @@
     aBody().innerHTML = '<div class="card"><h2>✏️ Textos</h2>' + Object.keys(TXT).map((k) => '<label>' + esc(TXT[k]) + '</label><textarea data-x="' + k + '" rows="2">' + esc(pub.textos[k] || '') + '</textarea>').join('') +
       '<div class="btns"><button id="xG">💾 Guardar textos</button></div></div>';
     $('xG').onclick = async () => {
+      const cambios = Array.from(aBody().querySelectorAll('[data-x]')).filter((i) => (pub.textos[i.dataset.x] || '') !== i.value);
+      if (!cambios.length) { toast('Sin cambios'); return; }
+      const motivo = await pedirMotivo('Cambiar ' + cambios.length + ' texto(s)'); if (socio && !motivo) return;
       try {
-        for (const i of aBody().querySelectorAll('[data-x]')) if ((pub.textos[i.dataset.x] || '') !== i.value) await rpc('admin_texto_guardar', { p_clave: i.dataset.x, p_valor: i.value });
+        for (const i of cambios) await rpc('admin_texto_guardar', { p_clave: i.dataset.x, p_valor: i.value, p_motivo: motivo });
         pub = await App.cargarPublica(); toast('✏️ Textos guardados');
       } catch (e) { toast(e.message); }
     };
@@ -362,7 +393,7 @@
     try { l = await rpc('admin_calificaciones'); } catch (e) { aBody().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
     aBody().innerHTML = '<div class="card"><h2>⭐ Calificaciones</h2><p class="muted" style="margin-top:0">Borra las injustas u ofensivas. Los comentarios solo los ves tú.</p><ul class="list">' +
       (l.map((q) => '<li><div class="grow"><span class="stars">' + App.estrellas(q.estrellas) + '</span> ' + (q.autor === 'cliente' ? esc(q.cliente) + ' → ' + esc(q.taller) : esc(q.taller) + ' → ' + esc(q.cliente)) +
-        (q.comentario ? '<div class="sub">“' + esc(q.comentario) + '”</div>' : '') + '<div class="sub">' + App.fHora(q.created_at) + '</div></div><button class="small danger" data-x="' + q.id + '">Borrar</button></li>').join('') || '<li class="muted">Sin calificaciones.</li>') + '</ul></div>';
+        (q.comentario ? '<div class="sub">“' + esc(q.comentario) + '”</div>' : '') + '<div class="sub">' + App.fHora(q.created_at) + '</div></div>' + (socio ? '' : '<button class="small danger" data-x="' + q.id + '">Borrar</button>') + '</li>').join('') || '<li class="muted">Sin calificaciones.</li>') + '</ul></div>';
     aBody().onclick = async (e) => {
       const b = e.target.closest('[data-x]'); if (!b || !await confirmar('¿Borrar la calificación?')) return;
       try { await rpc('admin_calificacion_borrar', { p_id: b.dataset.x }); verCalif(); } catch (err) { toast(err.message); }
@@ -372,8 +403,48 @@
   async function verRegistro() {
     let l = [];
     try { l = await rpc('admin_auditoria'); } catch (e) { aBody().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
-    aBody().innerHTML = '<div class="card"><h2>📜 Registro de cambios</h2><ul class="list">' + (l.map((a) => '<li><div class="grow"><b>' + esc(a.accion) + '</b> <span class="sub">' + esc(a.detalle) + '</span></div><span class="sub">' + App.fHora(a.created_at) + '</span></li>').join('') ||
+    aBody().innerHTML = '<div class="card"><h2>📜 Registro de cambios</h2><ul class="list">' + (l.map((a) => '<li><div class="grow"><b>' + esc(a.accion) + '</b> ' +
+      (a.quien_rol === 'socio' ? '<span class="pill info">👥 ' + esc(a.quien_nombre) + '</span> ' : '') + '<span class="sub">' + esc(a.detalle) + '</span></div><span class="sub">' + App.fHora(a.created_at) + '</span></li>').join('') ||
       '<li class="muted">Sin registros.</li>') + '</ul></div>';
+  }
+
+  // Socios: solo el administrador los crea, suspende o elimina.
+  async function verSocios() {
+    let l = [];
+    try { l = await rpc('admin_socios'); } catch (e) { aBody().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    aBody().innerHTML = '<div class="card"><h2>👥 Socios</h2><p class="muted" style="margin-top:0">Un socio entra a este mismo panel y ve todo: talleres, usuarios, pagos y ajustes. ' +
+      'Puede chatear con los talleres y aprobar o rechazar pagos. <b>No puede crear ni eliminar</b> talleres, usuarios ni calificaciones, ni cambiar los links de pago, avisos o limpieza. ' +
+      'Cada cambio que haga (Premium, suspender, planes, reglas, textos) le pide un <b>motivo</b>: te llega como aviso y queda en 📜 Registro.</p><ul class="list">' +
+      (l.map((x) => '<li><div class="grow"><b>' + esc(x.nombre || x.email) + '</b>' + (x.suspendido ? ' <span class="pill bad">Suspendido</span>' : '') +
+        '<div class="sub">' + esc(x.email) + ' · visto ' + App.hace(x.visto_at) + ' · ' + x.cambios + ' cambio' + (x.cambios === 1 ? '' : 's') + '</div></div>' +
+        '<button class="small ' + (x.suspendido ? 'okb' : 'ghost') + '" data-ss="' + x.id + '" data-s="' + (x.suspendido ? 0 : 1) + '">' + (x.suspendido ? 'Reactivar' : 'Suspender') + '</button>' +
+        '<button class="small danger" data-sd="' + x.id + '" data-n="' + esc(x.nombre || x.email) + '">🗑️</button></li>').join('') || '<li class="muted">Aún no tienes socios.</li>') + '</ul>' +
+      '<h3>➕ Crear socio</h3><div class="row"><div><label for="soN">Nombre</label><input id="soN" maxlength="80"></div><div><label for="soT">WhatsApp</label><input id="soT" inputmode="tel"></div></div>' +
+      '<label for="soE">Correo</label><input id="soE" type="email" autocomplete="off"><label for="soP">Contraseña inicial</label><input id="soP" value="' + App.clave() + '">' +
+      '<div class="btns"><button id="soOk">Crear socio</button></div><p class="err" id="soErr"></p></div>';
+    $('soOk').onclick = async () => {
+      const b = $('soOk'), d = { rol: 'socio', nombre: $('soN').value.trim(), telefono: $('soT').value.trim(), email: $('soE').value.trim(), password: $('soP').value.trim() };
+      $('soErr').textContent = '';
+      if (!d.nombre || !d.email) { $('soErr').textContent = 'Escribe el nombre y el correo'; return; }
+      b.disabled = true; b.textContent = 'Creando…';
+      try {
+        await App.crearCuenta(d);
+        const msg = App.mensajeAcceso({ nombre: d.nombre.split(' ')[0], email: d.email, password: d.password, lugar: 'BiciTaller como socio administrador' });
+        modal('<h2>✅ Socio creado</h2><pre class="link" style="white-space:pre-wrap;font:inherit">' + esc(msg) + '</pre><div class="btns"><button class="ghost" data-cerrar>Cerrar</button>' +
+          (d.telefono ? '<a class="btn" target="_blank" rel="noopener" href="' + App.wa(d.telefono, msg) + '">📲 Enviar por WhatsApp</a>' : '') + '</div>');
+        verSocios();
+      } catch (e) { $('soErr').textContent = e.message; b.disabled = false; b.textContent = 'Crear socio'; }
+    };
+    aBody().onclick = async (e) => {
+      const ss = e.target.closest('[data-ss]'), sd = e.target.closest('[data-sd]');
+      try {
+        if (ss) { await rpc('admin_suspender', { p_tipo: 'perfil', p_id: ss.dataset.ss, p_suspender: ss.dataset.s === '1' }); verSocios(); }
+        if (sd) {
+          if (!await confirmar('¿Eliminar al socio "' + sd.dataset.n + '"? Ya no podrá entrar. El registro de sus cambios se mantiene.', 'Sí, eliminar')) return;
+          await App.borrarCuenta('perfil', sd.dataset.sd); toast('🗑️ Socio eliminado'); verSocios();
+        }
+      } catch (err) { toast(err.message); }
+    };
   }
 
   function verCuenta() {

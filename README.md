@@ -11,6 +11,7 @@ Servidor: **Supabase** (plan gratis). Publicación: **Cloudflare Pages**.
 | Perfil | Quién lo crea | Qué hace |
 |---|---|---|
 | **Administrador** | — (correo fijo) | Crea talleres, ve todo (actividad, clientes, reservas, uso del servidor), da/quita Premium y días, aprueba pagos, edita precios, links, planes, reglas y textos, envía avisos, borra calificaciones y limpia el servidor. |
+| **Socio** | El administrador (Ajustes → 👥 Socios) | Entra al mismo panel y ve todo. Aprueba/rechaza pagos y chatea con talleres. No crea ni elimina nada ni cambia los links de pago; cada cambio (Premium, suspender, planes, reglas, textos) le pide un motivo, que le llega como aviso al administrador y queda en 📜 Registro. |
 | **Taller** (dueño) | El administrador, o él mismo y gratis desde el link/QR de registro (`n/`) | Perfil (logo, colores, ícono), horario, servicios, link del abono, promociones, equipo, agenda, reservas, trabajos, clientes, estadísticas y recordatorios. |
 | **Equipo** (mecánico / recepción) | El dueño del taller | Agenda, revisar comprobantes, trabajar reservas y clientes. No cambia perfil, precios, links ni plan. |
 | **Cliente con cuenta** | Él mismo, desde la página de su taller | Queda asociado a ese taller: sus reservas, historial de la bici, avisos y Premium. |

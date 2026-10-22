@@ -79,7 +79,12 @@ El taller, al entrar, ve una lista de lo que le falta: logo y colores, servicios
 
 ---
 
-## 9. Plan anual
+## 9. Socios (v1.7)
+**Ajustes → 👥 Socios → Crear socio**: nombre, correo y contraseña inicial (la app arma el mensaje para WhatsApp).
+El socio entra con su correo al mismo panel de administración. No puede crear ni eliminar nada; cada cambio que hace
+te llega como aviso con su motivo. Para crear socios la función "servidor" debe ser la versión 1.7 (paso 4).
+
+## 10. Plan anual
 **Ajustes → 💳 Precios y links** → "Premium de talleres · anual" y "Premium de clientes · anual": pon el precio
 (sugerido: 10 meses) y el link de Mercado Pago. Mientras el link anual esté vacío solo se ofrece el mensual.
 
