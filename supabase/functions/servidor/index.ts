@@ -1,12 +1,15 @@
 // BiciTaller · Función "servidor" (Supabase → Edge Functions → nombre: servidor)
 //  1) { accion: 'crear_cuenta' }  El administrador crea talleres y socios; el dueño crea a su equipo.
 //  2) { accion: 'borrar' }        Solo el administrador: borra un usuario o un taller completo.
-//  3) { accion: 'ping' }          Diagnóstico.
+//  3) { accion: 'actualizar_bd' } Solo el administrador: instala la base de datos que viene con esta versión de la función.
+//  4) { accion: 'ping' }          Diagnóstico.
 //  3) sin acción (cada minuto, pg_cron): envía por push los avisos nuevos de la campanita.
 import webpush from 'npm:web-push@3.6.7';
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
+import postgres from 'npm:postgres@3.4.4';
+import { INSTALAR, DB_VERSION } from './instalar.ts';
 
-const VERSION = '1.7';
+const VERSION = '1.8';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -62,6 +65,33 @@ async function borrar(jwt: string, b: { tipo?: string; id?: string }) {
   return { ok: true, borrados: n };
 }
 
+// Botón "Actualizar base de datos": ejecuta supabase/instalar.sql, que viaja DENTRO de esta función
+// (queda fijo al publicarla; no se descarga nada al momento). Se puede repetir: no borra datos.
+async function actualizarBd(jwt: string) {
+  const s = db();
+  const { data: who, error: e0 } = await s.auth.getUser(jwt);
+  if (e0 || !who?.user) return { ok: false, error: 'Inicia sesión de nuevo' };
+  const { data: adminEmail } = await s.rpc('admin_email');
+  const { data: yo } = await s.from('perfiles').select('rol, suspendido').eq('id', who.user.id).maybeSingle();
+  if (!yo || yo.rol !== 'admin' || yo.suspendido || !who.user.email_confirmed_at ||
+      String(who.user.email || '').toLowerCase() !== String(adminEmail || '').toLowerCase()) {
+    return { ok: false, error: 'Solo el administrador actualiza la base de datos' };
+  }
+  const dbUrl = Deno.env.get('SUPABASE_DB_URL');
+  if (!dbUrl) return { ok: false, error: 'La función no tiene acceso a la base de datos (falta SUPABASE_DB_URL)' };
+  const { data: antes } = await s.rpc('db_version');
+  const sql = postgres(dbUrl, { prepare: false, max: 1, idle_timeout: 5, connect_timeout: 20 });
+  try {
+    await sql.unsafe(INSTALAR);
+    const r = await sql`select public.db_version() as v`;
+    return { ok: true, antes: antes || '?', ahora: r[0]?.v || DB_VERSION };
+  } catch (e) {
+    return { ok: false, error: 'La base de datos rechazó la actualización: ' + String((e as Error).message || e).slice(0, 300) };
+  } finally {
+    await sql.end({ timeout: 5 }).catch(() => {});
+  }
+}
+
 async function enviarPush() {
   const s = db();
   const { data, error } = await s.rpc('push_pendientes');
@@ -94,7 +124,12 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   try {
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
-    if (body?.accion === 'ping') return json({ ok: true, version: VERSION, servicio: !!Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') });
+    if (body?.accion === 'ping') return json({ ok: true, version: VERSION, db_version: DB_VERSION, servicio: !!Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'), bd: !!Deno.env.get('SUPABASE_DB_URL') });
+    if (body?.accion === 'actualizar_bd') {
+      const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+      try { return json(await actualizarBd(jwt)); }
+      catch (e) { return json({ ok: false, error: 'Error del servidor: ' + String((e as Error).message || e) }); }
+    }
     if (body?.accion === 'crear_cuenta') {
       const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
       try { return json(await crearCuenta(jwt, body)); }

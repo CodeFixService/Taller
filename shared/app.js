@@ -491,7 +491,9 @@
   function pie() {
     const f = document.createElement('footer');
     f.className = 'pie';
-    f.innerHTML = '© ' + new Date().getFullYear() + ' ' + esc(txt('app_nombre') || 'BiciTaller') + ' · CodeFix · v' + cfg.VERSION;
+    f.innerHTML = '© ' + new Date().getFullYear() + ' ' + esc(txt('app_nombre') || 'BiciTaller') + ' · CodeFix · v' + cfg.VERSION +
+      ' · <button type="button" title="Descarga la última versión de la app">🔄 Actualizar</button>';
+    f.querySelector('button').onclick = actualizar;
     (document.querySelector('main') || document.body).appendChild(f);
   }
 
@@ -515,7 +517,7 @@
     sb, ROOT, $, esc, plata, numero, iso, fechaDe, sumarDias, hoy, fCorta, fLarga, fHora, hace, DIAS, telNorm, wa, estrellas, nota,
     toast, modal, confirmar, tema, pintarLogo, friendly, rpc, q, cargarPublica, txt, refrescar, requerir, entrar, salir, crearCuenta,
     clave, mensajeAcceso, comprimirComprobante, comprimirLogo, comprimirFoto, descargar, verImagen, compartir, verQR, afiche, campana, irA, activarPush, ofrecerPush,
-    pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino, revisarVersion, actualizar, chatBoton, abrirChat, borrarCuenta, horarioTxt,
+    pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino, revisarVersion, actualizar, mayor, chatBoton, abrirChat, borrarCuenta, horarioTxt,
     get cuenta() { return cuenta; },
     get publica() { return publica; }
   };

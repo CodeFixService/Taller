@@ -101,7 +101,14 @@ te llega como aviso con su motivo. Para crear socios la función "servidor" debe
   taller no haya llegado a su límite de clientes con cuenta.
 - **No llegan notificaciones al celular** → pasos 3, 4 y 5, y que la persona haya tocado "Activar".
 
-## Versiones y actualizaciones
-- La versión de la app está en `version.json` y `shared/config.js` (se ve al pie de cada pantalla).
-- Cuando se publica una versión nueva, a cada persona le aparece una ventana **"🔄 Hay una versión nueva → Actualizar ahora"**.
-- Si la versión trae cambios en la base de datos, el **Resumen** del admin lo avisa: corre el `instalar-corto.sql` nuevo.
+## Versiones y actualizaciones (botones desde la v1.8)
+- **App**: al pie de cada pantalla está **🔄 Actualizar** (para todos). Además, cuando se publica una versión nueva
+  aparece la ventana **"🔄 Hay una versión nueva → Actualizar ahora"**.
+- **Resumen → 🔄 Actualizaciones** (admin) muestra la versión de la app, la base de datos y la función "servidor":
+  - Si la **función** está vieja: **📋 Copiar línea de la función** → **Abrir Supabase** → Edge Functions → servidor → Code →
+    borra todo, pega y **Deploy**. Es lo único que sigue siendo a mano (Supabase no deja que una app cambie sus funciones).
+  - Si la **base de datos** está vieja: **⬆️ Actualizar base de datos** (un toque). La función trae dentro el instalador
+    de su misma versión y lo ejecuta; no borra datos.
+  - Si prefieres hacerlo a mano: "¿Prefieres actualizar la base de datos a mano?" → copiar instalador → SQL Editor → Run.
+- Para programadores: después de cambiar `schema.sql` o `cron.sql`, corre `node supabase/generar.mjs` (rehace `instalar.sql`
+  y la copia que viaja dentro de la función).

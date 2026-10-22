@@ -37,33 +37,87 @@
   /* ---------- Resumen y servidor ---------- */
   async function verResumen() {
     let r;
-    try { r = await rpc('admin_resumen'); } catch (e) { $('v-resumen').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    try { r = await rpc('admin_resumen'); }
+    catch (e) { $('v-resumen').innerHTML = '<div id="actCard"></div><p class="err">' + esc(e.message) + '</p>'; pintarActualizaciones(); return; }
     $('tabPagos').textContent = r.pagos_por_revisar; $('tabPagos').classList.toggle('hidden', !r.pagos_por_revisar);
     const u = r.uso, pct = Math.round(100 * u.db_bytes / u.db_limite);
     const tablas = Object.entries(u.tablas).sort((a, b) => b[1] - a[1]);
-    $('v-resumen').innerHTML = (r.version !== window.BT_CONFIG.DB_VERSION ? '<div class="aviso bad"><div class="grow">⚠️ La base de datos es la versión ' + esc(r.version) +
-        ' y la app necesita la ' + esc(window.BT_CONFIG.DB_VERSION) + '. Vuelve a correr la instalación de la base de datos (guía, paso 1).</div></div>' : '') +
+    $('v-resumen').innerHTML = '<div id="actCard"></div>' +
       (r.pagos_por_revisar ? '<div class="aviso warn clic" data-ir="pagos"><div class="grow">💰 Tienes <b>' + r.pagos_por_revisar + '</b> pago(s) Premium por revisar.</div><span>›</span></div>' : '') +
       '<div class="stats">' +
       [['🚲 Talleres', r.talleres], ['⭐ Talleres Premium', r.talleres_premium], ['🟢 Activos 7 días', r.talleres_activos_7d], ['⏳ Vencen en 7 días', r.por_vencer],
         ['👥 Clientes con cuenta', r.clientes], ['⭐ Clientes Premium', r.clientes_premium], ['🔧 Personas de equipo', r.equipo], ['📅 Reservas este mes', r.reservas_mes],
-        ['📅 Reservas hoy', r.reservas_hoy], ['💰 Ingresos del mes', plata(r.ingresos_mes)], ['🆕 Talleres nuevos (7 días)', r.talleres_nuevos_7d]].map((x) => '<div class="card"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>').join('') + '</div>' +
+        ['📅 Reservas hoy', r.reservas_hoy], ['💰 Ingresos del mes', plata(r.ingresos_mes)], ['🆕 Talleres nuevos (7 días)', r.talleres_nuevos_7d == null ? '—' : r.talleres_nuevos_7d]].map((x) => '<div class="card"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>').join('') + '</div>' +
       '<div class="card"><h2>🖥️ Servidor</h2><div class="sub">Base de datos: ' + MB(u.db_bytes) + ' de ' + MB(u.db_limite) + ' (' + pct + '%) · plan gratis de Supabase</div>' +
       '<div class="barra"><i class="' + (pct >= 90 ? 'rojo' : pct >= 70 ? 'amarillo' : '') + '" style="width:' + Math.max(pct, 1) + '%"></i></div>' +
       '<p class="sub">' + (pct >= 90 ? '🔴 Casi lleno: limpia o pasa a Supabase Pro.' : pct >= 70 ? '🟡 Va subiendo: programa una limpieza.' : '🟢 Todo bien.') + '</p>' +
       '<table>' + tablas.map(([k, v]) => '<tr><td>' + esc(k) + '</td><td class="r">' + MB(v) + '</td></tr>').join('') + '</table>' +
-      '<p class="sub">Comprobantes guardados: ' + u.comprobantes + ' (' + MB(u.comprobantes_bytes) + ') · Fotos antes/después: ' + u.fotos + ' (' + MB(u.fotos_bytes) + ') · Logos: ' + MB(u.logos_bytes) + ' · Avisos: ' + u.notificaciones + ' · Reservas: ' + u.reservas + '</p>' +
+      '<p class="sub">Comprobantes guardados: ' + u.comprobantes + ' (' + MB(u.comprobantes_bytes) + ') · Fotos antes/después: ' + (u.fotos || 0) + ' (' + MB(u.fotos_bytes || 0) + ') · Logos: ' + MB(u.logos_bytes) + ' · Avisos: ' + u.notificaciones + ' · Reservas: ' + u.reservas + '</p>' +
       (socio ? '' : '<h3>🧹 Limpieza</h3><p class="sub" style="margin-top:0">Se hace sola todos los días a las 4 AM. También puedes limpiar ahora:</p>' +
       '<div class="btns"><button class="ghost small" data-l="comprobantes">Comprobantes revisados</button><button class="ghost small" data-l="notificaciones">Avisos viejos</button>' +
       '<button class="ghost small" data-l="fotos">Fotos más antiguas que ' + ((pub.config || {}).dias_fotos || 365) + ' días</button>' +
       '<button class="ghost small" data-l="reservas">Reservas expiradas/rechazadas (+60 días)</button><button class="danger small" data-l="todo">Limpiar todo</button></div>') +
       '<p class="sub">Versión de la base de datos: ' + esc(r.version) + ' · App: ' + esc(window.BT_CONFIG.VERSION) + '</p></div>';
+    pintarActualizaciones();
     $('v-resumen').onclick = async (e) => {
       const ir = e.target.closest('[data-ir]'); if (ir) { show(ir.dataset.ir); return; }
       const b = e.target.closest('[data-l]'); if (!b) return;
       if (!await confirmar(b.dataset.l === 'comprobantes' ? 'Se borran TODOS los comprobantes ya revisados (los en revisión se mantienen). ¿Seguir?' : '¿Limpiar ahora?')) return;
       try { const x = await rpc('limpiar', { p_que: b.dataset.l }); toast('🧹 Borrados: ' + x.comprobantes + ' comprobantes, ' + x.notificaciones + ' avisos, ' + x.reservas + ' reservas, ' + (x.fotos || 0) + ' fotos'); verResumen(); }
       catch (err) { toast(err.message); }
+    };
+  }
+
+  /* ---------- Actualizaciones: app, base de datos y función "servidor" ---------- */
+  const C = window.BT_CONFIG, REF = (/https:\/\/([a-z0-9]+)\.supabase\.co/.exec(C.SUPABASE_URL) || [])[1] || '';
+  const PANEL = 'https://supabase.com/dashboard/project/' + REF;
+  async function pintarActualizaciones() {
+    const el = $('actCard'); if (!el) return;
+    el.innerHTML = '<div class="card"><p class="sub" style="margin:0">🔄 Revisando actualizaciones…</p></div>';
+    const [pubV, dbV, fn] = await Promise.all([
+      fetch(App.ROOT + 'version.json?_=' + Date.now(), { cache: 'no-store' }).then((x) => x.json()).then((j) => String(j.version)).catch(() => null),
+      rpc('db_version').catch(() => null),
+      App.sb.functions.invoke('servidor', { body: { accion: 'ping' } }).then((x) => (x.error ? null : x.data)).catch(() => null)]);
+    const appOk = !pubV || !App.mayor(pubV, C.VERSION);
+    const dbOk = !!dbV && !App.mayor(C.DB_VERSION, dbV);
+    const fnOk = !!(fn && fn.version) && !App.mayor(C.SERVER_VERSION, fn.version);
+    const fnTraeBd = !!(fn && fn.db_version && fn.bd) && !App.mayor(C.DB_VERSION, fn.db_version);
+    const fila = (ok, titulo, detalle, acciones) => '<li><div class="grow">' + (ok ? '✅ ' : '⚠️ ') + '<b>' + titulo + '</b><div class="sub">' + detalle + '</div></div>' + (acciones || '') + '</li>';
+    const todo = appOk && dbOk && fnOk;
+    el.innerHTML = '<div class="card' + (todo ? '' : ' plan premium') + '"><h2>🔄 Actualizaciones ' + (todo ? '<span class="pill ok">Todo al día</span>' : '<span class="pill warn">Hay que actualizar</span>') + '</h2><ul class="list">' +
+      fila(appOk, 'App', 'Tienes la v' + esc(C.VERSION) + (pubV ? ' · publicada v' + esc(pubV) : ''), '<button class="small' + (appOk ? ' ghost' : '') + '" data-act="app">🔄 Actualizar app</button>') +
+      fila(dbOk, 'Base de datos', dbV ? 'Versión ' + esc(dbV) + (dbOk ? '' : ' · la app necesita la ' + esc(C.DB_VERSION)) : 'No responde',
+        dbOk || socio ? '' : fnTraeBd ? '<button class="small gold" data-act="bd">⬆️ Actualizar base de datos</button>' : '') +
+      fila(fnOk, 'Función "servidor"', fn ? 'Versión ' + esc(fn.version || '?') + (fnOk ? '' : ' · la app necesita la ' + esc(C.SERVER_VERSION)) : 'No responde: créala en Supabase (guía, paso 4)', '') +
+      '</ul>' +
+      (!socio && !fnOk ? '<div class="aviso warn" style="margin-top:10px"><div class="grow"><b>Actualiza la función (1 minuto):</b> copia la línea, abre Supabase → Edge Functions → <b>servidor</b> → Code, ' +
+        'borra todo, pega y toca <b>Deploy</b>. Vuelve aquí: ' + (dbOk ? 'listo.' : 'después toca "Actualizar base de datos".') + '</div></div>' +
+        '<div class="btns"><button class="alt" data-act="copiarFn">📋 Copiar línea de la función</button><a class="btn ghost" target="_blank" rel="noopener" href="' + PANEL + '/functions">Abrir Supabase</a></div>' : '') +
+      (!socio && !dbOk ? '<details style="margin-top:10px"><summary class="clic sub">¿Prefieres actualizar la base de datos a mano?</summary><p class="sub">Copia el instalador, abre el SQL Editor de Supabase, pégalo y toca Run.</p>' +
+        '<div class="btns"><button class="ghost small" data-act="copiarSql">📋 Copiar instalador</button><a class="btn ghost small" target="_blank" rel="noopener" href="' + PANEL + '/sql/new">Abrir SQL Editor</a></div></details>' : '') +
+      '<p class="sub" id="actRes" style="margin-bottom:0"></p></div>';
+    el.onclick = async (e) => {
+      const b = e.target.closest('[data-act]'); if (!b) return;
+      const a = b.dataset.act;
+      if (a === 'app') { b.disabled = true; b.textContent = 'Actualizando…'; App.actualizar(); return; }
+      if (a === 'copiarFn' || a === 'copiarSql') {
+        try {
+          const t = await (await fetch(App.ROOT + (a === 'copiarFn' ? 'supabase/functions/servidor/corto.ts' : 'supabase/instalar-corto.sql') + '?_=' + Date.now(), { cache: 'no-store' })).text();
+          await navigator.clipboard.writeText(t.trim()); toast('📋 Copiado: ahora pégalo en Supabase');
+        } catch (err) { toast('No se pudo copiar: ' + err.message); }
+        return;
+      }
+      if (a === 'bd') {
+        if (!await confirmar('Se instala la base de datos ' + fn.db_version + ' que viene con la función. No se borran datos y tarda unos segundos.\n\n¿Actualizar ahora?', 'Sí, actualizar')) return;
+        b.disabled = true; b.textContent = 'Actualizando…'; $('actRes').textContent = '';
+        try {
+          const { data, error } = await App.sb.functions.invoke('servidor', { body: { accion: 'actualizar_bd' } });
+          if (error) throw new Error('No se pudo conectar con la función "servidor"');
+          if (!data || !data.ok) throw new Error((data && data.error) || 'No se pudo actualizar');
+          pub = await App.cargarPublica();
+          toast('✅ Base de datos actualizada: ' + data.antes + ' → ' + data.ahora); verResumen();
+        } catch (err) { $('actRes').textContent = '❌ ' + err.message; b.disabled = false; b.textContent = '⬆️ Actualizar base de datos'; }
+      }
     };
   }
 
