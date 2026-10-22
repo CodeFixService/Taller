@@ -30,6 +30,7 @@
     </div>
     <div id="promos"></div>
     <div class="card"><h2>📅 Mis reservas</h2><div class="grid" id="activas"></div></div>
+    <a class="card aviso clic" id="otros" href="../d/" style="text-decoration:none;color:inherit;display:flex"></a>
   </section>
 
   <section class="view" id="v-historial">
@@ -57,7 +58,7 @@
   </section>
 </main>
 <button class="flotante" id="ayuda" type="button" title="¿Necesitas ayuda? Escríbele al taller" style="bottom:calc(86px + env(safe-area-inset-bottom))"></button>
-<a class="btn flotante alt hidden" id="tienes" target="_blank" rel="noopener" title="¿Tienes un taller? Súmalo a BiciTaller" aria-label="¿Tienes un taller?" style="bottom:calc(140px + env(safe-area-inset-bottom))">🚀</a>
+<a class="btn flotante alt hidden" id="tienes" title="¿Tienes un taller? Súmalo gratis a BiciTaller" aria-label="¿Tienes un taller?" style="bottom:calc(140px + env(safe-area-inset-bottom))">🚀</a>
 <nav class="tabs">
   <button data-v="inicio"><span class="i">🏠</span>Inicio</button>
   <button data-v="historial"><span class="i">🚲</span>Mi bici</button>
@@ -96,10 +97,14 @@
     $('activas').innerHTML = D.activas.length ? D.activas.map((r) => {
       const e = ESTADO[r.estado] || [r.estado, ''];
       return '<a class="card" style="text-decoration:none;color:inherit" href="../r/?t=' + r.token + '"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div><b>' + App.fLarga(r.fecha) + ' · ' + r.hora + '</b><div class="sub">' +
-        esc(r.servicio) + (r.estado === 'cancelada' ? ' · saldo hasta ' + App.fCorta((r.saldo_hasta || '').slice(0, 10)) + ' — toca para reagendar' : '') + '</div></div><span class="pill ' + e[1] + '">' + e[0] + '</span></div></a>';
+        esc(r.servicio) + (r.otro_taller ? ' · 🏪 ' + esc(r.otro_taller) : '') + (r.estado === 'cancelada' ? ' · saldo hasta ' + App.fCorta((r.saldo_hasta || '').slice(0, 10)) + ' — toca para reagendar' : '') + '</div></div><span class="pill ' + e[1] + '">' + e[0] + '</span></div></a>';
     }).join('') : '<p class="muted" style="margin:0">No tienes reservas activas. ¡Reserva tu hora!</p>';
     $('hLim').textContent = D.premium ? 'Historial completo.' : 'Plan gratis: tus últimas ' + D.limite_historial + ' visitas. Con Premium ves todo tu historial.';
+    $('otros').innerHTML = '<div class="grow">🗺️ <b>Otros talleres</b><div class="sub">' + (D.premium ? 'Como cliente Premium reservas con tu cuenta en cualquier taller del directorio.'
+      : 'Mira otros talleres. Con Premium reservas con tu cuenta en cualquiera de ellos.') + '</div></div><span>›</span>';
     $('hist').innerHTML = D.historial.length ? D.historial.map((r) => '<a class="card" style="text-decoration:none;color:inherit" href="../r/?t=' + r.token + '"><b>' + App.fLarga(r.fecha) + '</b> · ' + esc(r.servicio) +
+      (r.taller && r.taller !== t.nombre ? ' · 🏪 ' + esc(r.taller) : '') +
+      (r.fotos ? ' <span class="pill' + (D.premium ? ' info' : '') + '">📷 ' + r.fotos + (D.premium ? '' : ' · Premium') + '</span>' : '') +
       (r.estado === 'no_asistio' ? ' <span class="pill bad">No asististe</span>' : '') + (r.bici ? '<div class="sub">🚲 ' + esc(r.bici) + '</div>' : '') +
       (r.diagnostico ? '<div class="sub">🔍 ' + esc(r.diagnostico) + '</div>' : '') + (r.total ? '<div class="sub">Total ' + plata(r.total) + '</div>' : '') +
       (r.proxima_mantencion ? '<div class="sub">🔔 Próxima mantención: ' + App.fCorta(r.proxima_mantencion) + '</div>' : '') +
@@ -134,28 +139,33 @@
     };
   }
 
+  let anual = false;
   async function verPlan() {
-    const planes = pub.planes || {}, link = pub.premium_cliente;
+    const planes = pub.planes || {}, mes = pub.premium_cliente, ano = pub.premium_cliente_anual, link = (anual && ano) || mes || ano;
     let pend = null;
     try { pend = await rpc('mi_pago_pendiente'); } catch (e) { /* nada */ }
     $('planBody').innerHTML = (D.premium ? '<div class="card plan premium"><h2>⭐ Eres Premium</h2><p class="muted" style="margin:0">Hasta el ' + new Date(D.premium_hasta).toLocaleDateString('es-CL') + '. ¡Gracias!</p></div>' : '') +
       ['cliente_free', 'cliente_premium'].map((c) => planes[c] ? '<div class="card plan' + (c === 'cliente_premium' ? ' premium' : '') + '"><h2>' + (c === 'cliente_premium' ? '⭐ ' : '') + esc(planes[c].nombre) +
-        (c === 'cliente_premium' && link ? ' · <span class="precio">' + plata(link.monto) + '</span> <span class="sub">cada ' + planes[c].duracion_dias + ' días</span>' : '') + '</h2>' +
+        (c === 'cliente_premium' && mes ? ' · <span class="precio">' + plata(mes.monto) + '</span> <span class="sub">cada ' + planes[c].duracion_dias + ' días</span>' : '') + '</h2>' +
         '<p class="muted" style="margin:0">' + esc(planes[c].descripcion) + '</p><ul>' + planes[c].beneficios.map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul></div>' : '').join('') +
       '<div class="card"><h2>' + (D.premium ? '🔁 Renovar' : '⭐ Hazte Premium') + '</h2>' +
+      (mes && ano ? '<div class="seg" id="pPer"><button data-a="0" class="' + (anual ? '' : 'on') + '">Mensual</button><button data-a="1" class="' + (anual ? 'on' : '') + '">Anual' +
+        (mes.monto * 12 > ano.monto ? ' · ahorras ' + plata(mes.monto * 12 - ano.monto) : '') + '</button></div>' : '') +
       (pend && pend.estado === 'en_revision' ? '<div class="aviso"><div class="grow">🧾 Tu comprobante está en revisión. Te avisamos apenas se apruebe.</div></div>'
         : !link ? '<p class="muted">Muy pronto.</p>'
         : (pend && pend.estado === 'rechazado' ? '<div class="aviso bad"><div class="grow">Tu último comprobante fue rechazado' + (pend.nota ? ': ' + esc(pend.nota) : '') + '.</div></div>' : '') +
           '<p class="muted" style="margin-top:0">' + esc(App.txt('pago_instrucciones')) + '</p>' + (link.texto ? '<p class="sub">' + esc(link.texto) + '</p>' : '') +
-          '<a class="btn block gold" target="_blank" rel="noopener" href="' + esc(link.url) + '">1️⃣ Pagar ' + plata(link.monto) + '</a>' +
+          '<a class="btn block gold" target="_blank" rel="noopener" href="' + esc(link.url) + '">1️⃣ Pagar ' + plata(link.monto) + (link === ano ? ' (1 año)' : '') + '</a>' +
           '<label for="pFile" class="btn block alt" style="margin-top:10px;color:var(--brand)">2️⃣ Subir comprobante</label><input type="file" id="pFile" accept="image/*" class="hidden">' +
           '<div id="pPrev" style="text-align:center"></div><button class="block hidden" id="pEnviar" style="margin-top:10px">Enviar comprobante</button><p class="err" id="pErr"></p>') + '</div>';
+    const per = $('pPer');
+    if (per) per.onclick = (e) => { const b = e.target.closest('[data-a]'); if (b) { anual = b.dataset.a === '1'; verPlan(); } };
     const f = $('pFile');
     if (f) {
       let img = null;
       f.onchange = async (e) => { const x = e.target.files[0]; if (!x) return; try { img = await App.comprimirComprobante(x); $('pPrev').innerHTML = '<img alt="Comprobante" src="' + img + '" style="max-height:240px;border-radius:12px;margin-top:10px">'; $('pEnviar').classList.remove('hidden'); } catch (err) { $('pErr').textContent = err.message; } };
       $('pEnviar').onclick = async () => {
-        try { const r = await rpc('premium_pagar', { p_tipo: 'premium_cliente', p_imagen: img }); if (!r.ok) throw new Error(r.error); App.sb.functions.invoke('servidor').catch(() => {}); toast('🧾 Comprobante enviado'); verPlan(); }
+        try { const r = await rpc('premium_pagar', { p_tipo: 'premium_cliente', p_imagen: img, p_anual: !!ano && link === ano }); if (!r.ok) throw new Error(r.error); App.sb.functions.invoke('servidor').catch(() => {}); toast('🧾 Comprobante enviado'); verPlan(); }
         catch (err) { $('pErr').textContent = err.message; }
       };
     }
@@ -169,8 +179,7 @@
   document.querySelector('nav.tabs [data-v="' + ir + '"]').click();
   App.campana($('campana'));
   App.chatBoton($('ayuda'), '❓');
-  const sop = (pub.config || {}).soporte_whatsapp;
-  if (sop) { $('tienes').href = App.wa(sop, 'Hola 👋 Tengo un taller de bicicletas y quiero usar BiciTaller.'); $('tienes').classList.remove('hidden'); }
+  $('tienes').href = '../n/#taller'; $('tienes').classList.remove('hidden');
   App.ofrecerPush($('cPush'));
   $('cG').onclick = async () => { try { await rpc('mi_perfil_guardar', { p_nombre: $('cN').value, p_telefono: $('cT').value }); toast('💾 Guardado'); } catch (e) { toast(e.message); } };
   $('cPG').onclick = async () => { const { error } = await App.sb.auth.updateUser({ password: $('cP').value }); toast(error ? App.friendly(error) : '🔑 Contraseña cambiada'); };

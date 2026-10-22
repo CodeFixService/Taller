@@ -29,21 +29,22 @@
       '<div class="stats">' +
       [['🚲 Talleres', r.talleres], ['⭐ Talleres Premium', r.talleres_premium], ['🟢 Activos 7 días', r.talleres_activos_7d], ['⏳ Vencen en 7 días', r.por_vencer],
         ['👥 Clientes con cuenta', r.clientes], ['⭐ Clientes Premium', r.clientes_premium], ['🔧 Personas de equipo', r.equipo], ['📅 Reservas este mes', r.reservas_mes],
-        ['📅 Reservas hoy', r.reservas_hoy], ['💰 Ingresos del mes', plata(r.ingresos_mes)]].map((x) => '<div class="card"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>').join('') + '</div>' +
+        ['📅 Reservas hoy', r.reservas_hoy], ['💰 Ingresos del mes', plata(r.ingresos_mes)], ['🆕 Talleres nuevos (7 días)', r.talleres_nuevos_7d]].map((x) => '<div class="card"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>').join('') + '</div>' +
       '<div class="card"><h2>🖥️ Servidor</h2><div class="sub">Base de datos: ' + MB(u.db_bytes) + ' de ' + MB(u.db_limite) + ' (' + pct + '%) · plan gratis de Supabase</div>' +
       '<div class="barra"><i class="' + (pct >= 90 ? 'rojo' : pct >= 70 ? 'amarillo' : '') + '" style="width:' + Math.max(pct, 1) + '%"></i></div>' +
       '<p class="sub">' + (pct >= 90 ? '🔴 Casi lleno: limpia o pasa a Supabase Pro.' : pct >= 70 ? '🟡 Va subiendo: programa una limpieza.' : '🟢 Todo bien.') + '</p>' +
       '<table>' + tablas.map(([k, v]) => '<tr><td>' + esc(k) + '</td><td class="r">' + MB(v) + '</td></tr>').join('') + '</table>' +
-      '<p class="sub">Comprobantes guardados: ' + u.comprobantes + ' (' + MB(u.comprobantes_bytes) + ') · Logos: ' + MB(u.logos_bytes) + ' · Avisos: ' + u.notificaciones + ' · Reservas: ' + u.reservas + '</p>' +
+      '<p class="sub">Comprobantes guardados: ' + u.comprobantes + ' (' + MB(u.comprobantes_bytes) + ') · Fotos antes/después: ' + u.fotos + ' (' + MB(u.fotos_bytes) + ') · Logos: ' + MB(u.logos_bytes) + ' · Avisos: ' + u.notificaciones + ' · Reservas: ' + u.reservas + '</p>' +
       '<h3>🧹 Limpieza</h3><p class="sub" style="margin-top:0">Se hace sola todos los días a las 4 AM. También puedes limpiar ahora:</p>' +
       '<div class="btns"><button class="ghost small" data-l="comprobantes">Comprobantes revisados</button><button class="ghost small" data-l="notificaciones">Avisos viejos</button>' +
+      '<button class="ghost small" data-l="fotos">Fotos más antiguas que ' + ((pub.config || {}).dias_fotos || 365) + ' días</button>' +
       '<button class="ghost small" data-l="reservas">Reservas expiradas/rechazadas (+60 días)</button><button class="danger small" data-l="todo">Limpiar todo</button></div>' +
       '<p class="sub">Versión de la base de datos: ' + esc(r.version) + ' · App: ' + esc(window.BT_CONFIG.VERSION) + '</p></div>';
     $('v-resumen').onclick = async (e) => {
       const ir = e.target.closest('[data-ir]'); if (ir) { show(ir.dataset.ir); return; }
       const b = e.target.closest('[data-l]'); if (!b) return;
       if (!await confirmar(b.dataset.l === 'comprobantes' ? 'Se borran TODOS los comprobantes ya revisados (los en revisión se mantienen). ¿Seguir?' : '¿Limpiar ahora?')) return;
-      try { const x = await rpc('limpiar', { p_que: b.dataset.l }); toast('🧹 Borrados: ' + x.comprobantes + ' comprobantes, ' + x.notificaciones + ' avisos, ' + x.reservas + ' reservas'); verResumen(); }
+      try { const x = await rpc('limpiar', { p_que: b.dataset.l }); toast('🧹 Borrados: ' + x.comprobantes + ' comprobantes, ' + x.notificaciones + ' avisos, ' + x.reservas + ' reservas, ' + (x.fotos || 0) + ' fotos'); verResumen(); }
       catch (err) { toast(err.message); }
     };
   }
@@ -51,7 +52,14 @@
   /* ---------- Talleres ---------- */
   let talleres = [], tFiltro = '';
   $('nPass').value = App.clave();
-  $('nRegalo').textContent = (pub.config || {}).dias_regalo_taller || 30;
+  document.querySelectorAll('.nRegalo').forEach((x) => { x.textContent = (pub.config || {}).dias_regalo_taller || 30; });
+  // Registro abierto: link y QR para publicar (un mismo link sirve a talleres y ciclistas).
+  const linkRegistro = App.ROOT + 'n/';
+  $('rLink').textContent = linkRegistro; $('rDir').href = App.ROOT + 'd/';
+  $('rCerrado').classList.toggle('hidden', String((pub.config || {}).registro_talleres) !== '0');
+  $('rCompartir').onclick = () => App.compartir(linkRegistro, '🚲 ¿Tienes un taller de bicicletas? Crea tu cuenta gratis en BiciTaller y recibe reservas online. ¿Eres ciclista? Encuentra tu taller aquí', 'BiciTaller');
+  $('rQR').onclick = () => App.verQR({ url: linkRegistro, titulo: 'QR para crear cuentas', archivo: 'bicitaller-registro.gif',
+    afiche: { titulo: '🚲 BiciTaller', texto: '¿Tienes un taller? Crea tu cuenta gratis y recibe reservas online. ¿Eres ciclista? Encuentra tu taller y reserva tu hora.' } });
   async function cargarTalleres() {
     try { talleres = await rpc('admin_talleres'); } catch (e) { $('tLista').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
     pintarTalleres();
@@ -61,13 +69,14 @@
   function pintarTalleres() {
     const f = $('tBuscar').value.trim().toLowerCase(), semana = Date.now() - 7 * 864e5, enSiete = Date.now() + 7 * 864e5;
     const l = talleres.filter((t) => (!f || (t.nombre + ' ' + t.email + ' ' + t.comuna + ' ' + t.dueno).toLowerCase().includes(f)) && (
-      !tFiltro || (tFiltro === 'premium' && t.premium) || (tFiltro === 'free' && !t.premium) || (tFiltro === 'suspendidos' && t.suspendido) ||
+      !tFiltro || (tFiltro === 'premium' && t.premium) || (tFiltro === 'free' && !t.premium) || (tFiltro === 'suspendidos' && t.suspendido) || (tFiltro === 'solos' && t.autoregistro) ||
       (tFiltro === 'vence' && t.premium && new Date(t.premium_hasta) < enSiete) || (tFiltro === 'inactivos' && (!t.visto_at || new Date(t.visto_at) < semana))));
     $('tLista').innerHTML = l.length ? l.map((t) => {
       const logo = /^data:image/.test(t.logo || '') ? 'background-image:url(\'' + t.logo + '\');' : '';
       return '<div class="card"><div style="display:flex;gap:12px;align-items:flex-start"><div class="mini-logo" style="background-color:' + esc(t.color) + ';' + logo + '">' + (logo ? '' : esc(t.icono)) + '</div>' +
         '<div class="grow"><b>' + esc(t.nombre) + '</b> ' + (t.premium ? '<span class="pill pro">PREMIUM</span>' : '<span class="pill">GRATIS</span>') + (t.suspendido ? ' <span class="pill bad">Suspendido</span>' : '') +
-        (t.cobra_abono ? '' : ' <span class="pill warn">Sin link de abono</span>') +
+        (t.cobra_abono ? '' : ' <span class="pill warn">Sin link de abono</span>') + (t.autoregistro ? ' <span class="pill info">🆕 Se registró solo</span>' : '') +
+        (t.referido_por ? ' <span class="pill">🤝 Invitado por ' + esc(t.referido_por) + '</span>' : '') + (t.invitados ? ' <span class="pill ok">🤝 Invitó a ' + t.invitados + '</span>' : '') +
         '<div class="sub">' + esc(t.dueno || '') + ' · ' + esc(t.email || '') + (t.comuna ? ' · ' + esc(t.comuna) : '') + '</div>' +
         '<div class="sub">' + (t.premium ? '⭐ Premium hasta ' + new Date(t.premium_hasta).toLocaleDateString('es-CL') : t.premium_hasta ? 'Premium venció el ' + new Date(t.premium_hasta).toLocaleDateString('es-CL') : 'Nunca fue Premium') +
         ' · 🟢 visto ' + App.hace(t.visto_at) + '</div>' +
@@ -181,7 +190,7 @@
     let l = [];
     try { l = await rpc('admin_pagos', { p_estado: pFiltro || null }); } catch (e) { $('pLista').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
     $('pLista').innerHTML = l.length ? l.map((g) => '<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:flex-start"><div><b>' + esc(g.quien) + '</b> <span class="pill">' +
-      (g.tipo === 'premium_taller' ? '🚲 Taller' : '👤 Cliente') + '</span><div class="sub">' + esc(g.email) + ' · ' + App.fHora(g.created_at) + '</div>' +
+      (g.tipo === 'premium_taller' ? '🚲 Taller' : '👤 Cliente') + '</span>' + (g.anual ? ' <span class="pill pro">Anual</span>' : '') + '<div class="sub">' + esc(g.email) + ' · ' + App.fHora(g.created_at) + '</div>' +
       (g.premium_hasta ? '<div class="sub">Premium actual hasta ' + new Date(g.premium_hasta).toLocaleDateString('es-CL') + '</div>' : '') + (g.nota ? '<div class="sub">Nota: ' + esc(g.nota) + '</div>' : '') +
       '</div><div style="text-align:right"><span class="precio" style="font-size:20px">' + plata(g.monto) + '</span><div><span class="pill ' + (g.estado === 'aprobado' ? 'ok' : g.estado === 'rechazado' ? 'bad' : 'info') + '">' + g.estado.replace('_', ' ') + '</span></div></div></div>' +
       '<div class="acc">' + (g.tiene_comprobante ? '<button class="small ghost" data-ver="' + g.id + '">👁️ Comprobante</button>' : '<span class="sub">Comprobante borrado</span>') +
@@ -193,7 +202,7 @@
     try {
       if (b.dataset.ver) { const img = await rpc('admin_pago_comprobante', { p_id: b.dataset.ver }); if (img) App.verImagen(img, 'Comprobante Premium', 'premium-' + b.dataset.ver.slice(0, 8) + '.jpg'); else toast('Ya fue borrado'); return; }
       if (b.dataset.ok) {
-        if (!await confirmar('Revisa en tu Mercado Pago que el pago llegó.\n\n¿Aprobar y activar Premium?', 'Sí, aprobar')) return;
+        if (!await confirmar('Revisa en tu Mercado Pago que el pago llegó.\n\n¿Aprobar y activar Premium? (si es anual se activan 365 días)', 'Sí, aprobar')) return;
         await rpc('admin_pago_resolver', { p_id: b.dataset.ok, p_aprobar: true, p_nota: null }); toast('⭐ Premium activado');
       }
       if (b.dataset.no) {
@@ -227,7 +236,9 @@
           '<div><label>Texto de la publicación</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="texto" maxlength="300" value="' + esc(l.texto) + '" placeholder="Pago mensual"></div></div>' +
           '<label>Link de pago (Mercado Pago)</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="url" value="' + esc(l.url) + '" placeholder="https://mpago.la/…"></div>'; }).join('') +
       '<div class="btns"><button data-guardar="' + tipo + '">💾 Guardar</button></div></div>';
-    aBody().innerHTML = bloque('premium_taller', '🚲 Premium de talleres') + bloque('premium_cliente', '👤 Premium de clientes') +
+    aBody().innerHTML = bloque('premium_taller', '🚲 Premium de talleres (mensual)') + bloque('premium_taller_anual', '🚲 Premium de talleres · anual (365 días)') +
+      bloque('premium_cliente', '👤 Premium de clientes (mensual)') + bloque('premium_cliente_anual', '👤 Premium de clientes · anual (365 días)') +
+      '<p class="sub">💡 Plan anual: pon como precio 10 meses (pagan 10 y se llevan 12). Si dejas el link anual vacío, solo se ofrece el mensual.</p>' +
       '<p class="sub">El abono de las reservas lo configura cada taller con su propio link: ese dinero le llega directo al taller y tú no lo ves.</p>';
     aBody().onclick = async (e) => {
       const b = e.target.closest('[data-guardar]'); if (!b) return;
@@ -242,7 +253,7 @@
 
   // Planes: nombre, descripción, duración, beneficios y límites
   const ETIQ = { reservas_mes: 'Reservas online al mes', servicios: 'Servicios', promos: 'Promociones activas', equipo: 'Personas en el equipo', clientes_cuenta: 'Clientes con cuenta',
-    estadisticas: 'Estadísticas', recordatorios: 'Recordatorios de mantención', historial: 'Visitas en el historial', anticipacion_extra: 'Días extra para reservar antes' };
+    estadisticas: 'Estadísticas', recordatorios: 'Recordatorios de mantención', historial: 'Visitas en el historial', anticipacion_extra: 'Días extra para reservar antes', fotos: 'Fotos antes/después en la orden de trabajo' };
   async function verPlanes() {
     pub = await App.cargarPublica();
     const planes = pub.planes;
@@ -273,9 +284,12 @@
     const c = pub.config || {};
     const campos = [['minutos_pago', 'Minutos para pagar el abono y subir el comprobante'], ['minutos_devolucion', 'Minutos para cancelar con devolución del abono'],
       ['horas_cancelacion', 'Horas mínimas para cancelar/reagendar con saldo a favor'], ['dias_saldo', 'Días que dura el saldo a favor'],
-      ['dias_regalo_taller', 'Días de Premium de regalo al crear un taller'], ['dias_aviso_vencimiento', 'Días antes del vencimiento para avisar'],
-      ['dias_comprobantes', 'Días que se guardan los comprobantes']];
-    aBody().innerHTML = '<div class="card"><h2>⚖️ Reglas</h2>' + campos.map(([k, t]) => '<label>' + esc(t) + '</label><input data-c="' + k + '" inputmode="numeric" value="' + esc(c[k]) + '">').join('') +
+      ['dias_regalo_taller', 'Días de Premium de regalo al crear un taller (también si se registra solo)'], ['dias_aviso_vencimiento', 'Días antes del vencimiento para avisar'],
+      ['dias_comprobantes', 'Días que se guardan los comprobantes'], ['dias_referido', 'Días de Premium para el taller que invita (cuando el invitado paga su primer Premium; 0 = sin premio)'],
+      ['horas_libera_premium', 'Horas antes de la cita en que una hora exclusiva Premium se abre a todos'], ['dias_fotos', 'Días que se guardan las fotos antes/después']];
+    aBody().innerHTML = '<div class="card"><h2>⚖️ Reglas</h2>' +
+      '<label for="rReg">Registro abierto de talleres (link y QR)</label><select id="rReg" data-c="registro_talleres"><option value="1"' + (String(c.registro_talleres) !== '0' ? ' selected' : '') +
+      '>✅ Abierto: cualquier taller crea su cuenta gratis</option><option value="0"' + (String(c.registro_talleres) === '0' ? ' selected' : '') + '>⛔ Cerrado: solo yo creo talleres</option></select>' + campos.map(([k, t]) => '<label>' + esc(t) + '</label><input data-c="' + k + '" inputmode="numeric" value="' + esc(c[k]) + '">').join('') +
       '<label>Tu WhatsApp de soporte</label><input data-c="soporte_whatsapp" data-txt="1" value="' + esc(c.soporte_whatsapp || '') + '" placeholder="+56 9 …">' +
       '<div class="btns"><button id="rG">💾 Guardar reglas</button></div></div>';
     $('rG').onclick = async () => {
@@ -285,6 +299,7 @@
           if (String(c[i.dataset.c]) !== String(val)) await rpc('admin_config_guardar', { p_clave: i.dataset.c, p_valor: val });
         }
         pub = await App.cargarPublica(); toast('⚖️ Reglas guardadas');
+        $('rCerrado').classList.toggle('hidden', String((pub.config || {}).registro_talleres) !== '0');
       } catch (e) { toast(e.message); }
     };
   }

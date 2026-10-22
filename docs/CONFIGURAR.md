@@ -19,9 +19,9 @@ Administrador: `juanjosuecastilloloyola@gmail.com` (el usuario que ya creaste en
 ## 2. Inicio de sesión (Authentication)
 En **Authentication → Sign In / Providers**:
 - **Email**: activado.
-- **Allow new users to sign up**: **activado**. Los clientes se crean su cuenta desde la página de su taller.
-  Nadie más puede registrarse: la base de datos rechaza cualquier cuenta que no sea cliente de un taller,
-  o que no haya sido creada por ti (talleres) o por el taller (su equipo).
+- **Allow new users to sign up**: **activado**. Los clientes se crean su cuenta desde la página de su taller y los
+  talleres desde el link de registro (`n/`, se cierra en Ajustes → Reglas). El equipo solo lo crea el dueño del taller.
+  La base de datos rechaza cualquier otra cuenta.
 - **Confirm email**: recomendado **desactivado**, así el cliente entra al tiro. Si lo dejas activado, el
   cliente tendrá que confirmar su correo antes de entrar.
 
@@ -66,7 +66,10 @@ ese dinero le llega directo al taller.
 Cada cambio que se suba a `main` se publica solo.
 
 ## 8. Primer taller
-**Talleres → Crear taller**: nombre del taller, dueño, correo y WhatsApp. La app arma el mensaje con su
+La forma fácil: **Talleres → 📣 Invita talleres** → comparte el link o imprime el **QR y afiche**. Cada taller crea su
+cuenta solo y gratis (con los días de Premium de regalo) y te llega un aviso.
+
+También puedes crearlo tú en **Talleres → ➕ Crear un taller yo mismo**: nombre del taller, dueño, correo y WhatsApp. La app arma el mensaje con su
 acceso para mandárselo por WhatsApp. El taller parte con 30 días de Premium de regalo (lo cambias en
 **Ajustes → Reglas**).
 
@@ -76,9 +79,14 @@ El taller, al entrar, ve una lista de lo que le falta: logo y colores, servicios
 
 ---
 
+## 9. Plan anual
+**Ajustes → 💳 Precios y links** → "Premium de talleres · anual" y "Premium de clientes · anual": pon el precio
+(sugerido: 10 meses) y el link de Mercado Pago. Mientras el link anual esté vacío solo se ofrece el mensual.
+
 ## Límites del plan gratis de Supabase
 - Base de datos: 500 MB. El panel **Resumen → Servidor** muestra cuánto se usa (🟢 / 🟡 70% / 🔴 90%).
 - Los comprobantes se achican antes de subirse (~100-300 KB) y se borran solos a los 30 días.
+- Las fotos antes/después (~60-150 KB, máximo 4 por trabajo) se borran solas al año (Ajustes → Reglas).
 - Cuando se acerque al límite: limpia desde el panel o pasa a Supabase Pro.
 
 ## Si algo falla

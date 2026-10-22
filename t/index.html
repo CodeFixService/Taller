@@ -13,6 +13,8 @@
   .paso { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--brand); color: var(--brand-ink); font-size: 13px; }
   .promo { border-left: 4px solid var(--brand); }
   .info-linea { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .horas button.vip { border-color: var(--gold); }
+  .horas button.vip.lock { opacity: .75; background: color-mix(in srgb, var(--gold) 10%, var(--field)); }
 </style>
 </head>
 <body>
@@ -63,6 +65,7 @@
         <h2><span class="paso">2</span> Elige el día y la hora</h2>
         <div class="dias" id="dias"></div>
         <div class="horas" id="horas"></div>
+        <p class="sub hidden" id="vipInfo" style="margin:8px 0 0"></p>
         <p class="aviso hidden" id="entrega" style="margin:10px 0 0"></p>
       </div>
       <div class="card">
@@ -85,6 +88,7 @@
       </div>
     </div>
 
+    <p class="sub" style="text-align:center"><a href="../d/">🗺️ Ver otros talleres</a></p>
   </div>
 </main>
 <script src="../shared/config.js"></script>
@@ -103,7 +107,9 @@
   if (!t) { $('cargando').textContent = 'Este taller no está disponible.'; return; }
   let yo = null;
   try { yo = await App.refrescar(); } catch (e) { yo = null; }
-  const esMio = !!(yo && yo.rol === 'cliente' && yo.taller_id === t.id);
+  // Reserva con su cuenta: el cliente de este taller o un cliente Premium de cualquier taller.
+  const esMio = !!(yo && yo.rol === 'cliente' && (yo.taller_id === t.id || yo.premium));
+  const soyPremium = !!(yo && yo.rol === 'cliente' && yo.premium);
 
   document.title = t.nombre + ' · Reservar hora';
   App.tema(t.color);
@@ -135,9 +141,14 @@
   // Cuenta del cliente
   if (esMio) {
     $('sinCuenta').classList.add('hidden'); $('yaCuenta').classList.remove('hidden');
-    $('yaCuenta').innerHTML = '<p class="muted" style="margin-top:0">Hola ' + esc(yo.nombre) + ', reservas con tu cuenta.</p><a class="btn alt" href="../cliente/">Ir a mi cuenta</a>';
+    $('yaCuenta').innerHTML = '<p class="muted" style="margin-top:0">Hola ' + esc(yo.nombre) + ', reservas con tu cuenta' +
+      (yo.taller_id !== t.id ? ' (⭐ como cliente Premium puedes reservar en cualquier taller)' : '') + '.</p><a class="btn alt" href="../cliente/">Ir a mi cuenta</a>';
     $('datos').classList.add('hidden'); $('datosYo').classList.remove('hidden');
     $('datosYo').innerHTML = '<div class="grow">👤 Reservas como <b>' + esc(yo.nombre || yo.email) + '</b> · ' + esc(yo.telefono || '') + '</div>';
+  } else if (yo && yo.rol === 'cliente') {
+    $('sinCuenta').classList.add('hidden'); $('yaCuenta').classList.remove('hidden');
+    $('yaCuenta').innerHTML = '<p class="muted" style="margin-top:0">Tu cuenta es de otro taller, así que aquí reservas como invitado. ' +
+      'Con ⭐ Premium reservas con tu cuenta en cualquier taller y tienes horas exclusivas.</p><a class="btn small gold" href="../cliente/#plan">Ver Premium</a>';
   } else if (yo && yo.rol !== 'cliente') {
     $('sinCuenta').classList.add('hidden'); $('yaCuenta').classList.remove('hidden');
     $('yaCuenta').innerHTML = '<p class="muted" style="margin:0">Tienes la sesión de ' + (yo.rol === 'admin' ? 'administrador' : 'taller') +
@@ -193,10 +204,26 @@
     $('horas').innerHTML = '<span class="muted">Buscando horas…</span>';
     let hs = [];
     try { hs = await App.rpc('horas_libres', { p_taller: t.id, p_fecha: f, p_min: mins }); } catch (e) { $('horas').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; return; }
-    $('horas').innerHTML = hs.length ? hs.map((h) => '<button type="button" data-h="' + h + '">' + h + '</button>').join('') : '<span class="muted" style="grid-column:1/-1">Sin horas este día.</span>';
+    $('horas').innerHTML = hs.length ? hs.map((h) => '<button type="button" data-h="' + h + '"' + (vip(f, h) ? ' class="vip' + (cerrada(f, h) ? ' lock' : '') + '"' : '') + '>' +
+      (vip(f, h) ? (cerrada(f, h) ? '🔒 ' : '⭐ ') : '') + h + '</button>').join('') : '<span class="muted" style="grid-column:1/-1">Sin horas este día.</span>';
+    const hayVip = hs.some((h) => vip(f, h));
+    $('vipInfo').classList.toggle('hidden', !hayVip);
+    $('vipInfo').textContent = soyPremium ? '⭐ Horas exclusivas para clientes Premium: puedes tomarlas.'
+      : '⭐ Las horas con candado son exclusivas para clientes Premium (se abren a todos ' + t.horas_libera_premium + ' horas antes).';
+  }
+  // Horas exclusivas Premium: cerradas para el resto hasta N horas antes de la cita (el servidor lo vuelve a revisar).
+  const vip = (f, h) => (t.horas_premium || []).includes(h);
+  const cerrada = (f, h) => vip(f, h) && !soyPremium && new Date(f + 'T' + h + ':00') - Date.now() > t.horas_libera_premium * 3600e3;
+  function ofrecerPremium() {
+    const pc = pub.premium_cliente;
+    App.modal('<h2>⭐ Hora exclusiva Premium</h2><p class="muted" style="margin-top:0">Esta hora la guarda ' + esc(t.nombre) + ' para sus clientes Premium. ' +
+      'Elige otra hora o hazte Premium' + (pc ? ' por ' + plata(pc.monto) + ' al mes' : '') + '.</p>' +
+      (yo && yo.rol === 'cliente' ? '<div class="btns"><button class="ghost" data-cerrar>Elegir otra</button><a class="btn gold" href="../cliente/#plan">Hazte Premium</a></div>'
+        : '<p class="sub">Primero crea tu cuenta gratis aquí arriba y después activa Premium desde tu app.</p><div class="btns"><button data-cerrar>Entendido</button></div>'));
   }
   $('horas').onclick = (e) => {
     const b = e.target.closest('[data-h]'); if (!b) return;
+    if (b.classList.contains('lock')) { ofrecerPremium(); return; }
     hora = b.dataset.h;
     $('horas').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
     $('entrega').classList.add('hidden');

@@ -90,7 +90,7 @@
     const falta = [];
     if (P.dueno) {
       if (!t.logo) falta.push(['perfil', 'Sube tu logo y elige tus colores']);
-      if (!servicios.length) falta.push(['servicios', 'Agrega tus servicios y precios']);
+      if (!servicios.length) falta.push(['servicios', 'Agrega tus servicios y precios (así apareces en el directorio de talleres)']);
       if (!(P.links || []).some((l) => l.activo && l.url)) falta.push(['abono', 'Configura el link de pago del abono (sin esto no recibes reservas online)']);
       if (!t.direccion) falta.push(['perfil', 'Escribe tu dirección']);
     }
@@ -112,6 +112,7 @@
       [rev, dev, pag, taller] = await Promise.all([reservas(hoy, hoy, ['en_revision']), reservas(hoy, hoy, ['cancelada']).then((l) => l.filter((r) => r.abono_estado === 'devolver')),
         reservas(hoy, App.sumarDias(hoy, 120), ['por_pagar']), reservas(hoy, hoy, EN_TALLER)]);
     } catch (e) { /* sin red */ }
+    pintarReferidos();
     const hoyAct = lista.filter((r) => !['cancelada', 'rechazada', 'expirada', 'por_pagar'].includes(r.estado));
     $('kHoy').textContent = hoyAct.length; $('kTaller').textContent = taller.length;
     $('cRevisar').classList.toggle('hidden', !rev.length);
@@ -134,17 +135,25 @@
     const c = e.target.closest('[data-r]'); if (c) abrirDetalle(c.dataset.r);
   });
   $('hCompartir').onclick = () => compartir(linkReservas(), '🚲 Reserva tu hora en ' + P.taller.nombre);
-  $('hQR').onclick = () => verQR(linkReservas());
-  async function compartir(url, texto) {
-    if (navigator.share) { try { await navigator.share({ title: P.taller.nombre, text: texto, url }); return; } catch (e) { /* cancelado */ } }
-    window.open('https://wa.me/?text=' + encodeURIComponent(texto + ': ' + url), '_blank');
-  }
-  function verQR(url) {
-    let img = '';
-    try { const qr = qrcode(0, 'M'); qr.addData(url); qr.make(); img = qr.createDataURL(8, 8); } catch (e) { /* nada */ }
-    const d = modal('<h2>📱 QR de tu página de reservas</h2><div class="qr" style="text-align:center"><img alt="QR" src="' + img + '"></div><p class="sub" style="text-align:center">' + esc(url) +
-      '</p><div class="btns"><button class="ghost" data-cerrar>Cerrar</button><button data-bajar>⬇️ Descargar</button></div>');
-    d.querySelector('[data-bajar]').onclick = () => App.descargar(img, 'qr-' + P.taller.slug + '.gif');
+  $('hQR').onclick = () => App.verQR({ url: linkReservas(), titulo: 'QR de tu página de reservas', archivo: 'qr-' + P.taller.slug + '.gif',
+    afiche: { titulo: '🚲 ' + P.taller.nombre, texto: 'Escanea y reserva tu hora online. Sigue el estado de tu bici desde el celular.' } });
+  const compartir = (url, texto) => App.compartir(url, texto, P.taller.nombre);
+
+  // Referidos: el dueño invita a otros talleres y gana días de Premium cuando el invitado paga su primer Premium.
+  let referidos = null;
+  async function pintarReferidos() {
+    if (!P.dueno) { $('hReferidos').innerHTML = ''; return; }
+    try { referidos = await rpc('taller_referidos'); } catch (e) { return; }
+    if (!referidos.abierto || !referidos.dias) { $('hReferidos').innerHTML = ''; return; }
+    const inv = referidos.invitados, gan = inv.filter((x) => x.premiado).length;
+    $('hReferidos').innerHTML = '<div class="card"><h2>🤝 Invita a otro taller y gana ' + referidos.dias + ' días de Premium</h2><p class="muted" style="margin-top:0">' +
+      'Comparte tu link con otro taller: se crea su cuenta gratis y, cuando active su Premium, te regalamos ' + referidos.dias + ' días.</p>' +
+      (inv.length ? '<p class="sub">Invitaste a ' + inv.length + ' taller' + (inv.length > 1 ? 'es' : '') + ' · ' + gan + ' ya te dio' + (gan === 1 ? '' : 'eron') + ' Premium: ' +
+        inv.map((x) => esc(x.nombre) + (x.premiado ? ' ✅' : ' ⏳')).join(', ') + '</p>' : '') +
+      '<div class="btns"><button id="rfCompartir" type="button">📤 Invitar</button><button class="alt" id="rfQR" type="button">QR</button></div></div>';
+    const url = App.ROOT + 'n/?ref=' + encodeURIComponent(referidos.slug);
+    $('rfCompartir').onclick = () => compartir(url, '🚲 Te recomiendo BiciTaller para recibir reservas online en tu taller. Crea tu cuenta gratis aquí');
+    $('rfQR').onclick = () => App.verQR({ url, titulo: 'Invita a otro taller', archivo: 'invita-' + P.taller.slug + '.gif' });
   }
 
   // Botones que aparecen en varias vistas (comprobante, aprobar, rechazar, devuelto).
@@ -369,7 +378,8 @@
         '<label for="dNotas">Notas internas (solo el taller)</label><textarea id="dNotas" maxlength="1000">' + esc(r.notas_internas) + '</textarea>' +
         '<div class="row"><div><label for="dMec">Mecánico</label><select id="dMec"><option value="">Sin asignar</option>' + equipo.map((p) => '<option value="' + p.id + '"' + (p.id === r.mecanico_id ? ' selected' : '') + '>' + esc(p.nombre) + '</option>').join('') + '</select></div>' +
         '<div><label for="dProx">Próxima mantención</label><input type="date" id="dProx" value="' + (r.proxima_mantencion || '') + '"></div></div>' +
-        '<div class="btns"><button id="dGuardar">💾 Guardar</button><button class="ghost" onclick="window.print()">🖨️ Imprimir</button></div></div>' : '') +
+        '<div class="btns"><button id="dGuardar">💾 Guardar</button><button class="ghost" onclick="window.print()">🖨️ Imprimir</button></div></div>' +
+        '<div class="card"><h2>📷 Fotos antes / después</h2><div id="dFotos"></div></div>' : '') +
       (['completada', 'lista', 'no_asistio'].includes(r.estado) ? '<div class="card"><h2>⭐ Califica al cliente</h2><p class="sub" style="margin-top:0">Los otros talleres y clientes solo ven el promedio de estrellas.</p>' +
         (r.calificado ? '<p class="muted">✅ Ya lo calificaste.</p>' : '<div class="row"><select id="dEst"><option value="5">★★★★★ Excelente</option><option value="4">★★★★ Bueno</option><option value="3">★★★ Regular</option>' +
           '<option value="2">★★ Llegó tarde / mal trato</option><option value="1">★ No llegó / problemas</option></select><button id="dCal" style="flex:0 0 auto">Calificar</button></div>' +
@@ -396,6 +406,7 @@
       $('dAddS').onchange = () => { const s = servicios.find((x) => x.id === $('dAddS').value); if (s) items.push({ nombre: s.nombre, cant: 1, precio: s.precio }); $('dAddS').value = ''; pintarItems(); };
       $('dAddR').onclick = () => { items.push({ nombre: '', cant: 1, precio: 0 }); pintarItems(); const ins = $('dItems').querySelectorAll('[data-k=nombre]'); ins[ins.length - 1].focus(); };
       $('dGuardar').onclick = () => guardarTrabajo(false);
+      pintarFotos(r.id);
     }
     const bc = $('dCal');
     if (bc) bc.onclick = async () => {
@@ -404,6 +415,35 @@
     };
   }
   let volverA = 'reservas';
+  // Fotos antes/después (Premium): el cliente las ve en el enlace de su reserva y, si es Premium, siempre en su historial.
+  async function pintarFotos(id) {
+    const el = $('dFotos');
+    if (!P.plan.limites.fotos) {
+      el.innerHTML = '<p class="muted" style="margin-top:0">Muestra el antes y el después: tu taller se ve más profesional y el cliente confía más. Es una función ⭐ Premium.</p>' +
+        (P.dueno ? '<div class="btns"><button class="gold" type="button" data-plan>⭐ Activar Premium</button></div>' : '');
+      const bp = el.querySelector('[data-plan]'); if (bp) bp.onclick = () => { subMas = 'plan'; show('mas'); };
+      return;
+    }
+    let fotos = [];
+    try { fotos = await rpc('taller_fotos', { p_reserva: id }); } catch (e) { el.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    const n = (t) => fotos.filter((f) => f.tipo === t).length;
+    el.innerHTML = '<p class="sub" style="margin-top:0">Hasta 2 de cada una. El cliente las ve en el enlace de su reserva.</p>' +
+      (fotos.length ? '<div class="fotos">' + fotos.map((f) => '<figure><img alt="Foto ' + f.tipo + '" src="' + f.imagen + '"><figcaption>' + (f.tipo === 'antes' ? 'Antes' : 'Después') + '</figcaption>' +
+        '<button class="small danger" type="button" data-fx="' + f.id + '" aria-label="Borrar foto">✕</button></figure>').join('') + '</div>' : '') +
+      '<div class="btns">' + ['antes', 'despues'].map((t) => n(t) < 2 ? '<label class="btn alt" style="margin:0;color:var(--brand)">📷 ' + (t === 'antes' ? 'Antes' : 'Después') +
+        '<input type="file" accept="image/*" capture="environment" data-ft="' + t + '" hidden></label>' : '').join('') + '</div>';
+    el.onchange = async (e) => {
+      const i = e.target.closest('[data-ft]'); if (!i || !i.files[0]) return;
+      const f = i.files[0]; i.value = '';
+      try { await rpc('taller_foto_subir', { p_reserva: id, p_tipo: i.dataset.ft, p_imagen: await App.comprimirFoto(f) }); toast('📷 Foto guardada'); pintarFotos(id); }
+      catch (err) { toast(err.message); }
+    };
+    el.onclick = async (e) => {
+      const x = e.target.closest('[data-fx]');
+      if (x) { e.stopPropagation(); if (!await confirmar('¿Borrar esta foto?')) return; try { await rpc('taller_foto_borrar', { p_id: x.dataset.fx }); pintarFotos(id); } catch (err) { toast(err.message); } return; }
+      const im = e.target.closest('img'); if (im) App.verImagen(im.src, im.alt, 'foto.jpg');
+    };
+  }
   function pintarItems() {
     $('dItems').innerHTML = items.length ? items.map((it, i) => '<div class="it"><input data-i="' + i + '" data-k="nombre" value="' + esc(it.nombre) + '" placeholder="Descripción" aria-label="Descripción">' +
       '<input data-i="' + i + '" data-k="cant" value="' + it.cant + '" inputmode="numeric" aria-label="Cantidad"><input data-i="' + i + '" data-k="precio" value="' + it.precio + '" inputmode="numeric" aria-label="Precio">' +
@@ -477,6 +517,8 @@
       '<label>Color de tu marca</label><div class="swatches" id="pCol">' + COLORES.map((c) => '<button type="button" data-c="' + c + '" style="background:' + c + '" aria-label="Color ' + c + '"></button>').join('') +
       '<input type="color" id="pColor" value="' + color + '" style="width:50px;height:36px;padding:2px" aria-label="Otro color"></div>' +
       '<label>Ícono (si no tienes logo)</label><div class="swatches iconos" id="pIco">' + ICONOS.map((i) => '<button type="button" data-i="' + i + '">' + i + '</button>').join('') + '</div>' +
+      '<label class="check"><input type="checkbox" id="pDirec"' + (t.en_directorio !== false ? ' checked' : '') + '> Aparecer en el <a href="' + App.ROOT + 'd/" target="_blank" rel="noopener">directorio de talleres</a>' +
+      (P.premium ? ' (⭐ como Premium sales primero)' : ' (los Premium salen primero)') + '</label>' +
       '<div class="btns"><button id="pGuardar">💾 Guardar perfil</button></div><p class="err" id="pErr"></p></div>';
     const prev = () => {
       App.pintarLogo($('pLogo'), { logo, icono });
@@ -495,10 +537,18 @@
       $('pErr').textContent = '';
       try {
         P = await rpc('taller_guardar', { p: { nombre: $('pNom').value, slug: $('pSlug').value, descripcion: $('pDesc').value, direccion: $('pDir').value,
-          comuna: $('pCom').value, telefono: $('pTel').value, instagram: $('pIg').value, logo, color, icono } });
+          comuna: $('pCom').value, telefono: $('pTel').value, instagram: $('pIg').value, logo, color, icono, en_directorio: $('pDirec').checked } });
         await cargarPanel(); toast('💾 Perfil guardado'); verPerfil();
       } catch (e) { $('pErr').textContent = e.message; }
     };
+  }
+
+  // Horas de inicio posibles (horario normal, cada "bloque" minutos) más las exclusivas ya guardadas.
+  function horasDelDia() {
+    const t = P.taller, l = [];
+    for (let m = mins(t.abre); m + t.bloque_min <= mins(t.cierra); m += t.bloque_min) l.push(hhmm(m));
+    (t.horas_premium || []).forEach((h) => { if (!l.includes(h)) l.push(h); });
+    return l.sort();
   }
 
   // ---- Horario
@@ -518,6 +568,9 @@
       '<div class="row"><div><label for="hAn">Se puede reservar hasta (días)</label><input id="hAn" inputmode="numeric" value="' + t.anticipacion_dias + '"></div>' +
       '<div><label for="hMe">Mantención cada (meses)</label><input id="hMe" inputmode="numeric" value="' + t.meses_mantencion + '"></div></div>' +
       '<label class="check"><input type="checkbox" id="hOn"' + (t.reservas_online ? ' checked' : '') + '> Recibir reservas online</label>' +
+      '<h3>⭐ Horas exclusivas para clientes Premium</h3><p class="sub" style="margin-top:0">Solo los clientes Premium pueden reservar estas horas (es lo que más los motiva a pagar). ' +
+      'Si nadie Premium la toma, se abre para todos ' + ((pub.config || {}).horas_libera_premium || 24) + ' horas antes, así no pierdes la hora.</p>' +
+      '<div class="chips" id="hVip">' + horasDelDia().map((h) => '<label><input type="checkbox" data-v="' + h + '"' + ((t.horas_premium || []).includes(h) ? ' checked' : '') + '> ' + h + '</label>').join('') + '</div>' +
       '<p class="sub">Para bloquear un feriado o unas horas usa ⛔ Bloquear en la Agenda.</p>' +
       '<div class="btns"><button id="hGuardar">💾 Guardar horario</button></div><p class="err" id="hErr"></p></div>';
     $('hGuardar').onclick = async () => {
@@ -537,7 +590,8 @@
           capacidad_dia: Math.max(App.numero($('hCap').value), 0), max_espera_dias: Math.max(App.numero($('hEsp').value) || 14, 1),
           abre: normal[0], cierra: normal[1], colacion_desde: cd, colacion_hasta: ch, bloque_min: +$('hBl').value,
           cupos: Math.min(Math.max(App.numero($('hCu').value) || 1, 1), 20), anticipacion_dias: Math.min(Math.max(App.numero($('hAn').value) || 21, 1), 120),
-          meses_mantencion: Math.min(Math.max(App.numero($('hMe').value) || 4, 1), 24), reservas_online: $('hOn').checked } });
+          meses_mantencion: Math.min(Math.max(App.numero($('hMe').value) || 4, 1), 24), reservas_online: $('hOn').checked,
+          horas_premium: Array.from($('hVip').querySelectorAll('input:checked')).map((i) => i.dataset.v) } });
         await cargarPanel(); toast('⏰ Horario guardado');
       } catch (e) { $('hErr').textContent = /check constraint/.test(e.message) ? 'Revisa las horas: el cierre debe ser después de la apertura.' : e.message; }
     };
@@ -640,8 +694,9 @@
   }
 
   // ---- Plan Premium (pagar con link y subir comprobante)
+  let anual = false;
   async function verPlan() {
-    const planes = pub.planes || {}, link = pub.premium_taller;
+    const planes = pub.planes || {}, mes = pub.premium_taller, ano = pub.premium_taller_anual, link = (anual && ano) || mes || ano;
     const t = P.taller, prem = P.premium;
     let pend = null;
     try { pend = await rpc('mi_pago_pendiente'); } catch (e) { /* nada */ }
@@ -653,22 +708,26 @@
       '<div class="sub" style="margin-top:6px">Servicios: ' + uso.servicios + ' de ' + lim.servicios + barra(uso.servicios, lim.servicios) + '</div>' +
       '<div class="sub" style="margin-top:6px">Equipo: ' + uso.equipo + ' de ' + lim.equipo + ' · Promociones activas: ' + uso.promos + ' de ' + lim.promos + ' · Clientes con cuenta: ' + uso.clientes_cuenta + ' de ' + lim.clientes_cuenta + '</div></div>' +
       ['taller_free', 'taller_premium'].map((c) => planes[c] ? '<div class="card plan' + (c === 'taller_premium' ? ' premium' : '') + '"><h2>' + (c === 'taller_premium' ? '⭐ ' : '') + esc(planes[c].nombre) +
-        (c === 'taller_premium' && link ? ' · <span class="precio">' + plata(link.monto) + '</span> <span class="sub">cada ' + planes[c].duracion_dias + ' días</span>' : '') + '</h2>' +
+        (c === 'taller_premium' && mes ? ' · <span class="precio">' + plata(mes.monto) + '</span> <span class="sub">cada ' + planes[c].duracion_dias + ' días</span>' : '') + '</h2>' +
         '<p class="muted" style="margin:0">' + esc(planes[c].descripcion) + '</p><ul>' + planes[c].beneficios.map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul></div>' : '').join('') +
       '<div class="card"><h2>' + (prem ? '🔁 Renovar Premium' : '⭐ Activar Premium') + '</h2>' +
+      (mes && ano ? '<div class="seg" id="plPer"><button data-a="0" class="' + (link === ano ? '' : 'on') + '">Mensual</button><button data-a="1" class="' + (link === ano ? 'on' : '') + '">Anual' +
+        (mes.monto * 12 > ano.monto ? ' · ahorras ' + plata(mes.monto * 12 - ano.monto) : '') + '</button></div>' : '') +
       (pend && pend.estado === 'en_revision' ? '<div class="aviso"><div class="grow">🧾 Tu comprobante de ' + plata(pend.monto) + ' está en revisión. Te avisamos apenas se apruebe.</div></div>'
         : !link ? '<p class="muted">El pago aún no está disponible. Escríbele al administrador.</p>'
         : (pend && pend.estado === 'rechazado' ? '<div class="aviso bad"><div class="grow">Tu último comprobante fue rechazado' + (pend.nota ? ': ' + esc(pend.nota) : '') + '.</div></div>' : '') +
           '<p class="muted" style="margin-top:0">' + esc(App.txt('pago_instrucciones')) + '</p>' + (link.texto ? '<p class="sub">' + esc(link.texto) + '</p>' : '') +
-          '<a class="btn block gold" target="_blank" rel="noopener" href="' + esc(link.url) + '">1️⃣ Pagar ' + plata(link.monto) + '</a>' +
+          '<a class="btn block gold" target="_blank" rel="noopener" href="' + esc(link.url) + '">1️⃣ Pagar ' + plata(link.monto) + (link === ano ? ' (1 año)' : '') + '</a>' +
           '<label for="plFile" class="btn block alt" style="margin-top:10px;color:var(--brand)">2️⃣ Subir comprobante</label><input type="file" id="plFile" accept="image/*" class="hidden">' +
           '<div id="plPrev" style="text-align:center"></div><button class="block hidden" id="plEnviar" style="margin-top:10px">Enviar comprobante</button><p class="err" id="plErr"></p>') + '</div>';
+    const per = $('plPer');
+    if (per) per.onclick = (e) => { const b = e.target.closest('[data-a]'); if (b) { anual = b.dataset.a === '1'; verPlan(); } };
     const f = $('plFile');
     if (f) {
       let img = null;
       f.onchange = async (e) => { const x = e.target.files[0]; if (!x) return; try { img = await App.comprimirComprobante(x); $('plPrev').innerHTML = '<img alt="Comprobante" src="' + img + '" style="max-height:240px;border-radius:12px;margin-top:10px">'; $('plEnviar').classList.remove('hidden'); } catch (err) { $('plErr').textContent = err.message; } };
       $('plEnviar').onclick = async () => {
-        try { const r = await rpc('premium_pagar', { p_tipo: 'premium_taller', p_imagen: img }); if (!r.ok) throw new Error(r.error); sb.functions.invoke('servidor').catch(() => {}); toast('🧾 Comprobante enviado'); verPlan(); }
+        try { const r = await rpc('premium_pagar', { p_tipo: 'premium_taller', p_imagen: img, p_anual: !!ano && link === ano }); if (!r.ok) throw new Error(r.error); sb.functions.invoke('servidor').catch(() => {}); toast('🧾 Comprobante enviado'); verPlan(); }
         catch (err) { $('plErr').textContent = err.message; }
       };
     }

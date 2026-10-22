@@ -34,13 +34,18 @@
   <p class="empty" id="cargando">Cargando…</p>
   <section class="view" id="v-resumen"></section>
   <section class="view" id="v-talleres">
-    <div class="card"><h2>➕ Crear taller</h2><p class="muted" style="margin-top:0">Solo tú creas talleres. Parten con <b id="nRegalo">30</b> días de Premium de regalo.</p>
+    <div class="card"><h2>📣 Invita talleres: registro gratis con link y QR</h2>
+      <p class="muted" style="margin-top:0">Cualquier taller crea su cuenta solo, gratis y con <b class="nRegalo">30</b> días de Premium de regalo. Los ciclistas usan el mismo link para buscar su taller.</p>
+      <div class="aviso hidden" id="rCerrado"><div class="grow">⛔ El registro abierto está apagado. Actívalo en Ajustes → Reglas.</div></div>
+      <div class="link" id="rLink"></div>
+      <div class="btns"><button id="rCompartir" type="button">📤 Compartir</button><button class="alt" id="rQR" type="button">QR y afiche</button><a class="btn ghost" id="rDir" target="_blank" rel="noopener">🗺️ Directorio</a></div></div>
+    <details class="card"><summary class="clic" style="font-weight:700">➕ Crear un taller yo mismo</summary><p class="muted">Con su correo y una contraseña inicial que le mandas por WhatsApp. Parte con <b class="nRegalo">30</b> días de Premium de regalo.</p>
       <div class="row"><div><label for="nTaller">Nombre del taller</label><input id="nTaller" maxlength="80" placeholder="Bici Sur"></div><div><label for="nDueno">Nombre del dueño</label><input id="nDueno" maxlength="80"></div></div>
       <div class="row"><div><label for="nEmail">Correo del dueño</label><input id="nEmail" type="email" autocomplete="off"></div><div><label for="nTel">WhatsApp</label><input id="nTel" inputmode="tel"></div></div>
       <label for="nPass">Contraseña inicial</label><input id="nPass" autocomplete="off">
-      <div class="btns"><button id="nCrear">Crear taller</button></div><p class="err" id="nErr"></p></div>
+      <div class="btns"><button id="nCrear">Crear taller</button></div><p class="err" id="nErr"></p></details>
     <input id="tBuscar" placeholder="Buscar taller…" aria-label="Buscar taller" style="margin-bottom:10px">
-    <div class="seg" id="tSeg"><button data-f="" class="on">Todos</button><button data-f="premium">⭐ Premium</button><button data-f="free">Gratis</button><button data-f="vence">⏳ Por vencer</button><button data-f="inactivos">💤 Sin actividad 7 días</button><button data-f="suspendidos">⛔ Suspendidos</button></div>
+    <div class="seg" id="tSeg"><button data-f="" class="on">Todos</button><button data-f="premium">⭐ Premium</button><button data-f="free">Gratis</button><button data-f="vence">⏳ Por vencer</button><button data-f="solos">🆕 Se registraron solos</button><button data-f="inactivos">💤 Sin actividad 7 días</button><button data-f="suspendidos">⛔ Suspendidos</button></div>
     <div class="grid" id="tLista"></div>
   </section>
   <section class="view" id="v-clientes">
@@ -71,6 +76,7 @@
 </nav>
 <script src="../shared/config.js"></script>
 <script src="../shared/vendor/supabase.js"></script>
+<script src="../shared/vendor/qrcode.js"></script>
 <script src="../shared/app.js"></script>
 <script src="admin.js"></script>
 </body>
