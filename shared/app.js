@@ -93,7 +93,7 @@
     if (/rate limit|too many/i.test(m)) return 'Demasiados intentos. Espera unos minutos.';
     if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Sin conexión. Revisa tu internet.';
     if (/Could not find the function|schema cache|does not exist/i.test(m)) return 'Falta instalar la base de datos: corre supabase/schema.sql en Supabase → SQL Editor (guía, paso 1).';
-    if (/Database error saving new user/i.test(m)) return 'No se pudo crear la cuenta: el taller no recibe clientes nuevos o el registro está cerrado.';
+    if (/Database error saving new user/i.test(m)) return 'No se pudo crear la cuenta: el registro está cerrado, se llegó al límite o hubo muchos registros seguidos. Intenta más tarde o escríbenos.';
     return m.replace(/^\w*Error:\s*/, '') || 'Error';
   }
   async function rpc(name, args) {
@@ -135,7 +135,7 @@
     if (cuenta) sb.rpc('registrar_visto').then(() => {}, () => {});
     return cuenta;
   }
-  const destino = (c) => !c ? 'index.html' : c.rol === 'admin' ? 'admin/' : c.rol === 'cliente' ? 'cliente/' : 'taller/';
+  const destino = (c) => !c ? 'index.html' : c.rol === 'admin' || c.rol === 'socio' ? 'admin/' : c.rol === 'cliente' ? 'cliente/' : 'taller/';
   // Úsalo al abrir cada panel: sin sesión o con otro rol, vuelve al inicio.
   async function requerir(roles) {
     let c = null;
@@ -204,6 +204,7 @@
   }
   const comprimirComprobante = (file) => achicar(file, 1400, 580000);
   const comprimirLogo = (file) => achicar(file, 256, 110000);
+  const comprimirFoto = (file) => achicar(file, 960, 150000);
   function descargar(dataUrl, nombre) {
     const a = document.createElement('a');
     a.href = dataUrl; a.download = nombre; document.body.appendChild(a); a.click(); a.remove();
@@ -397,6 +398,36 @@
     leer(); setTimeout(() => txt.focus(), 100);
   }
 
+  /* ---------- Compartir un enlace y su QR (con afiche para imprimir) ---------- */
+  async function compartir(url, texto, titulo) {
+    if (navigator.share) { try { await navigator.share({ title: titulo || texto, text: texto, url }); return; } catch (e) { /* cancelado */ } }
+    window.open('https://wa.me/?text=' + encodeURIComponent(texto + ': ' + url), '_blank');
+  }
+  function qrImagen(url, celda) {
+    try { const qr = global.qrcode(0, 'M'); qr.addData(url); qr.make(); return qr.createDataURL(celda || 8, 8); } catch (e) { return ''; }
+  }
+  // d = { url, titulo, archivo, afiche: { titulo, texto } }
+  function verQR(d) {
+    const img = qrImagen(d.url);
+    const m = modal('<h2>📱 ' + esc(d.titulo || 'Código QR') + '</h2><div class="qr" style="text-align:center"><img alt="QR" src="' + img + '"></div><p class="sub" style="text-align:center">' + esc(d.url) +
+      '</p><div class="btns"><button class="ghost" data-cerrar>Cerrar</button><button class="alt" data-copiar>📋 Copiar link</button><button data-bajar>⬇️ Descargar</button>' +
+      (d.afiche ? '<button class="alt" data-afiche>🖨️ Afiche</button>' : '') + '</div>');
+    m.querySelector('[data-bajar]').onclick = () => descargar(img, d.archivo || 'qr.gif');
+    m.querySelector('[data-copiar]').onclick = () => { navigator.clipboard.writeText(d.url).then(() => toast('🔗 Link copiado'), () => toast(d.url)); };
+    const af = m.querySelector('[data-afiche]');
+    if (af) af.onclick = () => afiche(d.url, d.afiche.titulo, d.afiche.texto);
+  }
+  // Hoja para imprimir y pegar en el mesón o en la vitrina.
+  function afiche(url, titulo, texto) {
+    const w = window.open('', '_blank');
+    if (!w) { toast('Permite las ventanas emergentes para imprimir'); return; }
+    w.document.write('<!doctype html><html lang="es"><head><meta charset="utf-8"><title>' + esc(titulo) + '</title><style>body{font-family:system-ui,sans-serif;text-align:center;padding:40px 24px;color:#0f172a}' +
+      'h1{font-size:40px;margin:0 0 12px}p{font-size:22px;margin:0 auto 28px;max-width:560px}img{width:340px;height:340px;image-rendering:pixelated}small{display:block;margin-top:18px;font-size:15px;color:#475569;word-break:break-all}</style></head><body>' +
+      '<h1>' + esc(titulo) + '</h1><p>' + esc(texto) + '</p><img alt="QR" src="' + qrImagen(url, 12) + '"><small>' + esc(url) + '</small>' +
+      '<script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>');
+    w.document.close();
+  }
+
   // Solo el administrador: borra un usuario o un taller completo (lo hace el servidor).
   async function borrarCuenta(tipo, id) {
     const { data, error } = await sb.functions.invoke('servidor', { body: { accion: 'borrar', tipo, id } });
@@ -460,7 +491,9 @@
   function pie() {
     const f = document.createElement('footer');
     f.className = 'pie';
-    f.innerHTML = '© ' + new Date().getFullYear() + ' ' + esc(txt('app_nombre') || 'BiciTaller') + ' · CodeFix · v' + cfg.VERSION;
+    f.innerHTML = '© ' + new Date().getFullYear() + ' ' + esc(txt('app_nombre') || 'BiciTaller') + ' · CodeFix · v' + cfg.VERSION +
+      ' · <button type="button" title="Descarga la última versión de la app">🔄 Actualizar</button>';
+    f.querySelector('button').onclick = actualizar;
     (document.querySelector('main') || document.body).appendChild(f);
   }
 
@@ -483,8 +516,8 @@
   global.App = {
     sb, ROOT, $, esc, plata, numero, iso, fechaDe, sumarDias, hoy, fCorta, fLarga, fHora, hace, DIAS, telNorm, wa, estrellas, nota,
     toast, modal, confirmar, tema, pintarLogo, friendly, rpc, q, cargarPublica, txt, refrescar, requerir, entrar, salir, crearCuenta,
-    clave, mensajeAcceso, comprimirComprobante, comprimirLogo, descargar, verImagen, campana, irA, activarPush, ofrecerPush,
-    pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino, revisarVersion, actualizar, chatBoton, abrirChat, borrarCuenta, horarioTxt,
+    clave, mensajeAcceso, comprimirComprobante, comprimirLogo, comprimirFoto, descargar, verImagen, compartir, verQR, afiche, campana, irA, activarPush, ofrecerPush,
+    pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino, revisarVersion, actualizar, mayor, chatBoton, abrirChat, borrarCuenta, horarioTxt,
     get cuenta() { return cuenta; },
     get publica() { return publica; }
   };

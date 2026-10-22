@@ -32,6 +32,10 @@
   .bar-mes { display: flex; align-items: flex-end; gap: 8px; height: 140px; margin-top: 10px; }
   .bar-mes div { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
   .bar-mes span { width: 100%; background: var(--brand); border-radius: 6px 6px 0 0; min-height: 2px; }
+  .fotos { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 6px; }
+  .fotos figure { margin: 0; position: relative; } .fotos figcaption { font-size: 12px; color: var(--muted); }
+  .fotos img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); cursor: pointer; }
+  .fotos button { position: absolute; top: 4px; right: 4px; padding: 2px 8px; }
 </style>
 </head>
 <body class="con-tabs">
@@ -59,6 +63,7 @@
     <div class="card hidden" id="cPagando"><h2>⏳ Esperando pago</h2><ul class="list" id="hPagando"></ul></div>
     <div class="card" id="cEnlace"><h2>🔗 Tu página de reservas</h2><p class="muted" style="margin-top:0">Compártela en WhatsApp, Instagram o imprime el QR.</p>
       <div class="link" id="hLink"></div><div class="btns"><button id="hCompartir" type="button">📤 Compartir</button><button class="alt" id="hQR" type="button">QR</button><a class="btn ghost" id="hAbrir" target="_blank" rel="noopener">Ver</a></div></div>
+    <div id="hReferidos"></div>
     <div id="hPlanCard"></div>
   </section>
 

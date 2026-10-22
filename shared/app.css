@@ -186,6 +186,7 @@ dialog .card { margin: 0; border: 0; box-shadow: none; }
 .plan.premium { border-color: var(--gold); background: linear-gradient(160deg, color-mix(in srgb, var(--gold) 9%, var(--card)), var(--card) 60%); }
 .plan ul { padding-left: 20px; margin: 8px 0; }
 footer.pie { text-align: center; font-size: 12px; color: var(--muted); padding: 20px 8px 6px; }
+footer.pie button { background: none; color: var(--brand); padding: 2px 4px; font-size: 12px; font-weight: 700; }
 .items .it { display: grid; grid-template-columns: 70px 1fr 40px; gap: 6px; margin-bottom: 8px; }
 .items .it input[data-k=nombre] { grid-column: 1 / -1; }
 .items .it input { padding: 9px 10px; }

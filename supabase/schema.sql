@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.5'::text $$;
+language sql immutable as $$ select '1.7'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -38,7 +38,11 @@ insert into public.config (clave, valor) values
   ('dias_aviso_vencimiento', '3'),   -- aviso antes de que venza el Premium
   ('dias_comprobantes', '30'),       -- los comprobantes se borran solos después de estos días
   ('soporte_whatsapp', '""'),
-  ('vapid_publica', '""')
+  ('vapid_publica', '""'),
+  ('registro_talleres', '1'),        -- 1 = cualquiera crea su taller gratis desde /n/ (0 = cerrado)
+  ('dias_referido', '30'),           -- Premium de regalo al taller que invitó, cuando el invitado paga su primer Premium
+  ('horas_libera_premium', '24'),    -- las horas exclusivas Premium se abren a todos con esta anticipación
+  ('dias_fotos', '365')              -- las fotos antes/después se borran solas después de estos días
 on conflict (clave) do nothing;
 alter table public.config enable row level security;
 
@@ -86,6 +90,13 @@ insert into public.planes (codigo, nombre, descripcion, limites, beneficios) val
    '["Historial completo de tu bici", "Recordatorio cuando le toca mantención", "Reserva hasta 15 días antes que el resto", "Insignia de cliente Premium"]')
 on conflict (codigo) do nothing;
 alter table public.planes enable row level security;
+-- v1.6: fotos antes/después (taller Premium) y beneficios nuevos (solo si el administrador no cambió la lista).
+update public.planes set limites = limites || '{"fotos": false}' where codigo = 'taller_free' and not limites ? 'fotos';
+update public.planes set limites = limites || '{"fotos": true}' where codigo = 'taller_premium' and not limites ? 'fotos';
+update public.planes set beneficios = beneficios || '["Fotos antes/después en tus órdenes de trabajo", "Apareces primero en el directorio de talleres"]'::jsonb
+where codigo = 'taller_premium' and beneficios = '["Reservas online casi ilimitadas (1000 al mes)", "Hasta 10 mecánicos o recepción con su propia cuenta", "60 servicios y 15 promociones", "Estadísticas de ingresos, servicios y clientes", "Recordatorios de mantención para que tus clientes vuelvan", "Hasta 2000 clientes con cuenta"]'::jsonb;
+update public.planes set beneficios = '["Horas exclusivas para clientes Premium", "Reserva con tu cuenta en cualquier taller del directorio", "Historial completo de tu bici, con fotos antes/después", "Recordatorio cuando le toca mantención", "Reserva hasta 15 días antes que el resto", "Insignia de cliente Premium"]'::jsonb
+where codigo = 'cliente_premium' and beneficios = '["Historial completo de tu bici", "Recordatorio cuando le toca mantención", "Reserva hasta 15 días antes que el resto", "Insignia de cliente Premium"]'::jsonb;
 
 -- Secretos (claves push): solo los lee el servidor.
 create table if not exists public.secretos (
@@ -139,6 +150,12 @@ alter table public.talleres add column if not exists capacidad_dia int not null 
 alter table public.talleres add column if not exists max_espera_dias int not null default 14; -- tope de días hasta la entrega
 alter table public.talleres drop constraint if exists talleres_bloque_min_check;
 alter table public.talleres add constraint talleres_bloque_min_check check (bloque_min in (15, 20, 30, 45, 60, 90, 120, 180, 240));
+-- v1.6: registro abierto, referidos, directorio y horas exclusivas Premium.
+alter table public.talleres add column if not exists autoregistro boolean not null default false;     -- se registró solo (link/QR)
+alter table public.talleres add column if not exists referido_por uuid references public.talleres (id) on delete set null;
+alter table public.talleres add column if not exists referido_premiado boolean not null default false;
+alter table public.talleres add column if not exists en_directorio boolean not null default true;
+alter table public.talleres add column if not exists horas_premium text[] not null default '{}';     -- {"10:00"}: solo clientes Premium
 
 create table if not exists public.perfiles (
   id               uuid primary key references auth.users (id) on delete cascade,
@@ -157,6 +174,9 @@ create table if not exists public.perfiles (
 );
 create index if not exists perfiles_taller_idx on public.perfiles (taller_id, rol);
 alter table public.perfiles enable row level security;
+-- v1.7: socio = administra junto al administrador (ve todo; no crea ni elimina; cada cambio con motivo).
+alter table public.perfiles drop constraint if exists perfiles_rol_check;
+alter table public.perfiles add constraint perfiles_rol_check check (rol in ('admin', 'socio', 'taller', 'equipo', 'cliente'));
 
 alter table public.talleres drop constraint if exists talleres_owner_fk;
 alter table public.talleres add constraint talleres_owner_fk foreign key (owner_id) references public.perfiles (id) on delete set null
@@ -175,7 +195,7 @@ create table if not exists public.invitaciones (
 );
 alter table public.invitaciones enable row level security;
 alter table public.invitaciones drop constraint if exists invitaciones_rol_check;
-alter table public.invitaciones add constraint invitaciones_rol_check check (rol in ('taller', 'equipo', 'cliente'));
+alter table public.invitaciones add constraint invitaciones_rol_check check (rol in ('socio', 'taller', 'equipo', 'cliente'));
 
 -- ---------------------------------------------------------------------
 -- 2. Quién soy
@@ -186,6 +206,12 @@ language sql stable security definer set search_path = '' as $$
     select 1 from public.perfiles p join auth.users u on u.id = p.id
     where p.id = auth.uid() and p.rol = 'admin' and not p.suspendido
       and lower(u.email) = public.admin_email() and u.email_confirmed_at is not null)
+$$;
+
+-- Socio del administrador (lo crea solo el administrador).
+create or replace function public.es_socio() returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.perfiles p where p.id = auth.uid() and p.rol = 'socio' and not p.suspendido)
 $$;
 
 -- Taller donde trabaja la persona (dueño o equipo), si ambos están activos.
@@ -235,8 +261,9 @@ language sql stable security definer set search_path = '' as $$
 $$;
 
 -- ---------------------------------------------------------------------
--- 3. Cuentas nuevas (registro cerrado)
---   · Admin: por correo.  · Taller y equipo: solo con invitación (servidor).
+-- 3. Cuentas nuevas
+--   · Admin: por correo.  · Equipo: solo con invitación (servidor).
+--   · Taller: lo crea el administrador o se registra solo y gratis desde /n/ (link y QR).
 --   · Cliente: se registra desde la página de SU taller y queda asociado a él.
 -- ---------------------------------------------------------------------
 create or replace function public.slug_de(txt text) returns text
@@ -259,6 +286,8 @@ declare
   t public.talleres;
   sl text;
   tid uuid;
+  nom text;
+  ref public.talleres;
 begin
   if em = public.admin_email() then
     insert into public.perfiles (id, email, nombre, rol) values (new.id, em, 'Administrador', 'admin')
@@ -287,6 +316,34 @@ begin
     return new;
   end if;
 
+  -- Taller que se registra solo desde /n/ (plan gratis + días de Premium de regalo).
+  if meta ->> 'rol' = 'taller' then
+    if coalesce(public.cfg_int('registro_talleres'), 1) <= 0 then raise exception 'El registro de talleres está cerrado'; end if;
+    nom := left(trim(coalesce(meta ->> 'taller_nombre', '')), 80);
+    if nom = '' then raise exception 'Escribe el nombre de tu taller'; end if;
+    if (select count(*) from public.talleres where autoregistro and created_at > now() - interval '1 hour') >= 20 then
+      raise exception 'Muchos registros seguidos. Intenta en un rato.';
+    end if;
+    select * into ref from public.talleres where slug = lower(trim(coalesce(meta ->> 'ref', ''))) and activo and not suspendido;
+    sl := public.slug_de(nom);
+    while exists (select 1 from public.talleres where slug = sl) loop
+      sl := left(public.slug_de(nom), 44) || '-' || substr(md5(random()::text), 1, 5);
+    end loop;
+    insert into public.talleres (owner_id, nombre, slug, telefono, comuna, premium_hasta, autoregistro, referido_por)
+    values (new.id, nom, sl, left(trim(coalesce(meta ->> 'telefono', '')), 30), left(trim(coalesce(meta ->> 'comuna', '')), 60),
+            now() + make_interval(days => coalesce(public.cfg_int('dias_regalo_taller'), 30)), true, ref.id)
+    returning id into tid;
+    insert into public.perfiles (id, email, nombre, telefono, rol, taller_id)
+    values (new.id, em, left(trim(coalesce(meta ->> 'nombre', '')), 80), left(trim(coalesce(meta ->> 'telefono', '')), 30), 'taller', tid);
+    perform public.avisar_admin('🚲 Nuevo taller: ' || nom, concat_ws(' · ', nullif(trim(meta ->> 'comuna'), ''), em, 'se registró solo',
+      'invitado por ' || ref.nombre), '/admin/#talleres');
+    if ref.id is not null then
+      perform public.avisar_taller(ref.id, '🤝 Se sumó un taller con tu invitación', nom || ' · Cuando active su Premium te regalamos ' ||
+        coalesce(public.cfg_int('dias_referido'), 30) || ' días de Premium.', '/taller/#hoy');
+    end if;
+    return new;
+  end if;
+
   -- Cliente que se registra desde la página de su taller.
   if meta ->> 'rol' = 'cliente' and (meta ->> 'taller') ~ '^[0-9a-f-]{36}$' then
     select * into t from public.talleres where id = (meta ->> 'taller')::uuid and activo and not suspendido;
@@ -300,7 +357,7 @@ begin
     return new;
   end if;
 
-  raise exception 'El registro está cerrado. Pide tu acceso a tu taller.';
+  raise exception 'Para crear tu cuenta entra al link de tu taller o al registro de talleres.';
 end $$;
 
 drop trigger if exists on_auth_user_created on auth.users;
@@ -339,6 +396,14 @@ begin
     values (em, 'taller', trim(p_nombre), trim(coalesce(p_telefono, '')), trim(p_taller_nombre), c.id)
     on conflict (email) do update set rol = excluded.rol, nombre = excluded.nombre, telefono = excluded.telefono,
       taller_nombre = excluded.taller_nombre, taller_id = null, created_by = excluded.created_by, created_at = now();
+    return jsonb_build_object('ok', true);
+  end if;
+  if p_rol = 'socio' then
+    if not admin then return jsonb_build_object('ok', false, 'error', 'Solo el administrador crea socios'); end if;
+    insert into public.invitaciones (email, rol, nombre, telefono, created_by)
+    values (em, 'socio', trim(p_nombre), trim(coalesce(p_telefono, '')), c.id)
+    on conflict (email) do update set rol = excluded.rol, nombre = excluded.nombre, telefono = excluded.telefono,
+      taller_id = null, taller_nombre = '', created_by = excluded.created_by, created_at = now();
     return jsonb_build_object('ok', true);
   end if;
   if p_rol not in ('equipo', 'cliente') then return jsonb_build_object('ok', false, 'error', 'Tipo de cuenta no válido'); end if;
@@ -441,6 +506,7 @@ create trigger promos_lim before insert or update on public.promos for each row 
 --   abono           → del taller (le llega al taller). Solo lo ve el taller.
 --   premium_taller  → del administrador (el taller paga su Premium).
 --   premium_cliente → del administrador (el cliente paga su Premium).
+--   premium_taller_anual / premium_cliente_anual → lo mismo, pagando el año (v1.6).
 -- ---------------------------------------------------------------------
 create table if not exists public.links_pago (
   id         uuid primary key default gen_random_uuid(),
@@ -456,11 +522,18 @@ create table if not exists public.links_pago (
 );
 create unique index if not exists links_pago_uni on public.links_pago (coalesce(taller_id, '00000000-0000-0000-0000-000000000000'::uuid), tipo, slot);
 alter table public.links_pago enable row level security;
+alter table public.links_pago drop constraint if exists links_pago_tipo_check;
+alter table public.links_pago add constraint links_pago_tipo_check
+  check (tipo in ('abono', 'premium_taller', 'premium_cliente', 'premium_taller_anual', 'premium_cliente_anual'));
 
+-- Plan anual: precio sugerido = 10 meses (paga 10, lleva 12). Se activa al poner el link.
 insert into public.links_pago (taller_id, tipo, slot, monto, texto, activo)
-select null, x.tipo, x.slot, 4990, '', x.slot = 1
+select null, x.tipo, x.slot, case when x.tipo like '%anual' then 49900 else 4990 end,
+       case when x.tipo like '%anual' then 'Pago anual: pagas 10 meses y te llevas 12' else '' end, x.slot = 1
 from (values ('premium_taller', 1::smallint), ('premium_taller', 2::smallint),
-             ('premium_cliente', 1::smallint), ('premium_cliente', 2::smallint)) x(tipo, slot)
+             ('premium_cliente', 1::smallint), ('premium_cliente', 2::smallint),
+             ('premium_taller_anual', 1::smallint), ('premium_taller_anual', 2::smallint),
+             ('premium_cliente_anual', 1::smallint), ('premium_cliente_anual', 2::smallint)) x(tipo, slot)
 where not exists (select 1 from public.links_pago l where l.taller_id is null and l.tipo = x.tipo and l.slot = x.slot);
 
 create or replace function public.link_activo(p_taller uuid, p_tipo text) returns public.links_pago
@@ -524,6 +597,17 @@ create index if not exists reservas_cli_idx on public.reservas (cliente_id);
 alter table public.reservas enable row level security;
 alter table public.reservas add column if not exists entrega_estimada date;
 
+-- Fotos antes/después del trabajo (v1.6, taller Premium). Livianas y se borran solas después de N días.
+create table if not exists public.fotos_trabajo (
+  id          uuid primary key default gen_random_uuid(),
+  reserva_id  uuid not null references public.reservas (id) on delete cascade,
+  tipo        text not null check (tipo in ('antes', 'despues')),
+  imagen      text not null check (imagen ~ '^data:image/(jpeg|png|webp);base64,' and length(imagen) <= 160000),
+  created_at  timestamptz not null default now()
+);
+create index if not exists fotos_r_idx on public.fotos_trabajo (reserva_id);
+alter table public.fotos_trabajo enable row level security;
+
 -- Comprobantes (imagen liviana). Se borran solos después de N días.
 create table if not exists public.comprobantes (
   id          uuid primary key default gen_random_uuid(),
@@ -551,6 +635,7 @@ create table if not exists public.pagos (
 );
 create index if not exists pagos_e_idx on public.pagos (estado, created_at);
 alter table public.pagos enable row level security;
+alter table public.pagos add column if not exists anual boolean not null default false;   -- v1.6: pagó el año
 alter table public.comprobantes drop constraint if exists comprobantes_pago_fk;
 alter table public.comprobantes add constraint comprobantes_pago_fk foreign key (pago_id) references public.pagos (id) on delete cascade;
 
@@ -626,13 +711,23 @@ create or replace function public.avisar_admin(p_titulo text, p_cuerpo text, p_u
 language sql security definer set search_path = '' as $$
   insert into public.notificaciones (para, titulo, cuerpo, url)
   select p.id, left(p_titulo, 90), left(coalesce(p_cuerpo, ''), 240), coalesce(p_url, '')
-  from public.perfiles p where p.rol = 'admin' and p.email = public.admin_email()
+  from public.perfiles p where (p.rol = 'admin' and p.email = public.admin_email()) or (p.rol = 'socio' and not p.suspendido)
 $$;
 
+-- Registro de cambios. Si el cambio lo hace un socio, guarda su motivo y avisa al administrador.
 create or replace function public.auditar(p_accion text, p_detalle text) returns void
-language sql security definer set search_path = '' as $$
-  insert into public.auditoria (quien, accion, detalle) values (auth.uid(), p_accion, left(coalesce(p_detalle, ''), 500))
-$$;
+language plpgsql security definer set search_path = '' as $$
+declare m text := nullif(current_setting('bt.motivo', true), ''); quien text;
+begin
+  insert into public.auditoria (quien, accion, detalle)
+  values (auth.uid(), p_accion, left(coalesce(p_detalle, '') || coalesce(' · Motivo: ' || m, ''), 500));
+  select coalesce(nullif(nombre, ''), email) into quien from public.perfiles where id = auth.uid() and rol = 'socio';
+  if quien is not null then
+    insert into public.notificaciones (para, titulo, cuerpo, url)
+    select p.id, left('👥 ' || quien || ': ' || p_accion, 90), left(coalesce(p_detalle, '') || coalesce(' · Motivo: ' || m, ''), 240), '/admin/#ajustes'
+    from public.perfiles p where p.rol = 'admin' and p.email = public.admin_email();
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------
 -- 8. Políticas de lectura (las escrituras pasan por funciones)
@@ -714,7 +809,11 @@ language sql stable security definer set search_path = '' as $$
     'premium_taller', (select jsonb_build_object('monto', l.monto, 'url', l.url, 'texto', l.texto)
                        from public.link_activo(null, 'premium_taller') l where l.id is not null),
     'premium_cliente', (select jsonb_build_object('monto', l.monto, 'url', l.url, 'texto', l.texto)
-                        from public.link_activo(null, 'premium_cliente') l where l.id is not null))
+                        from public.link_activo(null, 'premium_cliente') l where l.id is not null),
+    'premium_taller_anual', (select jsonb_build_object('monto', l.monto, 'url', l.url, 'texto', l.texto)
+                             from public.link_activo(null, 'premium_taller_anual') l where l.id is not null),
+    'premium_cliente_anual', (select jsonb_build_object('monto', l.monto, 'url', l.url, 'texto', l.texto)
+                              from public.link_activo(null, 'premium_cliente_anual') l where l.id is not null))
 $$;
 
 create or replace function public.mi_cuenta() returns jsonb
@@ -771,6 +870,8 @@ language sql stable security definer set search_path = '' as $$
     'horarios', t.horarios, 'max_dia', t.max_dia, 'capacidad_dia', t.capacidad_dia,
     'colacion_desde', to_char(t.colacion_desde, 'HH24:MI'), 'colacion_hasta', to_char(t.colacion_hasta, 'HH24:MI'),
     'anticipacion_dias', t.anticipacion_dias, 'hoy', (now() at time zone t.zona)::date,
+    'premium', public.taller_es_premium(t.id), 'horas_premium', t.horas_premium,
+    'horas_libera_premium', coalesce(public.cfg_int('horas_libera_premium'), 24),
     'reservas_online', t.reservas_online and (public.link_activo(t.id, 'abono')).id is not null,
     'abono', (public.link_activo(t.id, 'abono')).monto,
     'nota', public.nota_taller(t.id),
@@ -842,6 +943,16 @@ begin
   end loop;
 end $$;
 
+-- Hora exclusiva Premium que todavía no se abre a todos (y quien reserva no es cliente Premium).
+create or replace function public.hora_premium_cerrada(p_taller uuid, p_fecha date, p_hora text, p_cliente uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select coalesce((select left(p_hora, 5) = any (t.horas_premium)
+                     and (p_fecha + left(p_hora, 5)::time) at time zone t.zona
+                         > now() + make_interval(hours => coalesce(public.cfg_int('horas_libera_premium'), 24))
+                   from public.talleres t where t.id = p_taller), false)
+     and not public.cliente_es_premium(p_cliente)
+$$;
+
 -- Días con horas libres (para pintar el calendario de reserva).
 create or replace function public.dias_libres(p_taller uuid, p_min int) returns setof date
 language plpgsql stable security definer set search_path = '' as $$
@@ -850,7 +961,9 @@ begin
   select * into c from public.talleres where id = p_taller and activo and not suspendido;
   if c.id is null then return; end if;
   select * into me from public.perfiles where id = auth.uid();
-  if me.rol = 'cliente' and me.taller_id = p_taller then extra := coalesce((public.limite_cliente(me.id, 'anticipacion_extra'))::int, 0); end if;
+  if me.rol = 'cliente' and (me.taller_id = p_taller or public.cliente_es_premium(me.id)) then
+    extra := coalesce((public.limite_cliente(me.id, 'anticipacion_extra'))::int, 0);
+  end if;
   hoy := (now() at time zone c.zona)::date;
   for d in select generate_series(hoy, hoy + c.anticipacion_dias + extra, interval '1 day')::date loop
     if exists (select 1 from public.horas_libres(p_taller, d, p_min)) then return next d; end if;
@@ -885,7 +998,8 @@ begin
   l := public.link_activo(p_taller, 'abono');
   if l.id is null then return jsonb_build_object('ok', false, 'error', 'El taller aún no configura el pago del abono'); end if;
   select * into me from public.perfiles where id = auth.uid();
-  if me.id is not null and (me.rol <> 'cliente' or me.taller_id <> p_taller) then me := null; end if;
+  -- Con cuenta: en su taller, o en cualquier taller si es cliente Premium.
+  if me.id is not null and (me.rol <> 'cliente' or (me.taller_id <> p_taller and not public.cliente_es_premium(me.id))) then me := null; end if;
   if me.id is not null then extra := coalesce((public.limite_cliente(me.id, 'anticipacion_extra'))::int, 0); end if;
   nom := left(trim(coalesce(nullif(trim(p_nombre), ''), me.nombre, '')), 80);
   tel := left(trim(coalesce(nullif(trim(p_telefono), ''), me.telefono, '')), 30);
@@ -917,6 +1031,9 @@ begin
   if not exists (select 1 from public.horas_libres(p_taller, p_fecha, mins) h where h = p_hora) then
     return jsonb_build_object('ok', false, 'error', 'Esa hora ya no está disponible. Elige otra.');
   end if;
+  if public.hora_premium_cerrada(p_taller, p_fecha, p_hora, me.id) then
+    return jsonb_build_object('ok', false, 'error', 'Esa hora es exclusiva para clientes Premium. Elige otra o hazte Premium.');
+  end if;
   mins := (ceil(mins::numeric / c.bloque_min) * c.bloque_min)::int;
   -- Entrega estimada según la cola del taller (si calcula capacidad diaria).
   ent := public.estimar_entrega(p_taller, p_fecha, p_hora::time, null);
@@ -943,6 +1060,12 @@ begin
     ' · esperando abono', '/taller/#reservas');
   return jsonb_build_object('ok', true, 'token', r.token);
 end $$;
+
+-- ¿Quien tiene el enlace de la reserva puede ver sus fotos antes/después?
+create or replace function public.fotos_visibles(r public.reservas) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select r.estado <> 'completada' or r.completada_at > now() - interval '7 days' or public.cliente_es_premium(r.cliente_id)
+$$;
 
 -- Detalle de la reserva por su enlace (sin cuenta).
 create or replace function public.reserva_estado_vencido(r public.reservas) returns public.reservas
@@ -985,6 +1108,9 @@ begin
               or (r.estado = 'cancelada' and r.abono_estado = 'saldo' and r.saldo_hasta > now()),
     'pagar_url', case when r.estado = 'por_pagar' then l.url end,
     'calificada', exists (select 1 from public.calificaciones where reserva_id = r.id and autor = 'cliente'),
+    -- Fotos antes/después: se ven durante el trabajo y una semana después; luego, solo el cliente Premium.
+    'fotos_n', (select count(*) from public.fotos_trabajo f where f.reserva_id = r.id),
+    'fotos_visibles', public.fotos_visibles(r),
     'taller', jsonb_build_object('id', c.id, 'nombre', c.nombre, 'slug', c.slug, 'telefono', c.telefono, 'logo', c.logo,
       'color', c.color, 'icono', c.icono, 'direccion', c.direccion, 'comuna', c.comuna),
     'minutos_devolucion', dev, 'horas_cancelacion', hrs);
@@ -1060,6 +1186,9 @@ begin
   if not exists (select 1 from public.horas_libres(r.taller_id, p_fecha, mins, r.id) h where h = p_hora) then
     return jsonb_build_object('ok', false, 'error', 'Esa hora ya no está disponible. Elige otra.');
   end if;
+  if public.hora_premium_cerrada(r.taller_id, p_fecha, p_hora, r.cliente_id) then
+    return jsonb_build_object('ok', false, 'error', 'Esa hora es exclusiva para clientes Premium. Elige otra.');
+  end if;
   update public.reservas set fecha = p_fecha, hora = p_hora::time, hora_fin = p_hora::time + make_interval(mins => mins),
     estado = 'confirmada', abono_estado = 'pagado', saldo_hasta = null, recordado = false, reagendada = reagendada + 1,
     entrega_estimada = public.estimar_entrega(r.taller_id, p_fecha, p_hora::time, r.id),
@@ -1102,7 +1231,8 @@ begin
     'mi_nota', public.nota_cliente(me.telefono),
     'activas', (select coalesce(jsonb_agg(jsonb_build_object('token', r.token, 'estado', r.estado, 'fecha', r.fecha,
                   'hora', to_char(r.hora, 'HH24:MI'), 'servicio', r.servicio_nombre, 'abono_estado', r.abono_estado,
-                  'saldo_hasta', r.saldo_hasta) order by r.fecha, r.hora), '[]')
+                  'saldo_hasta', r.saldo_hasta, 'otro_taller', case when r.taller_id <> me.taller_id
+                    then (select nombre from public.talleres where id = r.taller_id) end) order by r.fecha, r.hora), '[]')
                 from public.reservas r where r.cliente_id = me.id
                   and ((r.estado in ('por_pagar', 'en_revision', 'confirmada', 'recibida', 'en_reparacion', 'esperando_repuesto', 'lista')
                         and public.ocupa_hora(r))
@@ -1110,6 +1240,8 @@ begin
     'historial', (select coalesce(jsonb_agg(x order by x.fecha desc), '[]') from (
                   select r.token, r.estado, r.fecha, to_char(r.hora, 'HH24:MI') as hora, r.servicio_nombre as servicio, r.total,
                          r.bici, r.diagnostico, r.items, r.proxima_mantencion,
+                         (select t2.nombre from public.talleres t2 where t2.id = r.taller_id) as taller,
+                         (select count(*) from public.fotos_trabajo f where f.reserva_id = r.id) as fotos,
                          exists (select 1 from public.calificaciones q where q.reserva_id = r.id and q.autor = 'cliente') as calificada
                   from public.reservas r where r.cliente_id = me.id and r.estado in ('completada', 'no_asistio')
                   order by r.fecha desc limit lim) x),
@@ -1184,8 +1316,15 @@ begin
     horarios = case when p ? 'horarios' and jsonb_typeof(p -> 'horarios') = 'object' then p -> 'horarios' else horarios end,
     max_dia = coalesce(least(greatest((p ->> 'max_dia')::int, 0), 200), max_dia),
     capacidad_dia = coalesce(least(greatest((p ->> 'capacidad_dia')::int, 0), 100), capacidad_dia),
-    max_espera_dias = coalesce(least(greatest((p ->> 'max_espera_dias')::int, 1), 120), max_espera_dias)
+    max_espera_dias = coalesce(least(greatest((p ->> 'max_espera_dias')::int, 1), 120), max_espera_dias),
+    en_directorio = coalesce((p ->> 'en_directorio')::boolean, en_directorio),
+    horas_premium = case when jsonb_typeof(p -> 'horas_premium') = 'array' then
+      (select coalesce(array_agg(distinct left(x, 5) order by left(x, 5)), '{}') from jsonb_array_elements_text(p -> 'horas_premium') x
+       where x ~ '^([01][0-9]|2[0-3]):[0-5][0-9]') else horas_premium end
   where id = tid;
+  if cardinality((select horas_premium from public.talleres where id = tid)) > 12 then
+    raise exception 'Máximo 12 horas exclusivas Premium';
+  end if;
   if exists (select 1 from public.talleres t, jsonb_each(t.horarios) h where t.id = tid
              and (h.value ->> 'cierra')::time <= (h.value ->> 'abre')::time) then
     raise exception 'Revisa el horario: el cierre debe ser después de la apertura';
@@ -1202,7 +1341,7 @@ begin
   if p_tipo = 'abono' then
     tid := public.taller_de(auth.uid());
     if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller'; end if;
-  elsif p_tipo in ('premium_taller', 'premium_cliente') then
+  elsif p_tipo in ('premium_taller', 'premium_cliente', 'premium_taller_anual', 'premium_cliente_anual') then
     if not public.is_admin() then raise exception 'Solo el administrador'; end if;
     tid := null;
   else raise exception 'Tipo no válido'; end if;
@@ -1451,8 +1590,10 @@ end $$;
 
 -- ---------------------------------------------------------------------
 -- 13. Premium: pagar con link y subir el comprobante (taller o cliente → admin)
+--     Mensual (duración del plan) o anual (365 días, con el link anual).
 -- ---------------------------------------------------------------------
-create or replace function public.premium_pagar(p_tipo text, p_imagen text) returns jsonb
+drop function if exists public.premium_pagar(text, text);
+create or replace function public.premium_pagar(p_tipo text, p_imagen text, p_anual boolean default false) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare me public.perfiles; l public.links_pago; pg public.pagos; quien text;
 begin
@@ -1463,7 +1604,7 @@ begin
   end if;
   if p_tipo = 'premium_cliente' and me.rol <> 'cliente' then return jsonb_build_object('ok', false, 'error', 'Solo clientes'); end if;
   if p_tipo not in ('premium_taller', 'premium_cliente') then return jsonb_build_object('ok', false, 'error', 'Tipo no válido'); end if;
-  l := public.link_activo(null, p_tipo);
+  l := public.link_activo(null, p_tipo || case when coalesce(p_anual, false) then '_anual' else '' end);
   if l.id is null then return jsonb_build_object('ok', false, 'error', 'El pago aún no está disponible'); end if;
   if p_imagen !~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' or length(p_imagen) > 600000 then
     return jsonb_build_object('ok', false, 'error', 'Imagen no válida o muy pesada');
@@ -1471,18 +1612,19 @@ begin
   if exists (select 1 from public.pagos where perfil_id = me.id and estado = 'en_revision') then
     return jsonb_build_object('ok', false, 'error', 'Ya tienes un comprobante en revisión');
   end if;
-  insert into public.pagos (perfil_id, taller_id, tipo, monto) values (me.id, case when p_tipo = 'premium_taller' then me.taller_id end, p_tipo, l.monto)
+  insert into public.pagos (perfil_id, taller_id, tipo, monto, anual)
+  values (me.id, case when p_tipo = 'premium_taller' then me.taller_id end, p_tipo, l.monto, coalesce(p_anual, false))
   returning * into pg;
   insert into public.comprobantes (pago_id, imagen) values (pg.id, p_imagen);
   quien := case when p_tipo = 'premium_taller' then (select nombre from public.talleres where id = me.taller_id)
                 else coalesce(nullif(me.nombre, ''), me.email) || ' (cliente)' end;
-  perform public.avisar_admin('💰 Pago Premium por revisar', quien || ' · $' || l.monto, '/admin/#pagos');
+  perform public.avisar_admin('💰 Pago Premium por revisar', quien || ' · $' || l.monto || case when p_anual then ' · anual' else '' end, '/admin/#pagos');
   return jsonb_build_object('ok', true);
 end $$;
 
 create or replace function public.mi_pago_pendiente() returns jsonb
 language sql stable security definer set search_path = '' as $$
-  select jsonb_build_object('id', id, 'monto', monto, 'estado', estado, 'created_at', created_at, 'nota', nota)
+  select jsonb_build_object('id', id, 'monto', monto, 'estado', estado, 'created_at', created_at, 'nota', nota, 'anual', anual)
   from public.pagos where perfil_id = auth.uid() order by created_at desc limit 1
 $$;
 
@@ -1495,18 +1637,37 @@ begin
   if not public.is_admin() then raise exception 'Solo el administrador'; end if;
 end $$;
 
+-- Ver el panel: administrador o socio.
+create or replace function public.admin_ver() returns void
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not (public.is_admin() or public.es_socio()) then raise exception 'Solo el administrador'; end if;
+end $$;
+
+-- Editar: el administrador libre; el socio solo con un motivo (queda en el registro y le llega al administrador).
+create or replace function public.admin_editar(p_motivo text) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if public.is_admin() then perform set_config('bt.motivo', coalesce(trim(p_motivo), ''), true); return; end if;
+  if not public.es_socio() then raise exception 'Solo el administrador'; end if;
+  if length(trim(coalesce(p_motivo, ''))) < 5 then raise exception 'Escribe el motivo del cambio (mínimo 5 letras)'; end if;
+  perform set_config('bt.motivo', left(trim(p_motivo), 200), true);
+end $$;
+
 create or replace function public.admin_resumen() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 declare tablas jsonb;
 begin
-  perform public.admin_check();
+  perform public.admin_ver();
   select jsonb_object_agg(t, pg_total_relation_size(('public.' || t)::regclass)) into tablas
-  from unnest(array['perfiles', 'talleres', 'servicios', 'promos', 'reservas', 'comprobantes', 'pagos', 'calificaciones',
-                    'notificaciones', 'push_subs', 'auditoria']) t;
+  from unnest(array['perfiles', 'talleres', 'servicios', 'promos', 'reservas', 'comprobantes', 'fotos_trabajo', 'pagos', 'calificaciones',
+                    'notificaciones', 'push_subs', 'auditoria', 'mensajes']) t;
   return jsonb_build_object(
     'talleres', (select count(*) from public.talleres),
     'talleres_premium', (select count(*) from public.talleres where premium_hasta > now()),
     'talleres_activos_7d', (select count(distinct p.taller_id) from public.perfiles p where p.rol in ('taller', 'equipo') and p.visto_at > now() - interval '7 days'),
+    'talleres_nuevos_7d', (select count(*) from public.talleres where created_at > now() - interval '7 days'),
+    'registro_abierto', coalesce(public.cfg_int('registro_talleres'), 1) > 0,
     'clientes', (select count(*) from public.perfiles where rol = 'cliente'),
     'clientes_premium', (select count(*) from public.perfiles where rol = 'cliente' and premium_hasta > now()),
     'equipo', (select count(*) from public.perfiles where rol = 'equipo'),
@@ -1518,6 +1679,7 @@ begin
     'uso', jsonb_build_object('db_bytes', pg_database_size(current_database()), 'db_limite', 500 * 1024 * 1024, 'tablas', tablas,
       'comprobantes', (select count(*) from public.comprobantes), 'comprobantes_bytes', (select coalesce(sum(length(imagen)), 0) from public.comprobantes),
       'logos_bytes', (select coalesce(sum(length(logo)), 0) from public.talleres),
+      'fotos', (select count(*) from public.fotos_trabajo), 'fotos_bytes', (select coalesce(sum(length(imagen)), 0) from public.fotos_trabajo),
       'notificaciones', (select count(*) from public.notificaciones), 'reservas', (select count(*) from public.reservas)),
     'version', public.db_version());
 end $$;
@@ -1525,10 +1687,12 @@ end $$;
 create or replace function public.admin_talleres() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 begin
-  perform public.admin_check();
+  perform public.admin_ver();
   return (select coalesce(jsonb_agg(x order by x.created_at desc), '[]') from (
     select t.id, t.nombre, t.slug, t.telefono, t.comuna, t.logo, t.color, t.icono, t.premium_hasta, t.premium_hasta > now() as premium,
-      t.activo, t.suspendido, t.created_at, t.reservas_online,
+      t.activo, t.suspendido, t.created_at, t.reservas_online, t.autoregistro, t.en_directorio,
+      (select x.nombre from public.talleres x where x.id = t.referido_por) as referido_por,
+      (select count(*) from public.talleres x where x.referido_por = t.id) as invitados,
       o.email, o.nombre as dueno, o.visto_at as dueno_visto,
       (select max(p.visto_at) from public.perfiles p where p.taller_id = t.id and p.rol in ('taller', 'equipo')) as visto_at,
       (select count(*) from public.perfiles p where p.taller_id = t.id and p.rol = 'cliente') as clientes_cuenta,
@@ -1547,7 +1711,7 @@ end $$;
 create or replace function public.admin_clientes() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 begin
-  perform public.admin_check();
+  perform public.admin_ver();
   return (select coalesce(jsonb_agg(x order by x.created_at desc), '[]') from (
     select p.id, p.rol, p.nombre, p.email, p.telefono, p.premium_hasta, p.premium_hasta > now() as premium, p.suspendido, p.visto_at,
       p.created_at, t.nombre as taller, t.id as taller_id, public.nota_cliente(p.telefono) as nota,
@@ -1556,11 +1720,12 @@ begin
 end $$;
 
 -- Dar o quitar Premium (días; 0 = quitar).
-create or replace function public.admin_premium(p_tipo text, p_id uuid, p_dias int) returns void
+drop function if exists public.admin_premium(text, uuid, int);
+create or replace function public.admin_premium(p_tipo text, p_id uuid, p_dias int, p_motivo text default null) returns void
 language plpgsql security definer set search_path = '' as $$
 declare h timestamptz; owner uuid; nom text;
 begin
-  perform public.admin_check();
+  perform public.admin_editar(p_motivo);
   if p_tipo = 'taller' then
     update public.talleres set premium_hasta = case when coalesce(p_dias, 0) <= 0 then now()
       else greatest(coalesce(premium_hasta, now()), now()) + make_interval(days => p_dias) end
@@ -1580,13 +1745,17 @@ begin
   perform public.auditar('premium', p_tipo || ' ' || coalesce(nom, '') || ': ' || case when p_dias > 0 then '+' || p_dias || ' días' else 'quitado' end);
 end $$;
 
-create or replace function public.admin_suspender(p_tipo text, p_id uuid, p_suspender boolean) returns void
+drop function if exists public.admin_suspender(text, uuid, boolean);
+create or replace function public.admin_suspender(p_tipo text, p_id uuid, p_suspender boolean, p_motivo text default null) returns void
 language plpgsql security definer set search_path = '' as $$
 begin
-  perform public.admin_check();
+  perform public.admin_editar(p_motivo);
   if p_tipo = 'taller' then
     update public.talleres set suspendido = p_suspender where id = p_id;
   else
+    if not public.is_admin() and exists (select 1 from public.perfiles where id = p_id and rol = 'socio') then
+      raise exception 'Solo el administrador suspende socios';
+    end if;
     update public.perfiles set suspendido = p_suspender where id = p_id and rol <> 'admin';
   end if;
   perform public.auditar(case when p_suspender then 'suspender' else 'reactivar' end, p_tipo || ' ' || p_id);
@@ -1595,9 +1764,9 @@ end $$;
 create or replace function public.admin_pagos(p_estado text) returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 begin
-  perform public.admin_check();
+  perform public.admin_ver();
   return (select coalesce(jsonb_agg(x order by x.created_at desc), '[]') from (
-    select g.id, g.tipo, g.monto, g.estado, g.nota, g.created_at, g.resuelto_at,
+    select g.id, g.tipo, g.monto, g.estado, g.nota, g.created_at, g.resuelto_at, g.anual,
       coalesce(t.nombre, nullif(p.nombre, ''), p.email) as quien, p.email, p.telefono,
       case when g.tipo = 'premium_taller' then t.premium_hasta else p.premium_hasta end as premium_hasta,
       exists (select 1 from public.comprobantes k where k.pago_id = g.id) as tiene_comprobante
@@ -1608,23 +1777,32 @@ end $$;
 create or replace function public.admin_pago_comprobante(p_id uuid) returns text
 language plpgsql stable security definer set search_path = '' as $$
 begin
-  perform public.admin_check();
+  perform public.admin_ver();
   return (select imagen from public.comprobantes where pago_id = p_id order by created_at desc limit 1);
 end $$;
 
 create or replace function public.admin_pago_resolver(p_id uuid, p_aprobar boolean, p_nota text) returns void
 language plpgsql security definer set search_path = '' as $$
-declare g public.pagos; dias int;
+declare g public.pagos; dias int; t public.talleres; regalo int := coalesce(public.cfg_int('dias_referido'), 30);
 begin
-  perform public.admin_check();
+  perform public.admin_editar(case when p_aprobar then 'Pago aprobado tras revisar el comprobante' else p_nota end);
   select * into g from public.pagos where id = p_id for update;
   if g.id is null or g.estado <> 'en_revision' then raise exception 'Este pago ya fue revisado'; end if;
   update public.pagos set estado = case when p_aprobar then 'aprobado' else 'rechazado' end, nota = left(coalesce(p_nota, ''), 300),
     resuelto_at = now() where id = g.id;
   if p_aprobar then
     select duracion_dias into dias from public.planes where codigo = case when g.tipo = 'premium_taller' then 'taller_premium' else 'cliente_premium' end;
-    if g.tipo = 'premium_taller' then perform public.admin_premium('taller', g.taller_id, coalesce(dias, 30));
-    else perform public.admin_premium('cliente', g.perfil_id, coalesce(dias, 30)); end if;
+    if g.anual then dias := 365; end if;
+    if g.tipo = 'premium_taller' then perform public.admin_premium('taller', g.taller_id, coalesce(dias, 30), 'Pago aprobado tras revisar el comprobante');
+    else perform public.admin_premium('cliente', g.perfil_id, coalesce(dias, 30), 'Pago aprobado tras revisar el comprobante'); end if;
+    -- Referidos: el primer Premium pagado del taller invitado le regala días al taller que lo invitó.
+    select * into t from public.talleres where id = g.taller_id and g.tipo = 'premium_taller' and referido_por is not null and not referido_premiado for update;
+    if t.id is not null and regalo > 0 then
+      update public.talleres set referido_premiado = true where id = t.id;
+      update public.talleres set premium_hasta = greatest(coalesce(premium_hasta, now()), now()) + make_interval(days => regalo) where id = t.referido_por;
+      perform public.avisar_taller(t.referido_por, '🤝 ¡Ganaste ' || regalo || ' días de Premium!', t.nombre || ' activó su Premium con tu invitación. ¡Gracias por recomendarnos!', '/taller/#plan');
+      perform public.auditar('referido', t.nombre || ' → +' || regalo || ' días al taller que lo invitó');
+    end if;
   else
     perform public.avisar(g.perfil_id, '❌ Pago rechazado', coalesce(nullif(p_nota, ''), 'Revisa el comprobante e inténtalo de nuevo.'),
       case when g.tipo = 'premium_taller' then '/taller/#mas' else '/cliente/' end);
@@ -1635,16 +1813,17 @@ end $$;
 create or replace function public.admin_links() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 begin
-  perform public.admin_check();
+  perform public.admin_ver();
   return (select coalesce(jsonb_agg(jsonb_build_object('tipo', tipo, 'slot', slot, 'monto', monto, 'url', url, 'texto', texto,
     'activo', activo) order by tipo, slot), '[]') from public.links_pago where taller_id is null);
 end $$;
 
+drop function if exists public.admin_plan_guardar(text, text, text, jsonb, jsonb, int);
 create or replace function public.admin_plan_guardar(p_codigo text, p_nombre text, p_descripcion text, p_limites jsonb,
-  p_beneficios jsonb, p_duracion int) returns void
+  p_beneficios jsonb, p_duracion int, p_motivo text default null) returns void
 language plpgsql security definer set search_path = '' as $$
 begin
-  perform public.admin_check();
+  perform public.admin_editar(p_motivo);
   if jsonb_typeof(p_limites) <> 'object' or jsonb_typeof(p_beneficios) <> 'array' then raise exception 'Datos no válidos'; end if;
   update public.planes set nombre = left(trim(p_nombre), 40), descripcion = left(coalesce(p_descripcion, ''), 300),
     limites = p_limites, beneficios = p_beneficios, duracion_dias = greatest(1, least(coalesce(p_duracion, 30), 3650))
@@ -1653,22 +1832,26 @@ begin
   perform public.auditar('plan', p_codigo);
 end $$;
 
-create or replace function public.admin_config_guardar(p_clave text, p_valor jsonb) returns void
+drop function if exists public.admin_config_guardar(text, jsonb);
+create or replace function public.admin_config_guardar(p_clave text, p_valor jsonb, p_motivo text default null) returns void
 language plpgsql security definer set search_path = '' as $$
 begin
-  perform public.admin_check();
+  perform public.admin_editar(p_motivo);
   if p_clave not in ('minutos_pago', 'minutos_devolucion', 'horas_cancelacion', 'dias_saldo', 'dias_regalo_taller',
-                     'dias_aviso_vencimiento', 'dias_comprobantes', 'soporte_whatsapp', 'vapid_publica') then
+                     'dias_aviso_vencimiento', 'dias_comprobantes', 'soporte_whatsapp', 'vapid_publica',
+                     'registro_talleres', 'dias_referido', 'horas_libera_premium', 'dias_fotos') then
     raise exception 'Ajuste no válido';
   end if;
+  if p_clave = 'vapid_publica' and not public.is_admin() then raise exception 'Solo el administrador'; end if;
   insert into public.config (clave, valor) values (p_clave, p_valor) on conflict (clave) do update set valor = excluded.valor;
   perform public.auditar('ajuste', p_clave || ' = ' || p_valor::text);
 end $$;
 
-create or replace function public.admin_texto_guardar(p_clave text, p_valor text) returns void
+drop function if exists public.admin_texto_guardar(text, text);
+create or replace function public.admin_texto_guardar(p_clave text, p_valor text, p_motivo text default null) returns void
 language plpgsql security definer set search_path = '' as $$
 begin
-  perform public.admin_check();
+  perform public.admin_editar(p_motivo);
   update public.textos set valor = left(coalesce(p_valor, ''), 2000) where clave = p_clave;
   if not found then raise exception 'Texto no encontrado'; end if;
   perform public.auditar('texto', p_clave);
@@ -1677,7 +1860,7 @@ end $$;
 create or replace function public.admin_calificaciones() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 begin
-  perform public.admin_check();
+  perform public.admin_ver();
   return (select coalesce(jsonb_agg(x order by x.created_at desc), '[]') from (
     select q.id, q.autor, q.estrellas, q.comentario, q.created_at, t.nombre as taller, r.nombre as cliente
     from public.calificaciones q join public.talleres t on t.id = q.taller_id join public.reservas r on r.id = q.reserva_id
@@ -1712,14 +1895,16 @@ end $$;
 create or replace function public.admin_auditoria() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 begin
-  perform public.admin_check();
-  return (select coalesce(jsonb_agg(x order by x.id desc), '[]') from (select * from public.auditoria order by id desc limit 200) x);
+  perform public.admin_ver();
+  return (select coalesce(jsonb_agg(x order by x.id desc), '[]') from (
+    select a.*, coalesce(nullif(p.nombre, ''), p.email) as quien_nombre, p.rol as quien_rol
+    from public.auditoria a left join public.perfiles p on p.id = a.quien order by a.id desc limit 200) x);
 end $$;
 
 -- Limpieza del servidor.
 create or replace function public.limpiar(p_que text) returns jsonb
 language plpgsql security definer set search_path = '' as $$
-declare a int := 0; b int := 0; c int := 0; d int := 0; dias int := coalesce(public.cfg_int('dias_comprobantes'), 30);
+declare a int := 0; b int := 0; c int := 0; d int := 0; f int := 0; dias int := coalesce(public.cfg_int('dias_comprobantes'), 30);
 begin
   if auth.uid() is not null then perform public.admin_check(); end if;
   if p_que in ('comprobantes', 'todo', 'auto') then
@@ -1736,13 +1921,17 @@ begin
     delete from public.reservas where estado in ('expirada', 'rechazada') and updated_at < now() - interval '60 days';
     get diagnostics c = row_count;
   end if;
+  if p_que in ('fotos', 'todo', 'auto') then
+    delete from public.fotos_trabajo where created_at < now() - make_interval(days => coalesce(public.cfg_int('dias_fotos'), 365));
+    get diagnostics f = row_count;
+  end if;
   if p_que in ('otros', 'todo', 'auto') then
     delete from public.auditoria where created_at < now() - interval '365 days';
     delete from public.invitaciones where created_at < now() - interval '2 days';
     get diagnostics d = row_count;
   end if;
   if auth.uid() is not null then perform public.auditar('limpieza', p_que); end if;
-  return jsonb_build_object('comprobantes', a, 'notificaciones', b, 'reservas', c, 'otros', d);
+  return jsonb_build_object('comprobantes', a, 'notificaciones', b, 'reservas', c, 'otros', d, 'fotos', f);
 end $$;
 
 -- Claves push (las genera el panel del admin).
@@ -1877,11 +2066,11 @@ grant execute on function
   public.taller_reserva_manual(date, text, uuid, text, text, text, text, boolean), public.taller_devuelto(uuid),
   public.taller_calificar(uuid, int, text), public.taller_clientes(), public.taller_equipo_suspender(uuid, boolean),
   public.taller_estadisticas(), public.taller_recordatorios(), public.taller_limpiar_comprobantes(),
-  public.premium_pagar(text, text), public.mi_pago_pendiente(),
-  public.admin_resumen(), public.admin_talleres(), public.admin_clientes(), public.admin_premium(text, uuid, int),
-  public.admin_suspender(text, uuid, boolean), public.admin_pagos(text), public.admin_pago_comprobante(uuid),
-  public.admin_pago_resolver(uuid, boolean, text), public.admin_links(), public.admin_plan_guardar(text, text, text, jsonb, jsonb, int),
-  public.admin_config_guardar(text, jsonb), public.admin_texto_guardar(text, text), public.admin_calificaciones(),
+  public.premium_pagar(text, text, boolean), public.mi_pago_pendiente(),
+  public.admin_resumen(), public.admin_talleres(), public.admin_clientes(), public.admin_premium(text, uuid, int, text),
+  public.admin_suspender(text, uuid, boolean, text), public.admin_pagos(text), public.admin_pago_comprobante(uuid),
+  public.admin_pago_resolver(uuid, boolean, text), public.admin_links(), public.admin_plan_guardar(text, text, text, jsonb, jsonb, int, text),
+  public.admin_config_guardar(text, jsonb, text), public.admin_texto_guardar(text, text, text), public.admin_calificaciones(),
   public.admin_calificacion_borrar(uuid), public.admin_aviso(text, text, text), public.admin_auditoria(), public.limpiar(text),
   public.admin_push_claves(text, text), public.push_guardar(text, text, text), public.push_quitar(text)
 to authenticated;
@@ -1918,7 +2107,7 @@ alter table public.mensajes enable row level security;
 create or replace function public.chat_puede(t uuid, c uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
   select public.taller_de(auth.uid()) = t
-      or (c is null and public.is_admin())
+      or (c is null and (public.is_admin() or public.es_socio()))
       or (c = auth.uid() and exists (select 1 from public.perfiles p where p.id = c and p.rol = 'cliente' and p.taller_id = t and not p.suspendido))
 $$;
 
@@ -1986,7 +2175,7 @@ begin
         count(*) filter (where not m.leido and not m.de_taller)
       from public.mensajes m join public.perfiles p on p.id = m.cliente_id
       where m.taller_id = tid group by p.id, p.nombre, p.email) x);
-  elsif public.is_admin() then
+  elsif public.is_admin() or public.es_socio() then
     return (select coalesce(jsonb_agg(x order by x.ultimo desc), '[]') from (
       select null::uuid as cliente_id, t.nombre, t.id as taller_id, max(m.created_at) as ultimo,
         count(*) filter (where not m.leido and m.de_taller) as no_leidos
@@ -2138,6 +2327,7 @@ create or replace function public.chat_limpiar(p_taller uuid, p_cliente uuid) re
 language plpgsql security definer set search_path = '' as $$
 begin
   if not public.chat_puede(p_taller, p_cliente) then raise exception 'Sin permiso'; end if;
+  if public.es_socio() then raise exception 'Solo el administrador borra conversaciones'; end if;
   delete from public.mensajes where taller_id = p_taller and cliente_id is not distinct from p_cliente;
 end $$;
 
@@ -2161,7 +2351,7 @@ language sql stable security definer set search_path = '' as $$
   select jsonb_build_object(
     'id', p.id, 'email', p.email, 'nombre', p.nombre, 'telefono', p.telefono, 'rol', p.rol,
     'suspendido', p.suspendido or coalesce(t.suspendido, false),
-    'is_admin', public.is_admin(),
+    'is_admin', public.is_admin(), 'is_socio', p.rol = 'socio' and not p.suspendido,
     'taller_id', p.taller_id,
     'foto', p.foto, 'color', p.color, 'icono', p.icono, 'descripcion', p.descripcion,
     'taller', case when t.id is null then null else jsonb_build_object(
@@ -2181,6 +2371,132 @@ revoke execute on function public.estimar_entrega(uuid, date, time, uuid), publi
 grant execute on function public.entrega_estimada(uuid, date, text) to anon, authenticated;
 grant execute on function public.chat_enviar(uuid, uuid, text, text), public.chat_leer(uuid, uuid), public.chat_limpiar(uuid, uuid),
   public.cliente_estilo(text, text, text, text), public.mi_cuenta() to authenticated;
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    execute 'grant execute on all functions in schema public to service_role';
+  end if;
+end $$;
+
+-- =====================================================================
+-- 21. (v1.6) Registro abierto de talleres, directorio, referidos y fotos antes/después
+-- =====================================================================
+-- Página /n/: ¿está abierto el registro? ¿quién invita?
+create or replace function public.registro_info(p_ref text default null) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object(
+    'abierto', coalesce(public.cfg_int('registro_talleres'), 1) > 0,
+    'dias_regalo', coalesce(public.cfg_int('dias_regalo_taller'), 30),
+    'ref', (select jsonb_build_object('nombre', t.nombre, 'slug', t.slug, 'logo', t.logo, 'icono', t.icono, 'color', t.color)
+            from public.talleres t where t.slug = lower(trim(coalesce(p_ref, ''))) and t.activo and not t.suspendido))
+$$;
+
+-- Directorio público: talleres activos con al menos un servicio. Los Premium aparecen primero.
+create or replace function public.directorio(p_comuna text default null, p_q text default null, p_desde int default 0) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  with v as (
+    select t.*, public.taller_es_premium(t.id) as prem, public.nota_taller(t.id) as nota
+    from public.talleres t
+    where t.activo and not t.suspendido and t.en_directorio
+      and exists (select 1 from public.servicios s where s.taller_id = t.id and s.activo))
+  select jsonb_build_object(
+    'comunas', (select coalesce(jsonb_agg(c order by c), '[]') from (select distinct initcap(lower(trim(comuna))) as c from v where trim(comuna) <> '') x),
+    'total', (select count(*) from v where (coalesce(trim(p_comuna), '') = '' or lower(trim(v.comuna)) = lower(trim(p_comuna)))
+                and (coalesce(trim(p_q), '') = '' or (v.nombre || ' ' || v.comuna || ' ' || v.descripcion) ilike '%' || trim(p_q) || '%')),
+    'talleres', (select coalesce(jsonb_agg(x), '[]') from (
+      select v.slug, v.nombre, v.comuna, v.direccion, v.descripcion, v.logo, v.icono, v.color, v.prem as premium, v.nota,
+        v.reservas_online and (public.link_activo(v.id, 'abono')).id is not null as reservas_online,
+        (select min(s.precio) from public.servicios s where s.taller_id = v.id and s.activo and not s.adicional and s.precio > 0) as desde
+      from v
+      where (coalesce(trim(p_comuna), '') = '' or lower(trim(v.comuna)) = lower(trim(p_comuna)))
+        and (coalesce(trim(p_q), '') = '' or (v.nombre || ' ' || v.comuna || ' ' || v.descripcion) ilike '%' || trim(p_q) || '%')
+      order by v.prem desc, (v.nota ->> 'promedio')::numeric desc nulls last, (v.nota ->> 'total')::int desc, v.nombre
+      offset greatest(coalesce(p_desde, 0), 0) limit 30) x))
+$$;
+
+-- Referidos del taller: su link para invitar a otros talleres y a quiénes invitó.
+create or replace function public.taller_referidos() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller'; end if;
+  return jsonb_build_object(
+    'slug', (select slug from public.talleres where id = tid),
+    'dias', coalesce(public.cfg_int('dias_referido'), 30),
+    'abierto', coalesce(public.cfg_int('registro_talleres'), 1) > 0,
+    'invitados', (select coalesce(jsonb_agg(jsonb_build_object('nombre', t.nombre, 'created_at', t.created_at, 'premiado', t.referido_premiado)
+                   order by t.created_at desc), '[]') from public.talleres t where t.referido_por = tid));
+end $$;
+
+-- Fotos antes/después del trabajo (taller Premium; máximo 2 de cada una por reserva).
+create or replace function public.taller_foto_subir(p_reserva uuid, p_tipo text, p_imagen text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); r public.reservas;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  select * into r from public.reservas where id = p_reserva and taller_id = tid;
+  if r.id is null then raise exception 'Reserva no encontrada'; end if;
+  if not coalesce((public.limite_taller(tid, 'fotos'))::boolean, false) then raise exception 'Las fotos antes/después son una función Premium'; end if;
+  if p_tipo not in ('antes', 'despues') then raise exception 'Tipo no válido'; end if;
+  if p_imagen !~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' or length(p_imagen) > 160000 then raise exception 'Imagen no válida o muy pesada'; end if;
+  if (select count(*) from public.fotos_trabajo where reserva_id = r.id and tipo = p_tipo) >= 2 then
+    raise exception 'Máximo 2 fotos de "%". Borra una para subir otra.', case when p_tipo = 'antes' then 'antes' else 'después' end;
+  end if;
+  insert into public.fotos_trabajo (reserva_id, tipo, imagen) values (r.id, p_tipo, p_imagen);
+  return public.taller_fotos(r.id);
+end $$;
+
+create or replace function public.taller_fotos(p_reserva uuid) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select coalesce(jsonb_agg(jsonb_build_object('id', f.id, 'tipo', f.tipo, 'imagen', f.imagen) order by f.tipo, f.created_at), '[]')
+  from public.fotos_trabajo f join public.reservas r on r.id = f.reserva_id
+  where f.reserva_id = p_reserva and r.taller_id = public.taller_de(auth.uid())
+$$;
+
+create or replace function public.taller_foto_borrar(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  delete from public.fotos_trabajo f using public.reservas r
+  where f.id = p_id and r.id = f.reserva_id and r.taller_id = public.taller_de(auth.uid());
+  if not found then raise exception 'Foto no encontrada'; end if;
+end $$;
+
+-- El cliente ve las fotos desde el enlace de su reserva (ver fotos_visibles).
+create or replace function public.reserva_fotos(p_token text) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select coalesce(jsonb_agg(jsonb_build_object('tipo', f.tipo, 'imagen', f.imagen) order by f.tipo, f.created_at), '[]')
+  from public.reservas r join public.fotos_trabajo f on f.reserva_id = r.id
+  where r.token = p_token and length(p_token) >= 20 and public.fotos_visibles(r)
+$$;
+
+revoke execute on function public.registro_info(text), public.directorio(text, text, int), public.taller_referidos(),
+  public.taller_foto_subir(uuid, text, text), public.taller_fotos(uuid), public.taller_foto_borrar(uuid), public.reserva_fotos(text),
+  public.hora_premium_cerrada(uuid, date, text, uuid), public.fotos_visibles(public.reservas) from public, anon, authenticated;
+grant execute on function public.registro_info(text), public.directorio(text, text, int), public.reserva_fotos(text) to anon, authenticated;
+grant execute on function public.taller_referidos(), public.taller_foto_subir(uuid, text, text), public.taller_fotos(uuid),
+  public.taller_foto_borrar(uuid) to authenticated;
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    execute 'grant execute on all functions in schema public to service_role';
+  end if;
+end $$;
+
+-- =====================================================================
+-- 22. (v1.7) Socios: los crea el administrador; ven todo, no crean ni eliminan, y cada cambio lleva motivo.
+-- =====================================================================
+create or replace function public.admin_socios() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  perform public.admin_check();
+  return (select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'nombre', p.nombre, 'email', p.email, 'telefono', p.telefono,
+    'suspendido', p.suspendido, 'visto_at', p.visto_at, 'created_at', p.created_at,
+    'cambios', (select count(*) from public.auditoria a where a.quien = p.id)) order by p.created_at), '[]')
+    from public.perfiles p where p.rol = 'socio');
+end $$;
+
+revoke execute on function public.es_socio(), public.admin_ver(), public.admin_editar(text), public.admin_socios() from public, anon, authenticated;
+grant execute on function public.admin_socios() to authenticated;
 do $$
 begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then

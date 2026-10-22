@@ -3,9 +3,27 @@
   'use strict';
   const { $, esc, plata, rpc, toast, modal, confirmar } = App;
   App.registrarSW();
-  const yo = await App.requerir(['admin']);
+  const yo = await App.requerir(['admin', 'socio']);
   let pub = await App.cargarPublica();
   App.tema('#0f766e');
+  // Socio: ve todo, no crea ni elimina, y cada cambio lleva un motivo (te llega como aviso y queda en el Registro).
+  const socio = yo.rol === 'socio';
+  if (socio) { $('hRol').textContent = 'SOCIO'; document.querySelectorAll('.solo-admin').forEach((x) => x.remove()); }
+  function pedirMotivo(que) {
+    if (!socio) return Promise.resolve(null);
+    return new Promise((ok) => {
+      const d = modal('<h2>✏️ Motivo del cambio</h2><p class="muted" style="margin-top:0">' + esc(que) + '. El administrador recibe el aviso con tu motivo.</p>' +
+        '<textarea id="moTxt" maxlength="200" placeholder="Ej.: compensación por una falla del sistema"></textarea><p class="err" id="moErr"></p>' +
+        '<div class="btns"><button class="ghost" data-cerrar>Cancelar</button><button id="moOk">Guardar cambio</button></div>');
+      let r = null;
+      d.querySelector('#moOk').onclick = () => {
+        const v = d.querySelector('#moTxt').value.trim();
+        if (v.length < 5) { d.querySelector('#moErr').textContent = 'Escribe el motivo (mínimo 5 letras)'; return; }
+        r = v; d.close();
+      };
+      d.addEventListener('close', () => ok(r));
+    });
+  }
   const MB = (b) => (b / 1048576).toFixed(1) + ' MB';
 
   const show = App.pestanas((v) => {
@@ -19,39 +37,101 @@
   /* ---------- Resumen y servidor ---------- */
   async function verResumen() {
     let r;
-    try { r = await rpc('admin_resumen'); } catch (e) { $('v-resumen').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    try { r = await rpc('admin_resumen'); }
+    catch (e) { $('v-resumen').innerHTML = '<div id="actCard"></div><p class="err">' + esc(e.message) + '</p>'; pintarActualizaciones(); return; }
     $('tabPagos').textContent = r.pagos_por_revisar; $('tabPagos').classList.toggle('hidden', !r.pagos_por_revisar);
     const u = r.uso, pct = Math.round(100 * u.db_bytes / u.db_limite);
     const tablas = Object.entries(u.tablas).sort((a, b) => b[1] - a[1]);
-    $('v-resumen').innerHTML = (r.version !== window.BT_CONFIG.DB_VERSION ? '<div class="aviso bad"><div class="grow">⚠️ La base de datos es la versión ' + esc(r.version) +
-        ' y la app necesita la ' + esc(window.BT_CONFIG.DB_VERSION) + '. Vuelve a correr la instalación de la base de datos (guía, paso 1).</div></div>' : '') +
+    $('v-resumen').innerHTML = '<div id="actCard"></div>' +
       (r.pagos_por_revisar ? '<div class="aviso warn clic" data-ir="pagos"><div class="grow">💰 Tienes <b>' + r.pagos_por_revisar + '</b> pago(s) Premium por revisar.</div><span>›</span></div>' : '') +
       '<div class="stats">' +
       [['🚲 Talleres', r.talleres], ['⭐ Talleres Premium', r.talleres_premium], ['🟢 Activos 7 días', r.talleres_activos_7d], ['⏳ Vencen en 7 días', r.por_vencer],
         ['👥 Clientes con cuenta', r.clientes], ['⭐ Clientes Premium', r.clientes_premium], ['🔧 Personas de equipo', r.equipo], ['📅 Reservas este mes', r.reservas_mes],
-        ['📅 Reservas hoy', r.reservas_hoy], ['💰 Ingresos del mes', plata(r.ingresos_mes)]].map((x) => '<div class="card"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>').join('') + '</div>' +
+        ['📅 Reservas hoy', r.reservas_hoy], ['💰 Ingresos del mes', plata(r.ingresos_mes)], ['🆕 Talleres nuevos (7 días)', r.talleres_nuevos_7d == null ? '—' : r.talleres_nuevos_7d]].map((x) => '<div class="card"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>').join('') + '</div>' +
       '<div class="card"><h2>🖥️ Servidor</h2><div class="sub">Base de datos: ' + MB(u.db_bytes) + ' de ' + MB(u.db_limite) + ' (' + pct + '%) · plan gratis de Supabase</div>' +
       '<div class="barra"><i class="' + (pct >= 90 ? 'rojo' : pct >= 70 ? 'amarillo' : '') + '" style="width:' + Math.max(pct, 1) + '%"></i></div>' +
       '<p class="sub">' + (pct >= 90 ? '🔴 Casi lleno: limpia o pasa a Supabase Pro.' : pct >= 70 ? '🟡 Va subiendo: programa una limpieza.' : '🟢 Todo bien.') + '</p>' +
       '<table>' + tablas.map(([k, v]) => '<tr><td>' + esc(k) + '</td><td class="r">' + MB(v) + '</td></tr>').join('') + '</table>' +
-      '<p class="sub">Comprobantes guardados: ' + u.comprobantes + ' (' + MB(u.comprobantes_bytes) + ') · Logos: ' + MB(u.logos_bytes) + ' · Avisos: ' + u.notificaciones + ' · Reservas: ' + u.reservas + '</p>' +
-      '<h3>🧹 Limpieza</h3><p class="sub" style="margin-top:0">Se hace sola todos los días a las 4 AM. También puedes limpiar ahora:</p>' +
+      '<p class="sub">Comprobantes guardados: ' + u.comprobantes + ' (' + MB(u.comprobantes_bytes) + ') · Fotos antes/después: ' + (u.fotos || 0) + ' (' + MB(u.fotos_bytes || 0) + ') · Logos: ' + MB(u.logos_bytes) + ' · Avisos: ' + u.notificaciones + ' · Reservas: ' + u.reservas + '</p>' +
+      (socio ? '' : '<h3>🧹 Limpieza</h3><p class="sub" style="margin-top:0">Se hace sola todos los días a las 4 AM. También puedes limpiar ahora:</p>' +
       '<div class="btns"><button class="ghost small" data-l="comprobantes">Comprobantes revisados</button><button class="ghost small" data-l="notificaciones">Avisos viejos</button>' +
-      '<button class="ghost small" data-l="reservas">Reservas expiradas/rechazadas (+60 días)</button><button class="danger small" data-l="todo">Limpiar todo</button></div>' +
+      '<button class="ghost small" data-l="fotos">Fotos más antiguas que ' + ((pub.config || {}).dias_fotos || 365) + ' días</button>' +
+      '<button class="ghost small" data-l="reservas">Reservas expiradas/rechazadas (+60 días)</button><button class="danger small" data-l="todo">Limpiar todo</button></div>') +
       '<p class="sub">Versión de la base de datos: ' + esc(r.version) + ' · App: ' + esc(window.BT_CONFIG.VERSION) + '</p></div>';
+    pintarActualizaciones();
     $('v-resumen').onclick = async (e) => {
       const ir = e.target.closest('[data-ir]'); if (ir) { show(ir.dataset.ir); return; }
       const b = e.target.closest('[data-l]'); if (!b) return;
       if (!await confirmar(b.dataset.l === 'comprobantes' ? 'Se borran TODOS los comprobantes ya revisados (los en revisión se mantienen). ¿Seguir?' : '¿Limpiar ahora?')) return;
-      try { const x = await rpc('limpiar', { p_que: b.dataset.l }); toast('🧹 Borrados: ' + x.comprobantes + ' comprobantes, ' + x.notificaciones + ' avisos, ' + x.reservas + ' reservas'); verResumen(); }
+      try { const x = await rpc('limpiar', { p_que: b.dataset.l }); toast('🧹 Borrados: ' + x.comprobantes + ' comprobantes, ' + x.notificaciones + ' avisos, ' + x.reservas + ' reservas, ' + (x.fotos || 0) + ' fotos'); verResumen(); }
       catch (err) { toast(err.message); }
+    };
+  }
+
+  /* ---------- Actualizaciones: app, base de datos y función "servidor" ---------- */
+  const C = window.BT_CONFIG, REF = (/https:\/\/([a-z0-9]+)\.supabase\.co/.exec(C.SUPABASE_URL) || [])[1] || '';
+  const PANEL = 'https://supabase.com/dashboard/project/' + REF;
+  async function pintarActualizaciones() {
+    const el = $('actCard'); if (!el) return;
+    el.innerHTML = '<div class="card"><p class="sub" style="margin:0">🔄 Revisando actualizaciones…</p></div>';
+    const [pubV, dbV, fn] = await Promise.all([
+      fetch(App.ROOT + 'version.json?_=' + Date.now(), { cache: 'no-store' }).then((x) => x.json()).then((j) => String(j.version)).catch(() => null),
+      rpc('db_version').catch(() => null),
+      App.sb.functions.invoke('servidor', { body: { accion: 'ping' } }).then((x) => (x.error ? null : x.data)).catch(() => null)]);
+    const appOk = !pubV || !App.mayor(pubV, C.VERSION);
+    const dbOk = !!dbV && !App.mayor(C.DB_VERSION, dbV);
+    const fnOk = !!(fn && fn.version) && !App.mayor(C.SERVER_VERSION, fn.version);
+    const fnTraeBd = !!(fn && fn.db_version && fn.bd) && !App.mayor(C.DB_VERSION, fn.db_version);
+    const fila = (ok, titulo, detalle, acciones) => '<li><div class="grow">' + (ok ? '✅ ' : '⚠️ ') + '<b>' + titulo + '</b><div class="sub">' + detalle + '</div></div>' + (acciones || '') + '</li>';
+    const todo = appOk && dbOk && fnOk;
+    el.innerHTML = '<div class="card' + (todo ? '' : ' plan premium') + '"><h2>🔄 Actualizaciones ' + (todo ? '<span class="pill ok">Todo al día</span>' : '<span class="pill warn">Hay que actualizar</span>') + '</h2><ul class="list">' +
+      fila(appOk, 'App', 'Tienes la v' + esc(C.VERSION) + (pubV ? ' · publicada v' + esc(pubV) : ''), '<button class="small' + (appOk ? ' ghost' : '') + '" data-act="app">🔄 Actualizar app</button>') +
+      fila(dbOk, 'Base de datos', dbV ? 'Versión ' + esc(dbV) + (dbOk ? '' : ' · la app necesita la ' + esc(C.DB_VERSION)) : 'No responde',
+        dbOk || socio ? '' : fnTraeBd ? '<button class="small gold" data-act="bd">⬆️ Actualizar base de datos</button>' : '') +
+      fila(fnOk, 'Función "servidor"', fn ? 'Versión ' + esc(fn.version || '?') + (fnOk ? '' : ' · la app necesita la ' + esc(C.SERVER_VERSION)) : 'No responde: créala en Supabase (guía, paso 4)', '') +
+      '</ul>' +
+      (!socio && !fnOk ? '<div class="aviso warn" style="margin-top:10px"><div class="grow"><b>Actualiza la función (1 minuto):</b> copia la línea, abre Supabase → Edge Functions → <b>servidor</b> → Code, ' +
+        'borra todo, pega y toca <b>Deploy</b>. Vuelve aquí: ' + (dbOk ? 'listo.' : 'después toca "Actualizar base de datos".') + '</div></div>' +
+        '<div class="btns"><button class="alt" data-act="copiarFn">📋 Copiar línea de la función</button><a class="btn ghost" target="_blank" rel="noopener" href="' + PANEL + '/functions">Abrir Supabase</a></div>' : '') +
+      (!socio && !dbOk ? '<details style="margin-top:10px"><summary class="clic sub">¿Prefieres actualizar la base de datos a mano?</summary><p class="sub">Copia el instalador, abre el SQL Editor de Supabase, pégalo y toca Run.</p>' +
+        '<div class="btns"><button class="ghost small" data-act="copiarSql">📋 Copiar instalador</button><a class="btn ghost small" target="_blank" rel="noopener" href="' + PANEL + '/sql/new">Abrir SQL Editor</a></div></details>' : '') +
+      '<p class="sub" id="actRes" style="margin-bottom:0"></p></div>';
+    el.onclick = async (e) => {
+      const b = e.target.closest('[data-act]'); if (!b) return;
+      const a = b.dataset.act;
+      if (a === 'app') { b.disabled = true; b.textContent = 'Actualizando…'; App.actualizar(); return; }
+      if (a === 'copiarFn' || a === 'copiarSql') {
+        try {
+          const t = await (await fetch(App.ROOT + (a === 'copiarFn' ? 'supabase/functions/servidor/corto.ts' : 'supabase/instalar-corto.sql') + '?_=' + Date.now(), { cache: 'no-store' })).text();
+          await navigator.clipboard.writeText(t.trim()); toast('📋 Copiado: ahora pégalo en Supabase');
+        } catch (err) { toast('No se pudo copiar: ' + err.message); }
+        return;
+      }
+      if (a === 'bd') {
+        if (!await confirmar('Se instala la base de datos ' + fn.db_version + ' que viene con la función. No se borran datos y tarda unos segundos.\n\n¿Actualizar ahora?', 'Sí, actualizar')) return;
+        b.disabled = true; b.textContent = 'Actualizando…'; $('actRes').textContent = '';
+        try {
+          const { data, error } = await App.sb.functions.invoke('servidor', { body: { accion: 'actualizar_bd' } });
+          if (error) throw new Error('No se pudo conectar con la función "servidor"');
+          if (!data || !data.ok) throw new Error((data && data.error) || 'No se pudo actualizar');
+          pub = await App.cargarPublica();
+          toast('✅ Base de datos actualizada: ' + data.antes + ' → ' + data.ahora); verResumen();
+        } catch (err) { $('actRes').textContent = '❌ ' + err.message; b.disabled = false; b.textContent = '⬆️ Actualizar base de datos'; }
+      }
     };
   }
 
   /* ---------- Talleres ---------- */
   let talleres = [], tFiltro = '';
-  $('nPass').value = App.clave();
-  $('nRegalo').textContent = (pub.config || {}).dias_regalo_taller || 30;
+  if (!socio) $('nPass').value = App.clave();
+  document.querySelectorAll('.nRegalo').forEach((x) => { x.textContent = (pub.config || {}).dias_regalo_taller || 30; });
+  // Registro abierto: link y QR para publicar (un mismo link sirve a talleres y ciclistas).
+  const linkRegistro = App.ROOT + 'n/';
+  $('rLink').textContent = linkRegistro; $('rDir').href = App.ROOT + 'd/';
+  $('rCerrado').classList.toggle('hidden', String((pub.config || {}).registro_talleres) !== '0');
+  $('rCompartir').onclick = () => App.compartir(linkRegistro, '🚲 ¿Tienes un taller de bicicletas? Crea tu cuenta gratis en BiciTaller y recibe reservas online. ¿Eres ciclista? Encuentra tu taller aquí', 'BiciTaller');
+  $('rQR').onclick = () => App.verQR({ url: linkRegistro, titulo: 'QR para crear cuentas', archivo: 'bicitaller-registro.gif',
+    afiche: { titulo: '🚲 BiciTaller', texto: '¿Tienes un taller? Crea tu cuenta gratis y recibe reservas online. ¿Eres ciclista? Encuentra tu taller y reserva tu hora.' } });
   async function cargarTalleres() {
     try { talleres = await rpc('admin_talleres'); } catch (e) { $('tLista').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
     pintarTalleres();
@@ -61,13 +141,14 @@
   function pintarTalleres() {
     const f = $('tBuscar').value.trim().toLowerCase(), semana = Date.now() - 7 * 864e5, enSiete = Date.now() + 7 * 864e5;
     const l = talleres.filter((t) => (!f || (t.nombre + ' ' + t.email + ' ' + t.comuna + ' ' + t.dueno).toLowerCase().includes(f)) && (
-      !tFiltro || (tFiltro === 'premium' && t.premium) || (tFiltro === 'free' && !t.premium) || (tFiltro === 'suspendidos' && t.suspendido) ||
+      !tFiltro || (tFiltro === 'premium' && t.premium) || (tFiltro === 'free' && !t.premium) || (tFiltro === 'suspendidos' && t.suspendido) || (tFiltro === 'solos' && t.autoregistro) ||
       (tFiltro === 'vence' && t.premium && new Date(t.premium_hasta) < enSiete) || (tFiltro === 'inactivos' && (!t.visto_at || new Date(t.visto_at) < semana))));
     $('tLista').innerHTML = l.length ? l.map((t) => {
       const logo = /^data:image/.test(t.logo || '') ? 'background-image:url(\'' + t.logo + '\');' : '';
       return '<div class="card"><div style="display:flex;gap:12px;align-items:flex-start"><div class="mini-logo" style="background-color:' + esc(t.color) + ';' + logo + '">' + (logo ? '' : esc(t.icono)) + '</div>' +
         '<div class="grow"><b>' + esc(t.nombre) + '</b> ' + (t.premium ? '<span class="pill pro">PREMIUM</span>' : '<span class="pill">GRATIS</span>') + (t.suspendido ? ' <span class="pill bad">Suspendido</span>' : '') +
-        (t.cobra_abono ? '' : ' <span class="pill warn">Sin link de abono</span>') +
+        (t.cobra_abono ? '' : ' <span class="pill warn">Sin link de abono</span>') + (t.autoregistro ? ' <span class="pill info">🆕 Se registró solo</span>' : '') +
+        (t.referido_por ? ' <span class="pill">🤝 Invitado por ' + esc(t.referido_por) + '</span>' : '') + (t.invitados ? ' <span class="pill ok">🤝 Invitó a ' + t.invitados + '</span>' : '') +
         '<div class="sub">' + esc(t.dueno || '') + ' · ' + esc(t.email || '') + (t.comuna ? ' · ' + esc(t.comuna) : '') + '</div>' +
         '<div class="sub">' + (t.premium ? '⭐ Premium hasta ' + new Date(t.premium_hasta).toLocaleDateString('es-CL') : t.premium_hasta ? 'Premium venció el ' + new Date(t.premium_hasta).toLocaleDateString('es-CL') : 'Nunca fue Premium') +
         ' · 🟢 visto ' + App.hace(t.visto_at) + '</div>' +
@@ -77,9 +158,9 @@
         '<option value="365">+1 año</option><option value="otro">Otro número de días…</option><option value="0">Quitar Premium</option></select>' +
         '<a class="btn small ghost" target="_blank" rel="noopener" href="../t/?s=' + encodeURIComponent(t.slug) + '">🔗 Página</a>' +
         (t.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(t.telefono, 'Hola ' + (t.dueno || '') + ' 👋') + '">📲</a>' : '') +
-        '<button class="small ghost" data-chat="' + t.id + '" data-n="' + esc(t.nombre) + '">💬</button><button class="small alt" data-add="' + t.id + '" data-n="' + esc(t.nombre) + '">👤＋</button>' +
+        '<button class="small ghost" data-chat="' + t.id + '" data-n="' + esc(t.nombre) + '">💬</button>' + (socio ? '' : '<button class="small alt" data-add="' + t.id + '" data-n="' + esc(t.nombre) + '">👤＋</button>') +
         '<button class="small ' + (t.suspendido ? 'okb' : 'danger') + '" data-susp="' + t.id + '" data-s="' + (t.suspendido ? 0 : 1) + '">' + (t.suspendido ? 'Reactivar' : 'Suspender') + '</button>' +
-        '<button class="small danger" data-del="' + t.id + '" data-n="' + esc(t.nombre) + '">🗑️</button></div></div>';
+        (socio ? '' : '<button class="small danger" data-del="' + t.id + '" data-n="' + esc(t.nombre) + '">🗑️</button>') + '</div></div>';
     }).join('') : '<p class="empty">No hay talleres aquí.</p>';
   }
   $('tLista').onchange = async (e) => {
@@ -88,7 +169,8 @@
     s.value = '';
     if (isNaN(dias)) return;
     if (dias === 0 && !await confirmar('¿Quitar el Premium a este taller? Vuelve a la versión gratis.')) return;
-    try { await rpc('admin_premium', { p_tipo: 'taller', p_id: s.dataset.prem, p_dias: dias }); App.sb.functions.invoke('servidor').catch(() => {}); toast(dias ? '⭐ +' + dias + ' días' : 'Premium quitado'); cargarTalleres(); }
+    const motivo = await pedirMotivo(dias ? 'Dar ' + dias + ' días de Premium' : 'Quitar el Premium'); if (socio && !motivo) return;
+    try { await rpc('admin_premium', { p_tipo: 'taller', p_id: s.dataset.prem, p_dias: dias, p_motivo: motivo }); App.sb.functions.invoke('servidor').catch(() => {}); toast(dias ? '⭐ +' + dias + ' días' : 'Premium quitado'); cargarTalleres(); }
     catch (err) { toast(err.message); }
   };
   $('tLista').onclick = async (e) => {
@@ -102,9 +184,10 @@
     }
     const b = e.target.closest('[data-susp]'); if (!b) return;
     if (b.dataset.s === '1' && !await confirmar('¿Suspender el taller? Ni el taller ni su equipo podrán entrar y su página se cierra.')) return;
-    try { await rpc('admin_suspender', { p_tipo: 'taller', p_id: b.dataset.susp, p_suspender: b.dataset.s === '1' }); cargarTalleres(); } catch (err) { toast(err.message); }
+    const motivo = await pedirMotivo(b.dataset.s === '1' ? 'Suspender el taller' : 'Reactivar el taller'); if (socio && !motivo) return;
+    try { await rpc('admin_suspender', { p_tipo: 'taller', p_id: b.dataset.susp, p_suspender: b.dataset.s === '1', p_motivo: motivo }); cargarTalleres(); } catch (err) { toast(err.message); }
   };
-  $('nCrear').onclick = async () => {
+  if (!socio) $('nCrear').onclick = async () => {
     const b = $('nCrear'); $('nErr').textContent = '';
     const d = { taller_nombre: $('nTaller').value.trim(), nombre: $('nDueno').value.trim(), email: $('nEmail').value.trim(), telefono: $('nTel').value.trim(), password: $('nPass').value.trim(), rol: 'taller' };
     if (!d.taller_nombre || !d.nombre || !d.email) { $('nErr').textContent = 'Completa el nombre del taller, del dueño y el correo'; return; }
@@ -159,7 +242,7 @@
       (c.suspendido ? '<span class="pill bad">Suspendido</span> ' : '') + App.nota(c.nota) + '<div class="sub">' + esc(c.email) + ' · ' + esc(c.telefono) + ' · ' + esc(c.taller || '') + ' · ' + c.visitas + ' visitas · visto ' + App.hace(c.visto_at) +
       (c.premium ? ' · Premium hasta ' + new Date(c.premium_hasta).toLocaleDateString('es-CL') : '') + '</div></div>' +
       '<select data-cp="' + c.id + '" style="width:auto" aria-label="Acción"><option value="">Acción…</option><option value="30">⭐ +30 días</option><option value="90">⭐ +90 días</option><option value="0">Quitar Premium</option>' +
-      '<option value="' + (c.suspendido ? 'react' : 'susp') + '">' + (c.suspendido ? 'Reactivar' : 'Suspender') + '</option><option value="del">🗑️ Eliminar</option></select></li>').join('') : '<li class="muted">Sin usuarios.</li>';
+      '<option value="' + (c.suspendido ? 'react' : 'susp') + '">' + (c.suspendido ? 'Reactivar' : 'Suspender') + '</option>' + (socio ? '' : '<option value="del">🗑️ Eliminar</option>') + '</select></li>').join('') : '<li class="muted">Sin usuarios.</li>';
   }
   $('cLista').onchange = async (e) => {
     const s = e.target.closest('[data-cp]'); if (!s || !s.value) return;
@@ -168,8 +251,12 @@
       if (v === 'del') {
         if (!await confirmar('¿Eliminar este usuario? Sus reservas quedan, sin la cuenta. No se puede deshacer.', 'Sí, eliminar')) return;
         await App.borrarCuenta('perfil', s.dataset.cp);
-      } else if (v === 'susp' || v === 'react') await rpc('admin_suspender', { p_tipo: 'perfil', p_id: s.dataset.cp, p_suspender: v === 'susp' });
-      else await rpc('admin_premium', { p_tipo: 'cliente', p_id: s.dataset.cp, p_dias: +v });
+      } else {
+        const motivo = await pedirMotivo(v === 'susp' ? 'Suspender al usuario' : v === 'react' ? 'Reactivar al usuario' : +v ? 'Dar ' + v + ' días de Premium' : 'Quitar el Premium');
+        if (socio && !motivo) return;
+        if (v === 'susp' || v === 'react') await rpc('admin_suspender', { p_tipo: 'perfil', p_id: s.dataset.cp, p_suspender: v === 'susp', p_motivo: motivo });
+        else await rpc('admin_premium', { p_tipo: 'cliente', p_id: s.dataset.cp, p_dias: +v, p_motivo: motivo });
+      }
       toast('Listo'); cargarClientes();
     } catch (err) { toast(err.message); }
   };
@@ -181,7 +268,7 @@
     let l = [];
     try { l = await rpc('admin_pagos', { p_estado: pFiltro || null }); } catch (e) { $('pLista').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
     $('pLista').innerHTML = l.length ? l.map((g) => '<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:flex-start"><div><b>' + esc(g.quien) + '</b> <span class="pill">' +
-      (g.tipo === 'premium_taller' ? '🚲 Taller' : '👤 Cliente') + '</span><div class="sub">' + esc(g.email) + ' · ' + App.fHora(g.created_at) + '</div>' +
+      (g.tipo === 'premium_taller' ? '🚲 Taller' : '👤 Cliente') + '</span>' + (g.anual ? ' <span class="pill pro">Anual</span>' : '') + '<div class="sub">' + esc(g.email) + ' · ' + App.fHora(g.created_at) + '</div>' +
       (g.premium_hasta ? '<div class="sub">Premium actual hasta ' + new Date(g.premium_hasta).toLocaleDateString('es-CL') + '</div>' : '') + (g.nota ? '<div class="sub">Nota: ' + esc(g.nota) + '</div>' : '') +
       '</div><div style="text-align:right"><span class="precio" style="font-size:20px">' + plata(g.monto) + '</span><div><span class="pill ' + (g.estado === 'aprobado' ? 'ok' : g.estado === 'rechazado' ? 'bad' : 'info') + '">' + g.estado.replace('_', ' ') + '</span></div></div></div>' +
       '<div class="acc">' + (g.tiene_comprobante ? '<button class="small ghost" data-ver="' + g.id + '">👁️ Comprobante</button>' : '<span class="sub">Comprobante borrado</span>') +
@@ -193,7 +280,7 @@
     try {
       if (b.dataset.ver) { const img = await rpc('admin_pago_comprobante', { p_id: b.dataset.ver }); if (img) App.verImagen(img, 'Comprobante Premium', 'premium-' + b.dataset.ver.slice(0, 8) + '.jpg'); else toast('Ya fue borrado'); return; }
       if (b.dataset.ok) {
-        if (!await confirmar('Revisa en tu Mercado Pago que el pago llegó.\n\n¿Aprobar y activar Premium?', 'Sí, aprobar')) return;
+        if (!await confirmar('Revisa en tu Mercado Pago que el pago llegó.\n\n¿Aprobar y activar Premium? (si es anual se activan 365 días)', 'Sí, aprobar')) return;
         await rpc('admin_pago_resolver', { p_id: b.dataset.ok, p_aprobar: true, p_nota: null }); toast('⭐ Premium activado');
       }
       if (b.dataset.no) {
@@ -207,13 +294,13 @@
   };
 
   /* ---------- Ajustes ---------- */
-  let ajuste = 'links';
+  let ajuste = socio ? 'planes' : 'links';
   $('aSeg').onclick = (e) => { const b = e.target.closest('[data-a]'); if (b) verAjuste(b.dataset.a); };
   const aBody = () => $('aBody');
   function verAjuste(a) {
     ajuste = a;
     $('aSeg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.a === a));
-    ({ links: verLinks, planes: verPlanes, reglas: verReglas, textos: verTextos, avisos: verAvisos, push: verPush, calif: verCalif, registro: verRegistro, cuenta: verCuenta })[a]();
+    ({ links: verLinks, planes: verPlanes, reglas: verReglas, textos: verTextos, avisos: verAvisos, push: verPush, calif: verCalif, socios: verSocios, registro: verRegistro, cuenta: verCuenta })[a]();
   }
 
   // Precios y links de pago (2 por plan, uno activo)
@@ -226,9 +313,13 @@
           (l.activo ? ' <span class="pill ok">Activo</span>' : '') + '</label><div class="row"><div><label>Precio</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="monto" inputmode="numeric" value="' + (l.monto || '') + '"></div>' +
           '<div><label>Texto de la publicación</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="texto" maxlength="300" value="' + esc(l.texto) + '" placeholder="Pago mensual"></div></div>' +
           '<label>Link de pago (Mercado Pago)</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="url" value="' + esc(l.url) + '" placeholder="https://mpago.la/…"></div>'; }).join('') +
-      '<div class="btns"><button data-guardar="' + tipo + '">💾 Guardar</button></div></div>';
-    aBody().innerHTML = bloque('premium_taller', '🚲 Premium de talleres') + bloque('premium_cliente', '👤 Premium de clientes') +
+      (socio ? '' : '<div class="btns"><button data-guardar="' + tipo + '">💾 Guardar</button></div>') + '</div>';
+    aBody().innerHTML = bloque('premium_taller', '🚲 Premium de talleres (mensual)') + bloque('premium_taller_anual', '🚲 Premium de talleres · anual (365 días)') +
+      bloque('premium_cliente', '👤 Premium de clientes (mensual)') + bloque('premium_cliente_anual', '👤 Premium de clientes · anual (365 días)') +
+      (socio ? '<div class="aviso warn"><div class="grow">🔒 Solo el administrador cambia los links de pago (ahí llega la plata).</div></div>' : '') +
+      '<p class="sub">💡 Plan anual: pon como precio 10 meses (pagan 10 y se llevan 12). Si dejas el link anual vacío, solo se ofrece el mensual.</p>' +
       '<p class="sub">El abono de las reservas lo configura cada taller con su propio link: ese dinero le llega directo al taller y tú no lo ves.</p>';
+    if (socio) aBody().querySelectorAll('input').forEach((i) => { i.disabled = true; });
     aBody().onclick = async (e) => {
       const b = e.target.closest('[data-guardar]'); if (!b) return;
       const tipo = b.dataset.guardar, act = +((aBody().querySelector('input[name="act-' + tipo + '"]:checked') || {}).value || 0);
@@ -242,7 +333,7 @@
 
   // Planes: nombre, descripción, duración, beneficios y límites
   const ETIQ = { reservas_mes: 'Reservas online al mes', servicios: 'Servicios', promos: 'Promociones activas', equipo: 'Personas en el equipo', clientes_cuenta: 'Clientes con cuenta',
-    estadisticas: 'Estadísticas', recordatorios: 'Recordatorios de mantención', historial: 'Visitas en el historial', anticipacion_extra: 'Días extra para reservar antes' };
+    estadisticas: 'Estadísticas', recordatorios: 'Recordatorios de mantención', historial: 'Visitas en el historial', anticipacion_extra: 'Días extra para reservar antes', fotos: 'Fotos antes/después en la orden de trabajo' };
   async function verPlanes() {
     pub = await App.cargarPublica();
     const planes = pub.planes;
@@ -260,9 +351,10 @@
       const card = aBody().querySelector('[data-plan="' + b.dataset.gp + '"]'), v = (k) => card.querySelector('[data-k="' + k + '"]').value;
       const lim = {};
       card.querySelectorAll('[data-l]').forEach((i) => { lim[i.dataset.l] = i.type === 'checkbox' ? i.checked : App.numero(i.value); });
+      const motivo = await pedirMotivo('Cambiar el plan "' + v('nombre') + '"'); if (socio && !motivo) return;
       try {
         await rpc('admin_plan_guardar', { p_codigo: b.dataset.gp, p_nombre: v('nombre'), p_descripcion: v('descripcion'), p_limites: lim,
-          p_beneficios: v('beneficios').split('\n').map((x) => x.trim()).filter(Boolean), p_duracion: App.numero(v('duracion')) });
+          p_beneficios: v('beneficios').split('\n').map((x) => x.trim()).filter(Boolean), p_duracion: App.numero(v('duracion')), p_motivo: motivo });
         toast('⭐ Plan guardado');
       } catch (err) { toast(err.message); }
     };
@@ -273,18 +365,23 @@
     const c = pub.config || {};
     const campos = [['minutos_pago', 'Minutos para pagar el abono y subir el comprobante'], ['minutos_devolucion', 'Minutos para cancelar con devolución del abono'],
       ['horas_cancelacion', 'Horas mínimas para cancelar/reagendar con saldo a favor'], ['dias_saldo', 'Días que dura el saldo a favor'],
-      ['dias_regalo_taller', 'Días de Premium de regalo al crear un taller'], ['dias_aviso_vencimiento', 'Días antes del vencimiento para avisar'],
-      ['dias_comprobantes', 'Días que se guardan los comprobantes']];
-    aBody().innerHTML = '<div class="card"><h2>⚖️ Reglas</h2>' + campos.map(([k, t]) => '<label>' + esc(t) + '</label><input data-c="' + k + '" inputmode="numeric" value="' + esc(c[k]) + '">').join('') +
+      ['dias_regalo_taller', 'Días de Premium de regalo al crear un taller (también si se registra solo)'], ['dias_aviso_vencimiento', 'Días antes del vencimiento para avisar'],
+      ['dias_comprobantes', 'Días que se guardan los comprobantes'], ['dias_referido', 'Días de Premium para el taller que invita (cuando el invitado paga su primer Premium; 0 = sin premio)'],
+      ['horas_libera_premium', 'Horas antes de la cita en que una hora exclusiva Premium se abre a todos'], ['dias_fotos', 'Días que se guardan las fotos antes/después']];
+    aBody().innerHTML = '<div class="card"><h2>⚖️ Reglas</h2>' +
+      '<label for="rReg">Registro abierto de talleres (link y QR)</label><select id="rReg" data-c="registro_talleres"><option value="1"' + (String(c.registro_talleres) !== '0' ? ' selected' : '') +
+      '>✅ Abierto: cualquier taller crea su cuenta gratis</option><option value="0"' + (String(c.registro_talleres) === '0' ? ' selected' : '') + '>⛔ Cerrado: solo yo creo talleres</option></select>' + campos.map(([k, t]) => '<label>' + esc(t) + '</label><input data-c="' + k + '" inputmode="numeric" value="' + esc(c[k]) + '">').join('') +
       '<label>Tu WhatsApp de soporte</label><input data-c="soporte_whatsapp" data-txt="1" value="' + esc(c.soporte_whatsapp || '') + '" placeholder="+56 9 …">' +
       '<div class="btns"><button id="rG">💾 Guardar reglas</button></div></div>';
     $('rG').onclick = async () => {
+      const cambios = Array.from(aBody().querySelectorAll('[data-c]')).map((i) => [i.dataset.c, i.dataset.txt ? i.value.trim() : App.numero(i.value)])
+        .filter(([k, val]) => String(c[k]) !== String(val));
+      if (!cambios.length) { toast('Sin cambios'); return; }
+      const motivo = await pedirMotivo('Cambiar ' + cambios.length + ' regla(s)'); if (socio && !motivo) return;
       try {
-        for (const i of aBody().querySelectorAll('[data-c]')) {
-          const val = i.dataset.txt ? i.value.trim() : App.numero(i.value);
-          if (String(c[i.dataset.c]) !== String(val)) await rpc('admin_config_guardar', { p_clave: i.dataset.c, p_valor: val });
-        }
+        for (const [k, val] of cambios) await rpc('admin_config_guardar', { p_clave: k, p_valor: val, p_motivo: motivo });
         pub = await App.cargarPublica(); toast('⚖️ Reglas guardadas');
+        $('rCerrado').classList.toggle('hidden', String((pub.config || {}).registro_talleres) !== '0');
       } catch (e) { toast(e.message); }
     };
   }
@@ -299,8 +396,11 @@
     aBody().innerHTML = '<div class="card"><h2>✏️ Textos</h2>' + Object.keys(TXT).map((k) => '<label>' + esc(TXT[k]) + '</label><textarea data-x="' + k + '" rows="2">' + esc(pub.textos[k] || '') + '</textarea>').join('') +
       '<div class="btns"><button id="xG">💾 Guardar textos</button></div></div>';
     $('xG').onclick = async () => {
+      const cambios = Array.from(aBody().querySelectorAll('[data-x]')).filter((i) => (pub.textos[i.dataset.x] || '') !== i.value);
+      if (!cambios.length) { toast('Sin cambios'); return; }
+      const motivo = await pedirMotivo('Cambiar ' + cambios.length + ' texto(s)'); if (socio && !motivo) return;
       try {
-        for (const i of aBody().querySelectorAll('[data-x]')) if ((pub.textos[i.dataset.x] || '') !== i.value) await rpc('admin_texto_guardar', { p_clave: i.dataset.x, p_valor: i.value });
+        for (const i of cambios) await rpc('admin_texto_guardar', { p_clave: i.dataset.x, p_valor: i.value, p_motivo: motivo });
         pub = await App.cargarPublica(); toast('✏️ Textos guardados');
       } catch (e) { toast(e.message); }
     };
@@ -347,7 +447,7 @@
     try { l = await rpc('admin_calificaciones'); } catch (e) { aBody().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
     aBody().innerHTML = '<div class="card"><h2>⭐ Calificaciones</h2><p class="muted" style="margin-top:0">Borra las injustas u ofensivas. Los comentarios solo los ves tú.</p><ul class="list">' +
       (l.map((q) => '<li><div class="grow"><span class="stars">' + App.estrellas(q.estrellas) + '</span> ' + (q.autor === 'cliente' ? esc(q.cliente) + ' → ' + esc(q.taller) : esc(q.taller) + ' → ' + esc(q.cliente)) +
-        (q.comentario ? '<div class="sub">“' + esc(q.comentario) + '”</div>' : '') + '<div class="sub">' + App.fHora(q.created_at) + '</div></div><button class="small danger" data-x="' + q.id + '">Borrar</button></li>').join('') || '<li class="muted">Sin calificaciones.</li>') + '</ul></div>';
+        (q.comentario ? '<div class="sub">“' + esc(q.comentario) + '”</div>' : '') + '<div class="sub">' + App.fHora(q.created_at) + '</div></div>' + (socio ? '' : '<button class="small danger" data-x="' + q.id + '">Borrar</button>') + '</li>').join('') || '<li class="muted">Sin calificaciones.</li>') + '</ul></div>';
     aBody().onclick = async (e) => {
       const b = e.target.closest('[data-x]'); if (!b || !await confirmar('¿Borrar la calificación?')) return;
       try { await rpc('admin_calificacion_borrar', { p_id: b.dataset.x }); verCalif(); } catch (err) { toast(err.message); }
@@ -357,8 +457,48 @@
   async function verRegistro() {
     let l = [];
     try { l = await rpc('admin_auditoria'); } catch (e) { aBody().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
-    aBody().innerHTML = '<div class="card"><h2>📜 Registro de cambios</h2><ul class="list">' + (l.map((a) => '<li><div class="grow"><b>' + esc(a.accion) + '</b> <span class="sub">' + esc(a.detalle) + '</span></div><span class="sub">' + App.fHora(a.created_at) + '</span></li>').join('') ||
+    aBody().innerHTML = '<div class="card"><h2>📜 Registro de cambios</h2><ul class="list">' + (l.map((a) => '<li><div class="grow"><b>' + esc(a.accion) + '</b> ' +
+      (a.quien_rol === 'socio' ? '<span class="pill info">👥 ' + esc(a.quien_nombre) + '</span> ' : '') + '<span class="sub">' + esc(a.detalle) + '</span></div><span class="sub">' + App.fHora(a.created_at) + '</span></li>').join('') ||
       '<li class="muted">Sin registros.</li>') + '</ul></div>';
+  }
+
+  // Socios: solo el administrador los crea, suspende o elimina.
+  async function verSocios() {
+    let l = [];
+    try { l = await rpc('admin_socios'); } catch (e) { aBody().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    aBody().innerHTML = '<div class="card"><h2>👥 Socios</h2><p class="muted" style="margin-top:0">Un socio entra a este mismo panel y ve todo: talleres, usuarios, pagos y ajustes. ' +
+      'Puede chatear con los talleres y aprobar o rechazar pagos. <b>No puede crear ni eliminar</b> talleres, usuarios ni calificaciones, ni cambiar los links de pago, avisos o limpieza. ' +
+      'Cada cambio que haga (Premium, suspender, planes, reglas, textos) le pide un <b>motivo</b>: te llega como aviso y queda en 📜 Registro.</p><ul class="list">' +
+      (l.map((x) => '<li><div class="grow"><b>' + esc(x.nombre || x.email) + '</b>' + (x.suspendido ? ' <span class="pill bad">Suspendido</span>' : '') +
+        '<div class="sub">' + esc(x.email) + ' · visto ' + App.hace(x.visto_at) + ' · ' + x.cambios + ' cambio' + (x.cambios === 1 ? '' : 's') + '</div></div>' +
+        '<button class="small ' + (x.suspendido ? 'okb' : 'ghost') + '" data-ss="' + x.id + '" data-s="' + (x.suspendido ? 0 : 1) + '">' + (x.suspendido ? 'Reactivar' : 'Suspender') + '</button>' +
+        '<button class="small danger" data-sd="' + x.id + '" data-n="' + esc(x.nombre || x.email) + '">🗑️</button></li>').join('') || '<li class="muted">Aún no tienes socios.</li>') + '</ul>' +
+      '<h3>➕ Crear socio</h3><div class="row"><div><label for="soN">Nombre</label><input id="soN" maxlength="80"></div><div><label for="soT">WhatsApp</label><input id="soT" inputmode="tel"></div></div>' +
+      '<label for="soE">Correo</label><input id="soE" type="email" autocomplete="off"><label for="soP">Contraseña inicial</label><input id="soP" value="' + App.clave() + '">' +
+      '<div class="btns"><button id="soOk">Crear socio</button></div><p class="err" id="soErr"></p></div>';
+    $('soOk').onclick = async () => {
+      const b = $('soOk'), d = { rol: 'socio', nombre: $('soN').value.trim(), telefono: $('soT').value.trim(), email: $('soE').value.trim(), password: $('soP').value.trim() };
+      $('soErr').textContent = '';
+      if (!d.nombre || !d.email) { $('soErr').textContent = 'Escribe el nombre y el correo'; return; }
+      b.disabled = true; b.textContent = 'Creando…';
+      try {
+        await App.crearCuenta(d);
+        const msg = App.mensajeAcceso({ nombre: d.nombre.split(' ')[0], email: d.email, password: d.password, lugar: 'BiciTaller como socio administrador' });
+        modal('<h2>✅ Socio creado</h2><pre class="link" style="white-space:pre-wrap;font:inherit">' + esc(msg) + '</pre><div class="btns"><button class="ghost" data-cerrar>Cerrar</button>' +
+          (d.telefono ? '<a class="btn" target="_blank" rel="noopener" href="' + App.wa(d.telefono, msg) + '">📲 Enviar por WhatsApp</a>' : '') + '</div>');
+        verSocios();
+      } catch (e) { $('soErr').textContent = e.message; b.disabled = false; b.textContent = 'Crear socio'; }
+    };
+    aBody().onclick = async (e) => {
+      const ss = e.target.closest('[data-ss]'), sd = e.target.closest('[data-sd]');
+      try {
+        if (ss) { await rpc('admin_suspender', { p_tipo: 'perfil', p_id: ss.dataset.ss, p_suspender: ss.dataset.s === '1' }); verSocios(); }
+        if (sd) {
+          if (!await confirmar('¿Eliminar al socio "' + sd.dataset.n + '"? Ya no podrá entrar. El registro de sus cambios se mantiene.', 'Sí, eliminar')) return;
+          await App.borrarCuenta('perfil', sd.dataset.sd); toast('🗑️ Socio eliminado'); verSocios();
+        }
+      } catch (err) { toast(err.message); }
+    };
   }
 
   function verCuenta() {

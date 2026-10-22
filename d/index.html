@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16a34a">
+<title>Talleres de bicicletas</title>
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icons/icon-192.png">
+<link rel="apple-touch-icon" href="../icons/icon-192.png">
+<link rel="stylesheet" href="../shared/app.css">
+<style>
+  .taller { display: flex; gap: 12px; align-items: flex-start; text-decoration: none; color: inherit; }
+  .taller .logo { width: 56px; height: 56px; border-radius: 16px; flex: none; display: grid; place-items: center; font-size: 28px; color: #fff; background: center / cover no-repeat; }
+  .destacado { border: 2px solid var(--gold); }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1 style="margin:0;font-size:22px">🗺️ Talleres de bicicletas</h1>
+    <p class="muted" style="margin:4px 0 0">Elige un taller, reserva tu hora y crea tu cuenta gratis.</p>
+    <div class="row" style="margin-top:10px">
+      <select id="comuna" aria-label="Comuna"><option value="">Todas las comunas</option></select>
+      <input id="q" placeholder="Buscar por nombre…" aria-label="Buscar taller">
+    </div>
+  </div>
+  <div id="premium"></div>
+  <p class="sub" id="total"></p>
+  <div class="grid" id="lista"><p class="empty">Cargando…</p></div>
+  <div class="btns hidden" id="mas"><button class="ghost" type="button" id="bMas">Ver más talleres</button></div>
+  <p class="sub" style="text-align:center;margin-top:18px">¿Tienes un taller? <a href="../n/#taller">Súmalo gratis</a></p>
+</main>
+<script src="../shared/config.js"></script>
+<script src="../shared/vendor/supabase.js"></script>
+<script src="../shared/app.js"></script>
+<script>
+(async function () {
+  'use strict';
+  const { $, esc, plata } = App;
+  App.registrarSW();
+  const pub = await App.cargarPublica();
+  let yo = null;
+  try { yo = await App.refrescar(); } catch (e) { yo = null; }
+  const prem = yo && yo.rol === 'cliente' && yo.premium;
+  // El cliente Premium reserva con su cuenta en cualquier taller; el resto, como invitado (o en el taller de su cuenta).
+  if (yo && yo.rol === 'cliente') {
+    $('premium').innerHTML = prem ? '<div class="aviso"><div class="grow">⭐ Eres Premium: reservas con tu cuenta en cualquiera de estos talleres.</div></div>'
+      : '<div class="aviso"><div class="grow">⭐ Con <b>' + esc(App.txt('premium_cliente_titulo') || 'Cliente Premium') + '</b> reservas con tu cuenta en cualquier taller y tienes horas exclusivas. ' +
+        'Sin Premium igual puedes reservar como invitado.</div><a class="btn small gold" href="../cliente/#plan">Ver</a></div>';
+  }
+  let desde = 0, datos = [], t0;
+  async function buscar(mas) {
+    if (!mas) { desde = 0; datos = []; }
+    let r;
+    try { r = await App.rpc('directorio', { p_comuna: $('comuna').value || null, p_q: $('q').value.trim() || null, p_desde: desde }); }
+    catch (e) { $('lista').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    if ($('comuna').options.length === 1) $('comuna').innerHTML += r.comunas.map((c) => '<option>' + esc(c) + '</option>').join('');
+    datos = datos.concat(r.talleres); desde = datos.length;
+    $('total').textContent = r.total ? r.total + ' taller' + (r.total === 1 ? '' : 'es') : '';
+    $('lista').innerHTML = datos.length ? datos.map((t) => {
+      const logo = /^data:image\/(jpeg|png|webp);base64,/.test(t.logo || '') ? 'background-image:url(\'' + t.logo + '\');' : '';
+      return '<a class="card taller' + (t.premium ? ' destacado' : '') + '" href="../t/?s=' + encodeURIComponent(t.slug) + '"><div class="logo" style="background-color:' + esc(t.color) + ';' + logo + '">' + (logo ? '' : esc(t.icono)) + '</div>' +
+        '<div class="grow"><b>' + esc(t.nombre) + '</b>' + (t.premium ? ' <span class="pill pro">⭐ Destacado</span>' : '') + '<div>' + App.nota(t.nota) + '</div>' +
+        '<div class="sub">' + esc([t.direccion, t.comuna].filter(Boolean).join(', ')) + '</div>' +
+        (t.descripcion ? '<div class="sub">' + esc(t.descripcion.length > 110 ? t.descripcion.slice(0, 110) + '…' : t.descripcion) + '</div>' : '') +
+        '<div class="sub">' + (t.reservas_online ? '📅 Reserva online' : '📲 Reserva por WhatsApp') + (t.desde ? ' · desde ' + plata(t.desde) : '') + '</div></div><span>›</span></a>';
+    }).join('') : '<p class="empty">No encontramos talleres con esa búsqueda.</p>';
+    $('mas').classList.toggle('hidden', datos.length >= r.total);
+  }
+  $('comuna').onchange = () => buscar();
+  $('q').oninput = () => { clearTimeout(t0); t0 = setTimeout(() => buscar(), 350); };
+  $('bMas').onclick = () => buscar(true);
+  buscar();
+  App.pie();
+})();
+</script>
+</body>
+</html>

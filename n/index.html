@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16a34a">
+<title>Únete a BiciTaller</title>
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icons/icon-192.png">
+<link rel="apple-touch-icon" href="../icons/icon-192.png">
+<link rel="stylesheet" href="../shared/app.css">
+<style>
+  main { max-width: 520px; }
+  .marca { text-align: center; margin: 4vh 0 16px; }
+  .marca .logo { width: 76px; height: 76px; border-radius: 22px; margin: 0 auto 10px; display: grid; place-items: center; font-size: 40px;
+    background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 55%, #000)); color: #fff; }
+  .marca h1 { margin: 0; font-size: 26px; letter-spacing: -.02em; }
+  .elige { display: grid; gap: 10px; }
+  .elige .opc { font-size: 16px; }
+  .elige .opc .i { font-size: 30px; line-height: 1; }
+</style>
+</head>
+<body>
+<main>
+  <div class="marca"><div class="logo">🚲</div><h1 id="nombreApp">BiciTaller</h1><p class="muted" style="margin:4px 0 0">Reservas online, abonos y órdenes de trabajo para talleres de bicicletas</p></div>
+  <p class="empty" id="cargando">Cargando…</p>
+
+  <div class="hidden" id="todo">
+    <div class="aviso hidden" id="invita"></div>
+    <div class="card hidden" id="sesion"></div>
+
+    <div class="elige" id="elige">
+      <button class="opc" type="button" id="bTaller"><span class="i">🔧</span><span class="grow"><b>Tengo un taller</b><small>Crea la cuenta de tu taller gratis y recibe reservas online.</small></span></button>
+      <a class="btn opc" id="bCiclista" href="../d/"><span class="i">🚴</span><span class="grow"><b>Soy ciclista</b><small>Busca un taller cerca de ti, reserva tu hora y crea tu cuenta gratis.</small></span></a>
+    </div>
+
+    <div class="card hidden" id="cerrado"></div>
+
+    <section class="card hidden" id="form">
+      <h2>🔧 Crea la cuenta de tu taller</h2>
+      <div id="gratis"></div>
+      <div class="row">
+        <div><label for="fTaller">Nombre del taller</label><input id="fTaller" maxlength="80" placeholder="Bici Sur"></div>
+        <div><label for="fComuna">Comuna</label><input id="fComuna" maxlength="60" placeholder="Ñuñoa"></div>
+      </div>
+      <div class="row">
+        <div><label for="fNom">Tu nombre</label><input id="fNom" maxlength="80" autocomplete="name"></div>
+        <div><label for="fTel">WhatsApp</label><input id="fTel" inputmode="tel" maxlength="30" autocomplete="tel" placeholder="+56 9 1234 5678"></div>
+      </div>
+      <label for="fEmail">Correo</label><input id="fEmail" type="email" autocomplete="email">
+      <label for="fPass">Contraseña (mínimo 6)</label><input id="fPass" type="password" autocomplete="new-password">
+      <label class="check"><input type="checkbox" id="fAcepto"> <span id="terminos" class="sub"></span></label>
+      <div class="btns"><button class="ghost" type="button" id="bVolver">Volver</button><button type="button" id="bCrear">Crear mi taller gratis</button></div>
+      <p class="err" id="fErr"></p>
+    </section>
+
+    <p class="sub" style="text-align:center">¿Ya tienes cuenta? <a href="../index.html">Inicia sesión</a></p>
+  </div>
+</main>
+<script src="../shared/config.js"></script>
+<script src="../shared/vendor/supabase.js"></script>
+<script src="../shared/app.js"></script>
+<script>
+(async function () {
+  'use strict';
+  const { $, esc } = App;
+  App.registrarSW();
+  const ref = (new URLSearchParams(location.search).get('ref') || '').trim().toLowerCase();
+  const pub = await App.cargarPublica();
+  let info;
+  try { info = await App.rpc('registro_info', { p_ref: ref || null }); } catch (e) { $('cargando').textContent = '⚠️ ' + e.message; return; }
+  if (pub.textos.app_nombre) { $('nombreApp').textContent = pub.textos.app_nombre; document.title = 'Únete a ' + pub.textos.app_nombre; }
+  $('terminos').textContent = App.txt('terminos') || 'Acepto los términos de uso';
+  const plan = (pub.planes || {}).taller_free;
+  $('gratis').innerHTML = '<div class="aviso"><div class="grow"><b>Gratis para siempre' + (info.dias_regalo ? ' + 🎁 ' + info.dias_regalo + ' días de Premium de regalo' : '') + '</b>' +
+    (plan ? '<div class="sub">' + esc(plan.beneficios.join(' · ')) + '</div>' : '') + '</div></div>';
+  if (info.ref) {
+    App.tema(info.ref.color);
+    $('invita').innerHTML = '<div class="grow">🤝 <b>' + esc(info.ref.nombre) + '</b> te invitó a BiciTaller.</div>';
+    $('invita').classList.remove('hidden');
+  }
+  $('cargando').classList.add('hidden'); $('todo').classList.remove('hidden');
+
+  // Con sesión abierta no se crea otra cuenta (se cambiaría la sesión).
+  let yo = null;
+  try { yo = await App.refrescar(); } catch (e) { yo = null; }
+  if (yo) {
+    $('sesion').innerHTML = '<p class="muted" style="margin-top:0">Tienes la sesión de <b>' + esc(yo.nombre || yo.email) + '</b> abierta. Para crear otra cuenta, cierra sesión primero.</p>' +
+      '<div class="btns"><a class="btn" href="../' + App.destino(yo) + '">Ir a mi app</a><button class="ghost" id="bSalir" type="button">Cerrar sesión</button></div>';
+    $('sesion').classList.remove('hidden');
+    $('bSalir').onclick = async () => { try { await App.sb.auth.signOut(); } catch (e) { /* sin red */ } localStorage.removeItem('bt:cuenta'); location.reload(); };
+  }
+
+  const ver = (form) => { $('elige').classList.toggle('hidden', form); $('form').classList.toggle('hidden', !form); if (form) $('fTaller').focus(); };
+  $('bTaller').onclick = () => {
+    if (yo) { App.toast('Cierra sesión para crear la cuenta de un taller'); return; }
+    if (!info.abierto) {
+      const sop = (pub.config || {}).soporte_whatsapp;
+      $('cerrado').innerHTML = '<p style="margin:0">Por ahora creamos las cuentas de los talleres nosotros. ' +
+        (sop ? '<a target="_blank" rel="noopener" href="' + App.wa(sop, 'Hola 👋 Tengo un taller de bicicletas y quiero usar BiciTaller.') + '">Escríbenos por WhatsApp</a> y te la creamos.' : 'Escríbenos y te la creamos.') + '</p>';
+      $('cerrado').classList.remove('hidden');
+      return;
+    }
+    ver(true);
+  };
+  $('bVolver').onclick = () => ver(false);
+  if (location.hash === '#taller') $('bTaller').click();
+
+  $('bCrear').onclick = async () => {
+    const b = $('bCrear'); $('fErr').textContent = '';
+    const d = { taller: $('fTaller').value.trim(), comuna: $('fComuna').value.trim(), nombre: $('fNom').value.trim(), tel: $('fTel').value.trim(),
+      email: $('fEmail').value.trim(), pass: $('fPass').value };
+    if (!d.taller) { $('fErr').textContent = 'Escribe el nombre de tu taller'; return; }
+    if (!d.nombre || App.telNorm(d.tel).length < 11) { $('fErr').textContent = 'Escribe tu nombre y tu WhatsApp (ej.: +56 9 1234 5678)'; return; }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.email)) { $('fErr').textContent = 'Escribe un correo válido'; return; }
+    if (d.pass.length < 6) { $('fErr').textContent = 'La contraseña debe tener al menos 6 caracteres'; return; }
+    if (!$('fAcepto').checked) { $('fErr').textContent = 'Acepta los términos para continuar'; return; }
+    b.disabled = true; b.textContent = 'Creando…';
+    const { data, error } = await App.sb.auth.signUp({ email: d.email, password: d.pass,
+      options: { data: { rol: 'taller', taller_nombre: d.taller, comuna: d.comuna, nombre: d.nombre, telefono: d.tel, ref: info.ref ? info.ref.slug : '' },
+        emailRedirectTo: App.ROOT + 'taller/' } });
+    b.disabled = false; b.textContent = 'Crear mi taller gratis';
+    if (error) { $('fErr').textContent = App.friendly(error); return; }
+    if (data.session) { location.href = '../taller/'; return; }
+    App.modal('<h2>📧 Revisa tu correo</h2><p>Te enviamos un enlace para confirmar tu cuenta. Después entra con tu correo y contraseña.</p><div class="btns"><a class="btn" href="../index.html">Ir a iniciar sesión</a></div>');
+  };
+  App.pie();
+})();
+</script>
+</body>
+</html>

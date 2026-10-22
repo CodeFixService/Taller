@@ -18,6 +18,9 @@
   tr.tot td { border: 0; font-weight: 800; }
   tr.sub2 td { border: 0; color: var(--muted); padding: 2px 0; }
   .prev img { max-height: 260px; width: auto; display: block; margin: 10px auto 0; border-radius: 12px; border: 1px solid var(--line); }
+  .fotos { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+  .fotos figure { margin: 0; } .fotos figcaption { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .fotos img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); cursor: pointer; }
 </style>
 </head>
 <body>
@@ -35,6 +38,7 @@
       <div id="bloque" style="margin-top:12px"></div>
     </div>
     <div class="card hidden" id="cTrabajo"><h2>🔧 Tu bici</h2><ul class="tl" id="tl"></ul><div id="detalle"></div></div>
+    <div class="card hidden" id="cFotos"><h2>📷 Antes y después</h2><div id="fotos"></div></div>
     <div class="card hidden" id="cCalif"></div>
     <div class="btns">
       <a class="btn alt hidden" id="bWsp" target="_blank" rel="noopener">📲 Escribir al taller</a>
@@ -62,7 +66,7 @@
   };
   const PASOS = [['confirmada', '✅ Confirmada'], ['recibida', '🚲 Recibida en el taller'], ['en_reparacion', '🔧 En reparación'], ['lista', '✅ Lista para retirar'], ['completada', '🎉 Entregada']];
   const ORDEN = { confirmada: 0, recibida: 1, en_reparacion: 2, esperando_repuesto: 2, lista: 3, completada: 4 };
-  let r = null, reloj = null, sondeo = null, imagen = null;
+  let r = null, reloj = null, sondeo = null, imagen = null, fotosN = -1;
 
   async function cargar() {
     try { r = await App.rpc('reserva_ver', { p_token: token }); } catch (e) { $('cargando').textContent = '⚠️ ' + e.message; return; }
@@ -157,6 +161,21 @@
         (r.proxima_mantencion && r.estado === 'completada' ? '<p class="sub">🔔 Próxima mantención recomendada: ' + App.fLarga(r.proxima_mantencion) + '</p>' : '');
     }
 
+    // Fotos antes/después (se cargan aparte: no viajan en cada actualización)
+    $('cFotos').classList.toggle('hidden', !r.fotos_n);
+    if (r.fotos_n && !r.fotos_visibles) {
+      fotosN = -1;
+      $('fotos').innerHTML = '<p class="muted" style="margin:0">El taller subió ' + r.fotos_n + ' foto' + (r.fotos_n > 1 ? 's' : '') + ' de tu bici. ' +
+        'Con ⭐ Premium las guardas siempre en tu historial.</p>' + (App.cuenta && App.cuenta.rol === 'cliente' ? '<div class="btns"><a class="btn gold" href="../cliente/#plan">Hazte Premium</a></div>' : '');
+    } else if (r.fotos_n && r.fotos_n !== fotosN) {
+      fotosN = r.fotos_n;
+      App.rpc('reserva_fotos', { p_token: token }).then((l) => {
+        $('fotos').innerHTML = '<div class="fotos">' + l.map((f) => '<figure><img alt="Foto ' + (f.tipo === 'antes' ? 'antes' : 'después') + '" src="' + f.imagen + '"><figcaption>' +
+          (f.tipo === 'antes' ? 'Antes' : 'Después') + '</figcaption></figure>').join('') + '</div>';
+      }).catch(() => { fotosN = -1; });
+    }
+    $('fotos').onclick = (ev) => { const i = ev.target.closest('img'); if (i) App.verImagen(i.src, i.alt, 'bici.jpg'); };
+
     // Calificar al taller
     const puedeCalif = ['completada', 'lista'].includes(r.estado) && !r.calificada;
     $('cCalif').classList.toggle('hidden', !puedeCalif);
@@ -179,7 +198,7 @@
     if (['por_pagar', 'en_revision', 'confirmada', 'recibida', 'en_reparacion', 'esperando_repuesto', 'lista'].includes(r.estado)) {
       sondeo = setInterval(async () => {
         if (document.hidden) return;
-        try { const n = await App.rpc('reserva_ver', { p_token: token }); if (n && (n.estado !== r.estado || n.abono_estado !== r.abono_estado || n.total !== r.total)) { r = n; pintar(); } } catch (e) { /* sin red */ }
+        try { const n = await App.rpc('reserva_ver', { p_token: token }); if (n && (n.estado !== r.estado || n.abono_estado !== r.abono_estado || n.total !== r.total || n.fotos_n !== r.fotos_n)) { r = n; pintar(); } } catch (e) { /* sin red */ }
       }, 20000);
     }
   }
