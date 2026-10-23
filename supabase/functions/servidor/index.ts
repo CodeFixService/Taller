@@ -1,6 +1,6 @@
 // BiciTaller · Función "servidor" (Supabase → Edge Functions → nombre: servidor)
 //  1) { accion: 'crear_cuenta' }  El administrador crea talleres y socios; el dueño crea a su equipo.
-//  2) { accion: 'borrar' }        Solo el administrador: borra un usuario o un taller completo.
+//  2) { accion: 'borrar' }        Administrador (o socio con motivo): borra un usuario o un taller completo.
 //  3) { accion: 'actualizar_bd' } Solo el administrador: instala la base de datos que viene con esta versión de la función.
 //  4) { accion: 'ping' }          Diagnóstico.
 //  3) sin acción (cada minuto, pg_cron): envía por push los avisos nuevos de la campanita.
@@ -9,7 +9,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 import postgres from 'npm:postgres@3.4.4';
 import { INSTALAR, DB_VERSION } from './instalar.ts';
 
-const VERSION = '1.8';
+const VERSION = '1.9';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -48,12 +48,13 @@ async function crearCuenta(jwt: string, b: Cuenta) {
   return { ok: true, id: nu.user.id };
 }
 
-async function borrar(jwt: string, b: { tipo?: string; id?: string }) {
+async function borrar(jwt: string, b: { tipo?: string; id?: string; motivo?: string }) {
   const s = db();
   const { data: who, error: e0 } = await s.auth.getUser(jwt);
   if (e0 || !who?.user) return { ok: false, error: 'Inicia sesión de nuevo' };
   if (!/^[0-9a-f-]{36}$/i.test(String(b.id || ''))) return { ok: false, error: 'Dato no válido' };
-  const { data: prep, error: e1 } = await s.rpc('preparar_borrado', { p_caller: who.user.id, p_tipo: b.tipo === 'taller' ? 'taller' : 'perfil', p_id: b.id });
+  const { data: prep, error: e1 } = await s.rpc('preparar_borrado', { p_caller: who.user.id, p_tipo: b.tipo === 'taller' ? 'taller' : 'perfil', p_id: b.id,
+    p_motivo: String(b.motivo || '').slice(0, 200) || null });
   if (e1) return { ok: false, error: e1.message };
   if (!prep?.ok) return prep;
   let n = 0;

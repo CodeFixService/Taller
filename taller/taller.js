@@ -143,7 +143,9 @@
   let referidos = null;
   async function pintarReferidos() {
     if (!P.dueno) { $('hReferidos').innerHTML = ''; return; }
-    try { referidos = await rpc('taller_referidos'); } catch (e) { return; }
+    // Si la base de datos aún no se actualiza, igual se muestra el link para invitar.
+    try { referidos = await rpc('taller_referidos'); }
+    catch (e) { referidos = { slug: P.taller.slug, dias: +((pub.config || {}).dias_referido || 30), abierto: true, invitados: [] }; }
     if (!referidos.abierto || !referidos.dias) { $('hReferidos').innerHTML = ''; return; }
     const inv = referidos.invitados, gan = inv.filter((x) => x.premiado).length;
     $('hReferidos').innerHTML = '<div class="card"><h2>🤝 Invita a otro taller y gana ' + referidos.dias + ' días de Premium</h2><p class="muted" style="margin-top:0">' +
@@ -498,9 +500,30 @@
     $('mSeg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.m === m));
     const on = $('mSeg').querySelector('.on'); if (on) on.scrollIntoView({ inline: 'center', block: 'nearest' });
     ({ perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan,
-      equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta })[m]();
+      equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir })[m]();
   }
   const body = () => $('mBody');
+
+  // ---- Compartir: link y QR de reservas (clientes) y de invitación (otros talleres)
+  async function verCompartir() {
+    const url = linkReservas();
+    body().innerHTML = '<div class="card"><h2>🚲 Tu página de reservas</h2><p class="muted" style="margin-top:0">Para tus clientes: reservan su hora, pagan el abono y se crean su cuenta gratis. ' +
+      'Compártela por WhatsApp e Instagram, o imprime el afiche con el QR para tu mesón.</p><div class="link">' + esc(url) + '</div>' +
+      '<div class="btns"><button type="button" id="cpR">📤 Compartir</button><button class="alt" type="button" id="cpRQ">QR y afiche</button><a class="btn ghost" target="_blank" rel="noopener" href="' + esc(url) + '">Ver</a></div></div>' +
+      '<div id="cpT"></div>';
+    $('cpR').onclick = () => compartir(url, '🚲 Reserva tu hora en ' + P.taller.nombre);
+    $('cpRQ').onclick = () => $('hQR').click();
+    if (!P.dueno) return;
+    if (!referidos) await pintarReferidos();
+    if (!referidos || !referidos.abierto) return;
+    const ur = App.ROOT + 'n/?ref=' + encodeURIComponent(referidos.slug);
+    $('cpT').innerHTML = '<div class="card"><h2>🤝 Invita a otros talleres</h2><p class="muted" style="margin-top:0">Se crean su cuenta gratis con tu link. Cuando un taller invitado activa su Premium, ' +
+      'te regalamos ' + referidos.dias + ' días de Premium.</p><div class="link">' + esc(ur) + '</div>' +
+      '<div class="btns"><button type="button" id="cpI">📤 Invitar</button><button class="alt" type="button" id="cpIQ">QR</button></div>' +
+      (referidos.invitados.length ? '<p class="sub">Invitados: ' + referidos.invitados.map((x) => esc(x.nombre) + (x.premiado ? ' ✅' : ' ⏳')).join(', ') + '</p>' : '') + '</div>';
+    $('cpI').onclick = () => compartir(ur, '🚲 Te recomiendo BiciTaller para recibir reservas online en tu taller. Crea tu cuenta gratis aquí');
+    $('cpIQ').onclick = () => App.verQR({ url: ur, titulo: 'Invita a otro taller', archivo: 'invita-' + P.taller.slug + '.gif' });
+  }
 
   // ---- Perfil del taller (logo, colores, ícono, datos)
   function verPerfil() {
@@ -766,17 +789,50 @@
   }
 
   // ---- Estadísticas (Premium)
+  // Gráficos simples (sin librerías): barras verticales, barras horizontales y barras dobles.
+  const barras = (l, val, etq, fmt) => {
+    const max = Math.max(1, ...l.map((x) => +val(x) || 0));
+    return '<div class="chart">' + l.map((x) => '<div><b>' + (fmt ? fmt(val(x)) : (+val(x) || 0)) + '</b><i style="height:' + Math.round(100 * (+val(x) || 0) / max) + '%"></i>' + esc(etq(x)) + '</div>').join('') + '</div>';
+  };
+  const hbarras = (l, total) => {
+    const max = Math.max(1, ...l.map((x) => x[1]));
+    return l.map((x) => '<div class="hbar"><span>' + esc(x[0]) + '</span><div><i style="width:' + Math.round(100 * x[1] / max) + '%"></i></div><b>' + x[1] +
+      (total ? ' <span class="sub">(' + Math.round(100 * x[1] / Math.max(total, 1)) + '%)</span>' : '') + '</b></div>').join('');
+  };
+  const mesCorto = (m) => new Date(+m.slice(0, 4), +m.slice(5, 7) - 1, 1).toLocaleDateString('es-CL', { month: 'short' });
   async function verStats() {
     body().innerHTML = '<p class="empty">Cargando…</p>';
     let s;
     try { s = await rpc('taller_estadisticas'); } catch (e) { body().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
-    if (s.bloqueado) { body().innerHTML = bloqueadoPremium('📊 Estadísticas', 'Ingresos por mes, servicios más pedidos, faltas y abonos perdidos.'); return; }
-    const max = Math.max(1, ...s.meses.map((m) => +m.ingresos || 0));
-    body().innerHTML = '<div class="stats"><div class="card"><span>Reservas online (90 días)</span><b>' + s.online + '</b></div><div class="card"><span>Faltas (90 días)</span><b>' + s.faltas + '</b></div>' +
-      '<div class="card"><span>Cancelaciones (90 días)</span><b>' + s.canceladas + '</b></div><div class="card"><span>Abonos que te quedaste</span><b>' + plata(s.abonos_perdidos) + '</b></div></div>' +
-      '<div class="card"><h2>💰 Ingresos por mes</h2>' + (s.meses.length ? '<div class="bar-mes">' + s.meses.map((m) => '<div><b style="color:var(--text)">' + plata(m.ingresos) + '</b><span style="height:' +
-        Math.round(100 * (m.ingresos || 0) / max) + '%"></span>' + m.mes.slice(5) + '/' + m.mes.slice(2, 4) + '</div>').join('') + '</div>' : '<p class="muted">Aún sin trabajos completados.</p>') + '</div>' +
-      '<div class="card"><h2>🛠️ Servicios más pedidos (90 días)</h2><ul class="list">' + (s.servicios.map((x) => '<li><span class="grow">' + esc(x.nombre) + '</span><b>' + x.n + '</b></li>').join('') || '<li class="muted">Sin datos.</li>') + '</ul></div>';
+    if (s.bloqueado) {
+      body().innerHTML = (s.mes_reservas != null ? '<div class="stats"><div class="card"><span>📅 Reservas este mes</span><b>' + s.mes_reservas + '</b></div>' +
+        '<div class="card"><span>💰 Ingresos este mes</span><b>' + plata(s.mes_ingresos) + '</b></div></div>' : '') +
+        bloqueadoPremium('📊 Gráficos y estadísticas', 'Ingresos por mes, días con más trabajo, servicios más pedidos, clientes nuevos y los que vuelven, de dónde llegan tus reservas, ticket promedio y tus estrellas.');
+      return;
+    }
+    const tot = s.meses.reduce((a, m) => a + (+m.ingresos || 0), 0), trab = s.meses.reduce((a, m) => a + (+m.trabajos || 0), 0);
+    const o = s.origen || {}, oTot = (+o.online || 0) + (+o.cuenta || 0) + (+o.taller || 0);
+    const est = s.estrellas || [], eTot = est.reduce((a, x) => a + x.n, 0);
+    const k = (n) => n >= 1e6 ? '$' + (n / 1e6).toFixed(1).replace('.', ',') + 'M' : n >= 1000 ? '$' + Math.round(n / 1000) + 'k' : plata(n);
+    body().innerHTML = '<div class="stats">' +
+      '<div class="card"><span>💰 Ingresos (6 meses)</span><b>' + plata(tot) + '</b></div><div class="card"><span>🔧 Trabajos (6 meses)</span><b>' + trab + '</b></div>' +
+      '<div class="card"><span>🧾 Ticket promedio</span><b>' + plata(s.ticket || 0) + '</b></div><div class="card"><span>🌐 Reservas online (90 días)</span><b>' + s.online + '</b></div>' +
+      '<div class="card"><span>🚫 Faltas (90 días)</span><b>' + s.faltas + '</b></div><div class="card"><span>❌ Cancelaciones (90 días)</span><b>' + s.canceladas + '</b></div>' +
+      '<div class="card"><span>💸 Abonos que te quedaste</span><b>' + plata(s.abonos_perdidos) + '</b></div></div>' +
+      '<div class="card"><h2>💰 Ingresos por mes</h2>' + (s.meses.length ? barras(s.meses, (m) => m.ingresos, (m) => mesCorto(m.mes), k) : '<p class="muted">Aún sin trabajos completados.</p>') + '</div>' +
+      '<div class="card"><h2>📅 Próximos 7 días</h2>' + barras(s.proximos || [], (d) => d.n, (d) => App.DIAS[App.fechaDe(d.fecha).getDay()] + ' ' + App.fechaDe(d.fecha).getDate()) +
+        '<p class="sub">Bicis agendadas por día' + (P.taller.max_dia ? ' (tu máximo: ' + P.taller.max_dia + ' por día)' : '') + '.</p></div>' +
+      '<div class="card"><h2>🗓️ Días con más trabajo (90 días)</h2>' + barras([1, 2, 3, 4, 5, 6, 0].map((d) => (s.semana || []).find((x) => x.dia === d) || { dia: d, n: 0 }), (x) => x.n, (x) => App.DIAS[x.dia]) + '</div>' +
+      '<div class="card"><h2>👥 Clientes nuevos y los que vuelven</h2>' + ((s.clientes_mes || []).length ?
+        '<div class="chart">' + (() => { const cm = s.clientes_mes, mx = Math.max(1, ...cm.map((x) => x.nuevos + x.vuelven));
+          return cm.map((x) => '<div><b>' + (x.nuevos + x.vuelven) + '</b><i class="b2" style="height:' + Math.round(100 * x.vuelven / mx) + '%;border-radius:7px 7px 0 0"></i>' +
+            '<i style="height:' + Math.round(100 * x.nuevos / mx) + '%;border-radius:0"></i>' + esc(mesCorto(x.mes)) + '</div>').join(''); })() + '</div>' +
+        '<div class="leyenda"><span><i style="background:var(--brand)"></i>Nuevos</span><span><i style="background:color-mix(in srgb, var(--brand) 40%, var(--line))"></i>Vuelven</span></div>'
+        : '<p class="muted">Aún sin datos.</p>') + '</div>' +
+      '<div class="card"><h2>🛠️ Servicios más pedidos (90 días)</h2>' + (s.servicios.length ? hbarras(s.servicios.map((x) => [x.nombre, +x.n])) : '<p class="muted">Sin datos.</p>') + '</div>' +
+      '<div class="card"><h2>📲 ¿De dónde llegan tus reservas? (90 días)</h2>' + (oTot ? hbarras([['🌐 Online sin cuenta', +o.online || 0], ['📱 Clientes con cuenta', +o.cuenta || 0], ['🏪 En el taller / teléfono', +o.taller || 0]], oTot) +
+        '<p class="sub">💡 Comparte tu QR: los clientes con cuenta vuelven más y reciben recordatorios.</p>' : '<p class="muted">Sin reservas todavía.</p>') + '</div>' +
+      '<div class="card"><h2>⭐ Tus estrellas</h2>' + (eTot ? hbarras(est.map((x) => ['★'.repeat(x.e), x.n]), eTot) : '<p class="muted">Aún sin calificaciones.</p>') + '</div>';
   }
   function bloqueadoPremium(t, d) {
     return '<div class="card plan premium"><h2>' + t + ' <span class="pill pro">PREMIUM</span></h2><p class="muted">' + esc(d) + '</p><div class="btns">' +
@@ -801,11 +857,14 @@
       '<div class="row"><div><label for="uN">Nombre</label><input id="uN" maxlength="80" value="' + esc(yo.nombre) + '"></div><div><label for="uT">Teléfono</label><input id="uT" maxlength="30" value="' + esc(yo.telefono) + '"></div></div>' +
       '<div class="btns"><button id="uG">💾 Guardar</button></div>' +
       '<label for="uP">Contraseña nueva</label><input id="uP" type="password" autocomplete="new-password"><div class="btns"><button class="alt" id="uPG">Cambiar contraseña</button></div>' +
-      '<div id="uPush"></div>' +
+      '<div id="uPush"></div><div id="uModo" style="margin-top:12px"></div><div id="uSop" style="margin-top:12px"></div>' +
       (P.dueno ? '<h3>🧹 Comprobantes</h3><p class="sub" style="margin:0">Se borran solos a los ' + ((pub.config || {}).dias_comprobantes || 30) + ' días. Descarga los que quieras guardar antes de limpiar.</p>' +
         '<div class="btns"><button class="ghost" id="uLimpiar">Borrar comprobantes ya revisados</button></div>' : '') +
       '<div class="btns"><button class="danger" id="uSalir">Cerrar sesión</button></div></div>';
     App.ofrecerPush($('uPush'));
+    App.selectorModo($('uModo'));
+    const sop = (pub.config || {}).soporte_whatsapp;
+    if (sop) $('uSop').innerHTML = '<a class="btn alt block" target="_blank" rel="noopener" href="' + App.wa(sop, 'Hola 👋 Soy ' + yo.nombre + ' de ' + P.taller.nombre + ' (BiciTaller).') + '">📲 Escribir al soporte por WhatsApp</a>';
     $('uG').onclick = async () => { try { await rpc('mi_perfil_guardar', { p_nombre: $('uN').value, p_telefono: $('uT').value }); toast('💾 Guardado'); } catch (e) { toast(e.message); } };
     $('uPG').onclick = async () => { const { error } = await sb.auth.updateUser({ password: $('uP').value }); toast(error ? App.friendly(error) : '🔑 Contraseña cambiada'); };
     $('uSalir').onclick = () => App.salir();

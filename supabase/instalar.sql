@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.8'::text $$;
+language sql immutable as $$ select '1.9'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -46,7 +46,8 @@ insert into public.config (clave, valor) values
   ('registro_talleres', '1'),        -- 1 = cualquiera crea su taller gratis desde /n/ (0 = cerrado)
   ('dias_referido', '30'),           -- Premium de regalo al taller que invitó, cuando el invitado paga su primer Premium
   ('horas_libera_premium', '24'),    -- las horas exclusivas Premium se abren a todos con esta anticipación
-  ('dias_fotos', '365')              -- las fotos antes/después se borran solas después de estos días
+  ('dias_fotos', '365'),             -- las fotos antes/después se borran solas después de estos días
+  ('color_app', '"#16a34a"')         -- color de la app (inicio, registro, directorio y panel del administrador)
 on conflict (clave) do nothing;
 alter table public.config enable row level security;
 
@@ -1560,10 +1561,35 @@ language plpgsql stable security definer set search_path = '' as $$
 declare tid uuid := public.taller_de(auth.uid());
 begin
   if tid is null then raise exception 'Sin acceso'; end if;
+  -- Gratis: un adelanto del mes (para que vean lo que tendrían con Premium).
   if not coalesce((public.limite_taller(tid, 'estadisticas'))::boolean, false) then
-    return jsonb_build_object('bloqueado', true);
+    return jsonb_build_object('bloqueado', true,
+      'mes_reservas', (select count(*) from public.reservas where taller_id = tid and created_at >= date_trunc('month', now()) and estado not in ('expirada', 'rechazada')),
+      'mes_ingresos', (select coalesce(sum(total), 0) from public.reservas where taller_id = tid and estado = 'completada' and completada_at >= date_trunc('month', now())));
   end if;
   return jsonb_build_object(
+    -- v1.9: datos para los gráficos.
+    'semana', (select coalesce(jsonb_agg(jsonb_build_object('dia', d, 'n', (select count(*) from public.reservas r where r.taller_id = tid
+                 and extract(dow from r.fecha) = d and r.fecha > current_date - 90 and r.estado not in ('expirada', 'rechazada', 'cancelada')))
+                 order by d), '[]') from generate_series(0, 6) d),
+    'origen', (select jsonb_build_object('online', count(*) filter (where origen = 'online'), 'cuenta', count(*) filter (where origen = 'cliente'),
+                 'taller', count(*) filter (where origen = 'taller'))
+               from public.reservas where taller_id = tid and created_at > now() - interval '90 days' and estado not in ('expirada', 'rechazada')),
+    'clientes_mes', (select coalesce(jsonb_agg(x order by x.mes), '[]') from (
+       select to_char(date_trunc('month', r.fecha), 'YYYY-MM') as mes,
+         count(distinct r.tel_norm) filter (where not exists (select 1 from public.reservas z where z.taller_id = tid and z.tel_norm = r.tel_norm
+           and z.estado = 'completada' and z.fecha < date_trunc('month', r.fecha))) as nuevos,
+         count(distinct r.tel_norm) filter (where exists (select 1 from public.reservas z where z.taller_id = tid and z.tel_norm = r.tel_norm
+           and z.estado = 'completada' and z.fecha < date_trunc('month', r.fecha))) as vuelven
+       from public.reservas r where r.taller_id = tid and r.estado = 'completada' and r.tel_norm <> '' and r.fecha > current_date - 180
+       group by 1) x),
+    'proximos', (select coalesce(jsonb_agg(jsonb_build_object('fecha', d::date, 'n', (select count(*) from public.reservas r where r.taller_id = tid
+                   and r.fecha = d::date and public.ocupa_hora(r))) order by d), '[]')
+                 from generate_series((now() at time zone 'America/Santiago')::date, (now() at time zone 'America/Santiago')::date + 6, interval '1 day') d),
+    'ticket', (select coalesce(round(avg(total)), 0) from public.reservas where taller_id = tid and estado = 'completada' and total > 0
+               and completada_at > now() - interval '90 days'),
+    'estrellas', (select coalesce(jsonb_agg(jsonb_build_object('e', e, 'n', (select count(*) from public.calificaciones q where q.taller_id = tid
+                    and q.autor = 'cliente' and q.estrellas = e)) order by e desc), '[]') from generate_series(1, 5) e),
     'meses', (select coalesce(jsonb_agg(x order by x.mes), '[]') from (
        select to_char(date_trunc('month', completada_at), 'YYYY-MM') as mes, count(*) as trabajos, sum(total) as ingresos
        from public.reservas where taller_id = tid and estado = 'completada' and completada_at > now() - interval '6 months'
@@ -1857,10 +1883,11 @@ begin
   perform public.admin_editar(p_motivo);
   if p_clave not in ('minutos_pago', 'minutos_devolucion', 'horas_cancelacion', 'dias_saldo', 'dias_regalo_taller',
                      'dias_aviso_vencimiento', 'dias_comprobantes', 'soporte_whatsapp', 'vapid_publica',
-                     'registro_talleres', 'dias_referido', 'horas_libera_premium', 'dias_fotos') then
+                     'registro_talleres', 'dias_referido', 'horas_libera_premium', 'dias_fotos', 'color_app') then
     raise exception 'Ajuste no válido';
   end if;
   if p_clave = 'vapid_publica' and not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  if p_clave = 'color_app' and (p_valor #>> '{}') !~ '^#[0-9a-fA-F]{6}$' then raise exception 'Color no válido'; end if;
   insert into public.config (clave, valor) values (p_clave, p_valor) on conflict (clave) do update set valor = excluded.valor;
   perform public.auditar('ajuste', p_clave || ' = ' || p_valor::text);
 end $$;
@@ -1885,10 +1912,11 @@ begin
     order by q.created_at desc limit 300) x);
 end $$;
 
-create or replace function public.admin_calificacion_borrar(p_id uuid) returns void
+drop function if exists public.admin_calificacion_borrar(uuid);
+create or replace function public.admin_calificacion_borrar(p_id uuid, p_motivo text default null) returns void
 language plpgsql security definer set search_path = '' as $$
 begin
-  perform public.admin_check();
+  perform public.admin_editar(p_motivo);
   delete from public.calificaciones where id = p_id;
   perform public.auditar('calificacion_borrada', p_id::text);
 end $$;
@@ -2089,7 +2117,7 @@ grant execute on function
   public.admin_suspender(text, uuid, boolean, text), public.admin_pagos(text), public.admin_pago_comprobante(uuid),
   public.admin_pago_resolver(uuid, boolean, text), public.admin_links(), public.admin_plan_guardar(text, text, text, jsonb, jsonb, int, text),
   public.admin_config_guardar(text, jsonb, text), public.admin_texto_guardar(text, text, text), public.admin_calificaciones(),
-  public.admin_calificacion_borrar(uuid), public.admin_aviso(text, text, text), public.admin_auditoria(), public.limpiar(text),
+  public.admin_calificacion_borrar(uuid, text), public.admin_aviso(text, text, text), public.admin_auditoria(), public.limpiar(text),
   public.admin_push_claves(text, text), public.push_guardar(text, text, text), public.push_quitar(text)
 to authenticated;
 -- Usadas por las políticas de seguridad.
@@ -2210,32 +2238,45 @@ end $$;
 -- =====================================================================
 -- 19. (v1.3) Borrar cuentas (solo el administrador; lo ejecuta la función "servidor")
 -- =====================================================================
-create or replace function public.preparar_borrado(p_caller uuid, p_tipo text, p_id uuid) returns jsonb
+-- Lo llama el servidor. El administrador borra libre; el socio (v1.9) borra talleres, clientes y equipo con un motivo,
+-- que queda en el registro y le llega como aviso al administrador. Nadie borra al administrador; los socios solo el admin.
+drop function if exists public.preparar_borrado(uuid, text, uuid);
+create or replace function public.preparar_borrado(p_caller uuid, p_tipo text, p_id uuid, p_motivo text default null) returns jsonb
 language plpgsql security definer set search_path = '' as $$
-declare p public.perfiles; ids uuid[];
+declare p public.perfiles; c public.perfiles; ids uuid[]; admin boolean; det text; m text := nullif(trim(coalesce(p_motivo, '')), '');
 begin
-  if not exists (select 1 from public.perfiles where id = p_caller and rol = 'admin' and email = public.admin_email() and not suspendido) then
-    return jsonb_build_object('ok', false, 'error', 'Solo el administrador');
-  end if;
+  select * into c from public.perfiles where id = p_caller and not suspendido;
+  admin := c.rol = 'admin' and c.email = public.admin_email();
+  if not admin and coalesce(c.rol, '') <> 'socio' then return jsonb_build_object('ok', false, 'error', 'Solo el administrador'); end if;
+  if not admin and length(coalesce(m, '')) < 5 then return jsonb_build_object('ok', false, 'error', 'Escribe el motivo (mínimo 5 letras)'); end if;
   if p_tipo = 'taller' then
-    select array_agg(id) into ids from public.perfiles where taller_id = p_id and rol <> 'admin';
-    insert into public.auditoria (quien, accion, detalle)
-    select p_caller, 'borrar_taller', nombre from public.talleres where id = p_id;
-    return jsonb_build_object('ok', true, 'ids', coalesce(to_jsonb(ids), '[]'::jsonb), 'taller', p_id);
+    select array_agg(id) into ids from public.perfiles where taller_id = p_id and rol not in ('admin', 'socio');
+    select 'taller ' || nombre into det from public.talleres where id = p_id;
+    if det is null then return jsonb_build_object('ok', false, 'error', 'Taller no encontrado'); end if;
+  else
+    select * into p from public.perfiles where id = p_id;
+    if p.id is null then return jsonb_build_object('ok', false, 'error', 'Usuario no encontrado'); end if;
+    if p.rol = 'admin' then return jsonb_build_object('ok', false, 'error', 'No puedes borrar al administrador'); end if;
+    if p.rol = 'taller' then return jsonb_build_object('ok', false, 'error', 'Es el dueño: elimina el taller completo'); end if;
+    if p.rol = 'socio' and not admin then return jsonb_build_object('ok', false, 'error', 'Solo el administrador elimina socios'); end if;
+    ids := array[p.id];
+    det := p.rol || ' ' || p.email;
   end if;
-  select * into p from public.perfiles where id = p_id;
-  if p.id is null then return jsonb_build_object('ok', false, 'error', 'Usuario no encontrado'); end if;
-  if p.rol = 'admin' then return jsonb_build_object('ok', false, 'error', 'No puedes borrar al administrador'); end if;
-  if p.rol = 'taller' then return jsonb_build_object('ok', false, 'error', 'Es el dueño: elimina el taller completo'); end if;
-  insert into public.auditoria (quien, accion, detalle) values (p_caller, 'borrar_usuario', p.rol || ' ' || p.email);
-  return jsonb_build_object('ok', true, 'ids', jsonb_build_array(p.id));
+  insert into public.auditoria (quien, accion, detalle)
+  values (p_caller, case when p_tipo = 'taller' then 'borrar_taller' else 'borrar_usuario' end, left(det || coalesce(' · Motivo: ' || m, ''), 500));
+  if not admin then
+    insert into public.notificaciones (para, titulo, cuerpo, url)
+    select a.id, left('🗑️ ' || coalesce(nullif(c.nombre, ''), c.email) || ' eliminó ' || det, 90), left('Motivo: ' || m, 240), '/admin/#ajustes'
+    from public.perfiles a where a.rol = 'admin' and a.email = public.admin_email();
+  end if;
+  return jsonb_build_object('ok', true, 'ids', coalesce(to_jsonb(ids), '[]'::jsonb), 'taller', case when p_tipo = 'taller' then p_id end);
 end $$;
 
 create or replace function public.borrar_taller(p_id uuid) returns void
 language sql security definer set search_path = '' as $$ delete from public.talleres where id = p_id $$;
 
 revoke execute on function public.chat_puede(uuid, uuid), public.chat_enviar(uuid, uuid, text), public.chat_leer(uuid, uuid),
-  public.chat_lista(), public.preparar_borrado(uuid, text, uuid), public.borrar_taller(uuid),
+  public.chat_lista(), public.preparar_borrado(uuid, text, uuid, text), public.borrar_taller(uuid),
   public.preparar_cuenta(uuid, text, text, text, text, text, uuid) from public, anon, authenticated;
 grant execute on function public.chat_puede(uuid, uuid), public.chat_enviar(uuid, uuid, text), public.chat_leer(uuid, uuid),
   public.chat_lista() to authenticated;

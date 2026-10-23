@@ -40,6 +40,7 @@
   const { $, esc, plata } = App;
   App.registrarSW();
   const pub = await App.cargarPublica();
+  App.colorApp();
   let yo = null;
   try { yo = await App.refrescar(); } catch (e) { yo = null; }
   const prem = yo && yo.rol === 'cliente' && yo.premium;
