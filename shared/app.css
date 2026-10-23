@@ -27,6 +27,28 @@
     color-scheme: dark;
   }
 }
+/* Modo oscuro elegido a mano (Mi cuenta → Apariencia) */
+:root[data-theme="dark"] {
+  --bg: #0b0f16; --card: #131a25; --text: #e7edf5; --muted: #93a3b8; --line: #243145; --field: #0f1520;
+  --brand-soft: color-mix(in srgb, var(--brand) 22%, transparent);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .25);
+  color-scheme: dark;
+}
+.swatch-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; align-items: center; }
+.swatch-row button { width: 36px; height: 36px; padding: 0; border-radius: 50%; border: 3px solid var(--card); box-shadow: 0 0 0 1px var(--line); }
+.swatch-row button.on { box-shadow: 0 0 0 2px var(--text); }
+/* Gráficos */
+.chart { display: flex; align-items: flex-end; gap: 6px; height: 150px; margin-top: 10px; }
+.chart > div { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; font-size: 11px; color: var(--muted); }
+.chart > div i { display: block; width: 100%; max-width: 46px; border-radius: 7px 7px 0 0; background: var(--brand); min-height: 2px; }
+.chart > div i.b2 { background: color-mix(in srgb, var(--brand) 40%, var(--line)); border-radius: 0; }
+.chart > div b { color: var(--text); font-size: 11px; white-space: nowrap; }
+.hbar { display: grid; grid-template-columns: minmax(110px, 46%) 1fr auto; gap: 8px; align-items: center; margin: 8px 0; font-size: 14px; }
+.hbar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar div { height: 12px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.hbar div i { display: block; height: 100%; background: var(--brand); border-radius: 99px; }
+.leyenda { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: var(--muted); margin-top: 8px; }
+.leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body {

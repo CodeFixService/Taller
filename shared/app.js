@@ -433,8 +433,8 @@
   }
 
   // Solo el administrador: borra un usuario o un taller completo (lo hace el servidor).
-  async function borrarCuenta(tipo, id) {
-    const { data, error } = await sb.functions.invoke('servidor', { body: { accion: 'borrar', tipo, id } });
+  async function borrarCuenta(tipo, id, motivo) {
+    const { data, error } = await sb.functions.invoke('servidor', { body: { accion: 'borrar', tipo, id, motivo: motivo || '' } });
     if (error) throw new Error('No se pudo conectar con la función "servidor".');
     if (!data || !data.ok) throw new Error((data && data.error) || 'No se pudo borrar');
     return data;
@@ -451,6 +451,32 @@
     });
     return g.map((x) => DIAS[x.ini] + (x.n > 1 ? '–' + DIAS[x.fin] : '') + ' ' + x.r).join(' · ');
   }
+
+  /* ---------- Apariencia: modo claro/oscuro (por celular) y color de la app ---------- */
+  function aplicarModo() {
+    let m = 'auto';
+    try { m = localStorage.getItem('bt:modo') || 'auto'; } catch (e) { /* sin almacenamiento */ }
+    if (m === 'claro') document.documentElement.dataset.theme = 'light';
+    else if (m === 'oscuro') document.documentElement.dataset.theme = 'dark';
+    else delete document.documentElement.dataset.theme;
+  }
+  aplicarModo();
+  // Selector "Automático / Claro / Oscuro" dentro de un elemento.
+  function selectorModo(el) {
+    if (!el) return;
+    let m = 'auto';
+    try { m = localStorage.getItem('bt:modo') || 'auto'; } catch (e) { /* nada */ }
+    el.innerHTML = '<label>🌓 Modo de pantalla (este celular)</label><div class="seg" style="margin:0">' +
+      [['auto', 'Automático'], ['claro', '☀️ Claro'], ['oscuro', '🌙 Oscuro']].map((x) => '<button type="button" data-modo="' + x[0] + '" class="' + (m === x[0] ? 'on' : '') + '">' + x[1] + '</button>').join('') + '</div>';
+    el.onclick = (e) => {
+      const b = e.target.closest('[data-modo]'); if (!b) return;
+      try { localStorage.setItem('bt:modo', b.dataset.modo); } catch (err) { /* nada */ }
+      aplicarModo(); selectorModo(el);
+    };
+  }
+  // Color de la app (lo elige el administrador): inicio, registro, directorio y panel del administrador.
+  const colorApp = () => tema(((publica && publica.config) || {}).color_app || '#16a34a');
+  const COLORES = ['#16a34a', '#059669', '#0f766e', '#0891b2', '#2563eb', '#4f46e5', '#7c3aed', '#db2777', '#dc2626', '#ea580c', '#d97706', '#334155', '#111827'];
 
   /* ---------- App instalable ---------- */
   function registrarSW() {
@@ -519,7 +545,7 @@
 
   global.App = {
     sb, ROOT, $, esc, plata, numero, iso, fechaDe, sumarDias, hoy, fCorta, fLarga, fHora, hace, DIAS, telNorm, wa, estrellas, nota,
-    promoTxt, toast, modal, confirmar, tema, pintarLogo, friendly, rpc, q, cargarPublica, txt, refrescar, requerir, entrar, salir, crearCuenta,
+    promoTxt, toast, modal, confirmar, tema, selectorModo, colorApp, COLORES, pintarLogo, friendly, rpc, q, cargarPublica, txt, refrescar, requerir, entrar, salir, crearCuenta,
     clave, mensajeAcceso, comprimirComprobante, comprimirLogo, comprimirFoto, descargar, verImagen, compartir, verQR, afiche, campana, irA, activarPush, ofrecerPush,
     pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino, revisarVersion, actualizar, mayor, chatBoton, abrirChat, borrarCuenta, horarioTxt,
     get cuenta() { return cuenta; },

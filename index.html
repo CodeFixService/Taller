@@ -55,11 +55,12 @@
 <script>
 (async function () {
   const { $ } = App;
-  App.registrarSW();
+  App.registrarSW(); App.colorApp();
   const params = new URLSearchParams(location.search);
   const volver = params.get('volver');
   const ver = (id) => ['vEntrar', 'vOlvide', 'vNueva'].forEach((v) => $(v).classList.toggle('hidden', v !== id));
   App.cargarPublica().then((p) => {
+    App.colorApp();
     if (p.textos.app_nombre) { $('nombreApp').textContent = p.textos.app_nombre; document.title = p.textos.app_nombre; }
     if (p.textos.app_lema) $('lema').textContent = p.textos.app_lema;
   });

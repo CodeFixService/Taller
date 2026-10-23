@@ -67,6 +67,7 @@
   App.registrarSW();
   const ref = (new URLSearchParams(location.search).get('ref') || '').trim().toLowerCase();
   const pub = await App.cargarPublica();
+  App.colorApp();
   let info;
   try { info = await App.rpc('registro_info', { p_ref: ref || null }); } catch (e) { $('cargando').textContent = '⚠️ ' + e.message; return; }
   if (pub.textos.app_nombre) { $('nombreApp').textContent = pub.textos.app_nombre; document.title = 'Únete a ' + pub.textos.app_nombre; }

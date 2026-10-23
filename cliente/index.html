@@ -52,7 +52,7 @@
       <div class="btns"><button id="cG">💾 Guardar</button></div>
       <label for="cP">Contraseña nueva</label><input id="cP" type="password" autocomplete="new-password">
       <div class="btns"><button class="alt" id="cPG">Cambiar contraseña</button></div>
-      <div id="cPush"></div>
+      <div id="cPush"></div><div id="cModo" style="margin-top:12px"></div>
       <h3>⭐ Mi perfil <span class="pill pro">PREMIUM</span></h3>
       <div id="cEstilo"></div>
       <div class="btns"><button class="danger" id="cSalir">Cerrar sesión</button></div>
@@ -184,6 +184,7 @@
   App.chatBoton($('ayuda'), '❓');
   $('tienes').href = '../n/#taller'; $('tienes').classList.remove('hidden');
   App.ofrecerPush($('cPush'));
+  App.selectorModo($('cModo'));
   $('cG').onclick = async () => { try { await rpc('mi_perfil_guardar', { p_nombre: $('cN').value, p_telefono: $('cT').value }); toast('💾 Guardado'); } catch (e) { toast(e.message); } };
   $('cPG').onclick = async () => { const { error } = await App.sb.auth.updateUser({ password: $('cP').value }); toast(error ? App.friendly(error) : '🔑 Contraseña cambiada'); };
   $('cSalir').onclick = () => App.salir();
