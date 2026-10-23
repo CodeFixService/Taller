@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.7'::text $$;
+language sql immutable as $$ select '1.8'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -526,6 +526,8 @@ create table if not exists public.links_pago (
 );
 create unique index if not exists links_pago_uni on public.links_pago (coalesce(taller_id, '00000000-0000-0000-0000-000000000000'::uuid), tipo, slot);
 alter table public.links_pago enable row level security;
+-- v1.8: en los Premium el espacio 1 es el precio normal y el 2 la promoción (con fecha de término opcional).
+alter table public.links_pago add column if not exists hasta date;
 alter table public.links_pago drop constraint if exists links_pago_tipo_check;
 alter table public.links_pago add constraint links_pago_tipo_check
   check (tipo in ('abono', 'premium_taller', 'premium_cliente', 'premium_taller_anual', 'premium_cliente_anual'));
@@ -540,11 +542,22 @@ from (values ('premium_taller', 1::smallint), ('premium_taller', 2::smallint),
              ('premium_cliente_anual', 1::smallint), ('premium_cliente_anual', 2::smallint)) x(tipo, slot)
 where not exists (select 1 from public.links_pago l where l.taller_id is null and l.tipo = x.tipo and l.slot = x.slot);
 
+-- Abono del taller: el espacio activo. Premium (admin): la promoción vigente (espacio 2) o, si no, el precio normal (espacio 1).
 create or replace function public.link_activo(p_taller uuid, p_tipo text) returns public.links_pago
 language sql stable security definer set search_path = '' as $$
   select * from public.links_pago
   where tipo = p_tipo and taller_id is not distinct from p_taller and activo and url <> '' and monto > 0
-  order by slot limit 1
+    and (hasta is null or hasta >= (now() at time zone 'America/Santiago')::date)
+  order by case when p_taller is null then -slot else slot end limit 1
+$$;
+
+-- Lo que ve la gente de un precio Premium (con el precio normal tachado si hay promoción).
+create or replace function public.link_publico(p_tipo text) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('monto', l.monto, 'url', l.url, 'texto', l.texto, 'promo', l.slot = 2, 'hasta', l.hasta,
+    'antes', case when l.slot = 2 then (select n.monto from public.links_pago n where n.taller_id is null and n.tipo = p_tipo
+                                         and n.slot = 1 and n.activo and n.url <> '' and n.monto > l.monto) end)
+  from public.link_activo(null, p_tipo) l where l.id is not null
 $$;
 
 -- ---------------------------------------------------------------------
@@ -810,14 +823,10 @@ language sql stable security definer set search_path = '' as $$
     'textos', (select jsonb_object_agg(clave, valor) from public.textos),
     'planes', (select jsonb_object_agg(codigo, jsonb_build_object('nombre', nombre, 'descripcion', descripcion,
                  'limites', limites, 'beneficios', beneficios, 'duracion_dias', duracion_dias)) from public.planes),
-    'premium_taller', (select jsonb_build_object('monto', l.monto, 'url', l.url, 'texto', l.texto)
-                       from public.link_activo(null, 'premium_taller') l where l.id is not null),
-    'premium_cliente', (select jsonb_build_object('monto', l.monto, 'url', l.url, 'texto', l.texto)
-                        from public.link_activo(null, 'premium_cliente') l where l.id is not null),
-    'premium_taller_anual', (select jsonb_build_object('monto', l.monto, 'url', l.url, 'texto', l.texto)
-                             from public.link_activo(null, 'premium_taller_anual') l where l.id is not null),
-    'premium_cliente_anual', (select jsonb_build_object('monto', l.monto, 'url', l.url, 'texto', l.texto)
-                              from public.link_activo(null, 'premium_cliente_anual') l where l.id is not null))
+    'premium_taller', public.link_publico('premium_taller'),
+    'premium_cliente', public.link_publico('premium_cliente'),
+    'premium_taller_anual', public.link_publico('premium_taller_anual'),
+    'premium_cliente_anual', public.link_publico('premium_cliente_anual'))
 $$;
 
 create or replace function public.mi_cuenta() returns jsonb
@@ -1337,7 +1346,9 @@ begin
 end $$;
 
 -- Links de pago del abono (2 espacios, uno activo).
-create or replace function public.link_guardar(p_tipo text, p_slot int, p_monto int, p_url text, p_texto text, p_activar boolean)
+drop function if exists public.link_guardar(text, int, int, text, text, boolean);
+create or replace function public.link_guardar(p_tipo text, p_slot int, p_monto int, p_url text, p_texto text, p_activar boolean,
+  p_hasta date default null)
 returns void
 language plpgsql security definer set search_path = '' as $$
 declare tid uuid;
@@ -1352,14 +1363,17 @@ begin
   if p_slot not in (1, 2) then raise exception 'Espacio no válido'; end if;
   if coalesce(p_url, '') <> '' and p_url !~ '^https://' then raise exception 'El link debe empezar con https://'; end if;
   if p_activar and (coalesce(p_url, '') = '' or coalesce(p_monto, 0) <= 0) then raise exception 'Para activarlo pon el monto y el link'; end if;
-  insert into public.links_pago (taller_id, tipo, slot, monto, url, texto, activo)
-  values (tid, p_tipo, p_slot, greatest(coalesce(p_monto, 0), 0), coalesce(p_url, ''), left(coalesce(p_texto, ''), 300), coalesce(p_activar, false))
+  insert into public.links_pago (taller_id, tipo, slot, monto, url, texto, activo, hasta)
+  values (tid, p_tipo, p_slot, greatest(coalesce(p_monto, 0), 0), coalesce(p_url, ''), left(coalesce(p_texto, ''), 300), coalesce(p_activar, false),
+          case when tid is null and p_slot = 2 then p_hasta end)
   on conflict (coalesce(taller_id, '00000000-0000-0000-0000-000000000000'::uuid), tipo, slot)
-  do update set monto = excluded.monto, url = excluded.url, texto = excluded.texto, activo = excluded.activo, updated_at = now();
-  if p_activar then
+  do update set monto = excluded.monto, url = excluded.url, texto = excluded.texto, activo = excluded.activo, hasta = excluded.hasta, updated_at = now();
+  -- Abono: un solo espacio activo. Premium: el normal y la promoción conviven (gana la promoción vigente).
+  if p_activar and tid is not null then
     update public.links_pago set activo = false where tipo = p_tipo and taller_id is not distinct from tid and slot <> p_slot;
   end if;
-  if tid is null then perform public.auditar('link', p_tipo || ' espacio ' || p_slot || ' $' || p_monto || case when p_activar then ' (activo)' else '' end); end if;
+  if tid is null then perform public.auditar('link', p_tipo || case when p_slot = 2 then ' promoción' else ' normal' end || ' $' || p_monto ||
+    case when p_activar then ' (activo' || coalesce(' hasta ' || to_char(p_hasta, 'DD/MM/YYYY'), '') || ')' else ' (apagado)' end); end if;
 end $$;
 
 -- Reservas del taller en un rango de fechas (con la nota del cliente).
@@ -1819,7 +1833,7 @@ language plpgsql stable security definer set search_path = '' as $$
 begin
   perform public.admin_ver();
   return (select coalesce(jsonb_agg(jsonb_build_object('tipo', tipo, 'slot', slot, 'monto', monto, 'url', url, 'texto', texto,
-    'activo', activo) order by tipo, slot), '[]') from public.links_pago where taller_id is null);
+    'activo', activo, 'hasta', hasta) order by tipo, slot), '[]') from public.links_pago where taller_id is null);
 end $$;
 
 drop function if exists public.admin_plan_guardar(text, text, text, jsonb, jsonb, int);
@@ -2064,7 +2078,7 @@ to anon, authenticated;
 grant execute on function
   public.is_admin(), public.taller_de(uuid), public.mi_taller(), public.es_dueno(uuid), public.ocupa_hora(public.reservas),
   public.mi_cuenta(), public.registrar_visto(), public.mi_perfil_guardar(text, text), public.cliente_inicio(),
-  public.taller_panel(), public.taller_guardar(jsonb), public.link_guardar(text, int, int, text, text, boolean),
+  public.taller_panel(), public.taller_guardar(jsonb), public.link_guardar(text, int, int, text, text, boolean, date),
   public.taller_reservas(date, date, text[], uuid), public.taller_comprobante(uuid), public.taller_revisar(uuid, boolean, text),
   public.taller_estado(uuid, text), public.taller_trabajo(uuid, jsonb, text, text, uuid, date),
   public.taller_reserva_manual(date, text, uuid, text, text, text, text, boolean), public.taller_devuelto(uuid),
@@ -2499,7 +2513,8 @@ begin
     from public.perfiles p where p.rol = 'socio');
 end $$;
 
-revoke execute on function public.es_socio(), public.admin_ver(), public.admin_editar(text), public.admin_socios() from public, anon, authenticated;
+revoke execute on function public.es_socio(), public.admin_ver(), public.admin_editar(text), public.admin_socios(),
+  public.link_publico(text) from public, anon, authenticated;
 grant execute on function public.admin_socios() to authenticated;
 do $$
 begin

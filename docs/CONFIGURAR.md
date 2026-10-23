@@ -48,10 +48,11 @@ cada minuto: notificaciones al celular). Si alguna vez quieres reinstalarlas sol
 4. En cada celular, la persona toca la campanita → **Activar**. En iPhone primero hay que instalar la app
    (Compartir → "Agregar a inicio") y abrirla desde ese ícono.
 
-## 6. Precios y links de pago
-**Ajustes → 💳 Precios y links**: para el Premium de talleres y el de clientes tienes 2 espacios.
-Pon el precio, el texto y el link de Mercado Pago, marca cuál está **activo** y guarda.
-El precio que ve la gente es siempre el del espacio activo.
+## 6. Precios y links (mensual, anual y promociones)
+**Ajustes → 💳 Precios y links**: para el Premium de talleres y el de clientes pon el precio y el link de Mercado Pago
+del **mensual** y del **anual**. Los dos se ofrecen al mismo tiempo (si un link queda vacío, ese período no se ofrece).
+Cada uno tiene una **🔥 Promoción** opcional: precio promo, su link y fecha de término. Mientras esté activa se cobra
+la promo y el precio normal se ve tachado; al pasar la fecha vuelve solo al normal.
 
 El **abono** de las reservas lo configura cada taller en **Más → 💳 Abono** con su propio link:
 ese dinero le llega directo al taller.
@@ -101,14 +102,14 @@ te llega como aviso con su motivo. Para crear socios la función "servidor" debe
   taller no haya llegado a su límite de clientes con cuenta.
 - **No llegan notificaciones al celular** → pasos 3, 4 y 5, y que la persona haya tocado "Activar".
 
-## Versiones y actualizaciones (botones desde la v1.8)
-- **App**: al pie de cada pantalla está **🔄 Actualizar** (para todos). Además, cuando se publica una versión nueva
-  aparece la ventana **"🔄 Hay una versión nueva → Actualizar ahora"**.
-- **Resumen → 🔄 Actualizaciones** (admin) muestra la versión de la app, la base de datos y la función "servidor":
-  - Si la **función** está vieja: **📋 Copiar línea de la función** → **Abrir Supabase** → Edge Functions → servidor → Code →
-    borra todo, pega y **Deploy**. Es lo único que sigue siendo a mano (Supabase no deja que una app cambie sus funciones).
-  - Si la **base de datos** está vieja: **⬆️ Actualizar base de datos** (un toque). La función trae dentro el instalador
-    de su misma versión y lo ejecuta; no borra datos.
-  - Si prefieres hacerlo a mano: "¿Prefieres actualizar la base de datos a mano?" → copiar instalador → SQL Editor → Run.
-- Para programadores: después de cambiar `schema.sql` o `cron.sql`, corre `node supabase/generar.mjs` (rehace `instalar.sql`
-  y la copia que viaja dentro de la función).
+## Versiones y actualizaciones (todo desde la app)
+- Al pie de cada pantalla está **🔄 Actualizar** (para todos): descarga la última versión de la app.
+- Admin: **Ajustes → 🔄 Actualizar** muestra la función, la base de datos y la app, en ese orden:
+  1. **Función "servidor"** (casi nunca cambia): **📋 Copiar línea y abrir Supabase** → servidor → Code → pega → **Deploy**.
+     Es el único paso a mano: Supabase no deja que una app cambie sus funciones.
+  2. **Base de datos**: **🧾 Abrir el editor con la consulta** abre el SQL Editor de tu proyecto con la consulta ya pegada
+     (y copiada) → **Run** → vuelve y toca **Ya la corrí: revisar**. Si la función trae la misma versión, aparece además
+     **⬆️ Actualizar con un toque**. Nunca borra datos.
+  3. **App**: **🔄 Actualizar app**.
+- Cuando falta algo, el **Resumen** muestra un aviso que lleva directo a Ajustes → Actualizar.
+- Para programadores: después de cambiar `schema.sql` o `cron.sql`, corre `node supabase/generar.mjs`.

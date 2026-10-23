@@ -711,12 +711,12 @@
         (c === 'taller_premium' && mes ? ' · <span class="precio">' + plata(mes.monto) + '</span> <span class="sub">cada ' + planes[c].duracion_dias + ' días</span>' : '') + '</h2>' +
         '<p class="muted" style="margin:0">' + esc(planes[c].descripcion) + '</p><ul>' + planes[c].beneficios.map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul></div>' : '').join('') +
       '<div class="card"><h2>' + (prem ? '🔁 Renovar Premium' : '⭐ Activar Premium') + '</h2>' +
-      (mes && ano ? '<div class="seg" id="plPer"><button data-a="0" class="' + (link === ano ? '' : 'on') + '">Mensual</button><button data-a="1" class="' + (link === ano ? 'on' : '') + '">Anual' +
+      (mes && ano ? '<div class="seg" id="plPer"><button data-a="0" class="' + (link === ano ? '' : 'on') + '">Mensual' + (mes.promo ? ' 🔥' : '') + '</button><button data-a="1" class="' + (link === ano ? 'on' : '') + '">Anual' + (ano.promo ? ' 🔥' : '') +
         (mes.monto * 12 > ano.monto ? ' · ahorras ' + plata(mes.monto * 12 - ano.monto) : '') + '</button></div>' : '') +
       (pend && pend.estado === 'en_revision' ? '<div class="aviso"><div class="grow">🧾 Tu comprobante de ' + plata(pend.monto) + ' está en revisión. Te avisamos apenas se apruebe.</div></div>'
         : !link ? '<p class="muted">El pago aún no está disponible. Escríbele al administrador.</p>'
         : (pend && pend.estado === 'rechazado' ? '<div class="aviso bad"><div class="grow">Tu último comprobante fue rechazado' + (pend.nota ? ': ' + esc(pend.nota) : '') + '.</div></div>' : '') +
-          '<p class="muted" style="margin-top:0">' + esc(App.txt('pago_instrucciones')) + '</p>' + (link.texto ? '<p class="sub">' + esc(link.texto) + '</p>' : '') +
+          '<p class="muted" style="margin-top:0">' + esc(App.txt('pago_instrucciones')) + '</p>' + App.promoTxt(link) + (link.texto ? '<p class="sub">' + esc(link.texto) + '</p>' : '') +
           '<a class="btn block gold" target="_blank" rel="noopener" href="' + esc(link.url) + '">1️⃣ Pagar ' + plata(link.monto) + (link === ano ? ' (1 año)' : '') + '</a>' +
           '<label for="plFile" class="btn block alt" style="margin-top:10px;color:var(--brand)">2️⃣ Subir comprobante</label><input type="file" id="plFile" accept="image/*" class="hidden">' +
           '<div id="plPrev" style="text-align:center"></div><button class="block hidden" id="plEnviar" style="margin-top:10px">Enviar comprobante</button><p class="err" id="plErr"></p>') + '</div>';

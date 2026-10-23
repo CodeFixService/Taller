@@ -38,7 +38,7 @@
   async function verResumen() {
     let r;
     try { r = await rpc('admin_resumen'); }
-    catch (e) { $('v-resumen').innerHTML = '<div id="actCard"></div><p class="err">' + esc(e.message) + '</p>'; pintarActualizaciones(); return; }
+    catch (e) { $('v-resumen').innerHTML = '<div id="actCard"></div><p class="err">' + esc(e.message) + '</p>'; avisoActualizar(); return; }
     $('tabPagos').textContent = r.pagos_por_revisar; $('tabPagos').classList.toggle('hidden', !r.pagos_por_revisar);
     const u = r.uso, pct = Math.round(100 * u.db_bytes / u.db_limite);
     const tablas = Object.entries(u.tablas).sort((a, b) => b[1] - a[1]);
@@ -58,7 +58,7 @@
       '<button class="ghost small" data-l="fotos">Fotos más antiguas que ' + ((pub.config || {}).dias_fotos || 365) + ' días</button>' +
       '<button class="ghost small" data-l="reservas">Reservas expiradas/rechazadas (+60 días)</button><button class="danger small" data-l="todo">Limpiar todo</button></div>') +
       '<p class="sub">Versión de la base de datos: ' + esc(r.version) + ' · App: ' + esc(window.BT_CONFIG.VERSION) + '</p></div>';
-    pintarActualizaciones();
+    avisoActualizar();
     $('v-resumen').onclick = async (e) => {
       const ir = e.target.closest('[data-ir]'); if (ir) { show(ir.dataset.ir); return; }
       const b = e.target.closest('[data-l]'); if (!b) return;
@@ -71,52 +71,74 @@
   /* ---------- Actualizaciones: app, base de datos y función "servidor" ---------- */
   const C = window.BT_CONFIG, REF = (/https:\/\/([a-z0-9]+)\.supabase\.co/.exec(C.SUPABASE_URL) || [])[1] || '';
   const PANEL = 'https://supabase.com/dashboard/project/' + REF;
-  async function pintarActualizaciones() {
-    const el = $('actCard'); if (!el) return;
-    el.innerHTML = '<div class="card"><p class="sub" style="margin:0">🔄 Revisando actualizaciones…</p></div>';
+  // Estado de las 3 piezas: app publicada, base de datos y función "servidor".
+  async function estadoVersiones() {
     const [pubV, dbV, fn] = await Promise.all([
       fetch(App.ROOT + 'version.json?_=' + Date.now(), { cache: 'no-store' }).then((x) => x.json()).then((j) => String(j.version)).catch(() => null),
       rpc('db_version').catch(() => null),
       App.sb.functions.invoke('servidor', { body: { accion: 'ping' } }).then((x) => (x.error ? null : x.data)).catch(() => null)]);
-    const appOk = !pubV || !App.mayor(pubV, C.VERSION);
-    const dbOk = !!dbV && !App.mayor(C.DB_VERSION, dbV);
-    const fnOk = !!(fn && fn.version) && !App.mayor(C.SERVER_VERSION, fn.version);
-    const fnTraeBd = !!(fn && fn.db_version && fn.bd) && !App.mayor(C.DB_VERSION, fn.db_version);
-    const fila = (ok, titulo, detalle, acciones) => '<li><div class="grow">' + (ok ? '✅ ' : '⚠️ ') + '<b>' + titulo + '</b><div class="sub">' + detalle + '</div></div>' + (acciones || '') + '</li>';
-    const todo = appOk && dbOk && fnOk;
-    el.innerHTML = '<div class="card' + (todo ? '' : ' plan premium') + '"><h2>🔄 Actualizaciones ' + (todo ? '<span class="pill ok">Todo al día</span>' : '<span class="pill warn">Hay que actualizar</span>') + '</h2><ul class="list">' +
-      fila(appOk, 'App', 'Tienes la v' + esc(C.VERSION) + (pubV ? ' · publicada v' + esc(pubV) : ''), '<button class="small' + (appOk ? ' ghost' : '') + '" data-act="app">🔄 Actualizar app</button>') +
-      fila(dbOk, 'Base de datos', dbV ? 'Versión ' + esc(dbV) + (dbOk ? '' : ' · la app necesita la ' + esc(C.DB_VERSION)) : 'No responde',
-        dbOk || socio ? '' : fnTraeBd ? '<button class="small gold" data-act="bd">⬆️ Actualizar base de datos</button>' : '') +
-      fila(fnOk, 'Función "servidor"', fn ? 'Versión ' + esc(fn.version || '?') + (fnOk ? '' : ' · la app necesita la ' + esc(C.SERVER_VERSION)) : 'No responde: créala en Supabase (guía, paso 4)', '') +
-      '</ul>' +
-      (!socio && !fnOk ? '<div class="aviso warn" style="margin-top:10px"><div class="grow"><b>Actualiza la función (1 minuto):</b> copia la línea, abre Supabase → Edge Functions → <b>servidor</b> → Code, ' +
-        'borra todo, pega y toca <b>Deploy</b>. Vuelve aquí: ' + (dbOk ? 'listo.' : 'después toca "Actualizar base de datos".') + '</div></div>' +
-        '<div class="btns"><button class="alt" data-act="copiarFn">📋 Copiar línea de la función</button><a class="btn ghost" target="_blank" rel="noopener" href="' + PANEL + '/functions">Abrir Supabase</a></div>' : '') +
-      (!socio && !dbOk ? '<details style="margin-top:10px"><summary class="clic sub">¿Prefieres actualizar la base de datos a mano?</summary><p class="sub">Copia el instalador, abre el SQL Editor de Supabase, pégalo y toca Run.</p>' +
-        '<div class="btns"><button class="ghost small" data-act="copiarSql">📋 Copiar instalador</button><a class="btn ghost small" target="_blank" rel="noopener" href="' + PANEL + '/sql/new">Abrir SQL Editor</a></div></details>' : '') +
+    const e = { pubV, dbV, fn };
+    e.appOk = !pubV || !App.mayor(pubV, C.VERSION);
+    e.dbOk = !!dbV && !App.mayor(C.DB_VERSION, dbV);
+    e.fnOk = !!(fn && fn.version) && !App.mayor(C.SERVER_VERSION, fn.version);
+    e.fnTraeBd = !!(fn && fn.db_version && fn.bd) && !App.mayor(C.DB_VERSION, fn.db_version);
+    e.todo = e.appOk && e.dbOk && e.fnOk;
+    return e;
+  }
+  // En el Resumen: solo un aviso cuando falta algo (todo se hace en Ajustes → Actualizar).
+  async function avisoActualizar() {
+    const el = $('actCard'); if (!el) return;
+    const e = await estadoVersiones();
+    if (!$('actCard')) return;
+    $('actCard').innerHTML = e.todo ? '' : '<div class="aviso warn clic" id="irActualizar"><div class="grow">🔄 <b>Hay que actualizar</b> ' +
+      [!e.appOk && 'la app', !e.dbOk && 'la base de datos', !e.fnOk && 'la función'].filter(Boolean).join(', ') + '. Toca aquí.</div><span>›</span></div>';
+    const b = $('irActualizar'); if (b) b.onclick = () => { ajuste = 'actualizar'; show('ajustes'); };
+  }
+  // Ajustes → Actualizar: todo desde la app.
+  async function verActualizar() {
+    const el = aBody();
+    el.innerHTML = '<div class="card"><p class="sub" style="margin:0">🔄 Revisando versiones…</p></div>';
+    const e = await estadoVersiones();
+    const [sqlCorto, fnCorto] = await Promise.all(['supabase/instalar-corto.sql', 'supabase/functions/servidor/corto.ts'].map((f) =>
+      fetch(App.ROOT + f + '?_=' + Date.now(), { cache: 'no-store' }).then((x) => (x.ok ? x.text() : '')).then((t) => t.trim()).catch(() => '')));
+    if (ajuste !== 'actualizar') return;
+    const fila = (ok, titulo, detalle, cuerpo) => '<div class="slotpago' + (ok ? '' : ' on') + '"><h3 style="margin:0">' + (ok ? '✅ ' : '⚠️ ') + titulo + '</h3>' +
+      '<div class="sub">' + detalle + '</div>' + (cuerpo || '') + '</div>';
+    el.innerHTML = '<div class="card"><h2>🔄 Actualizar ' + (e.todo ? '<span class="pill ok">Todo al día</span>' : '<span class="pill warn">Hay que actualizar</span>') + '</h2>' +
+      '<p class="muted" style="margin-top:0">La app, la base de datos y la función "servidor" deben ir en la misma versión. Actualiza en este orden.</p>' +
+      fila(e.fnOk, '1. Función "servidor"', e.fn ? 'Versión ' + esc(e.fn.version || '?') + (e.fnOk ? '' : ' · la app necesita la ' + esc(C.SERVER_VERSION)) : 'No responde',
+        socio || e.fnOk ? '' : '<p class="sub">Se copia la línea y se abre Supabase: entra a <b>servidor → Code</b>, borra todo, pega y toca <b>Deploy</b>. Supabase no deja que una app cambie sus funciones, por eso este paso es a mano (casi nunca cambia).</p>' +
+          '<div class="btns"><button class="gold" data-act="fn">📋 Copiar línea y abrir Supabase</button></div>') +
+      fila(e.dbOk, '2. Base de datos', e.dbV ? 'Versión ' + esc(e.dbV) + (e.dbOk ? '' : ' · la app necesita la ' + esc(C.DB_VERSION)) : 'No responde',
+        socio ? '' : (!e.dbOk && e.fnTraeBd ? '<div class="btns"><button class="gold" data-act="bd">⬆️ Actualizar con un toque</button></div><p class="sub" style="text-align:center;margin:6px 0 0">o</p>' : '') +
+          '<p class="sub">' + (e.dbOk ? 'Si alguna vez algo falla, puedes reinstalarla (no borra datos):' : 'Se abre el SQL Editor de Supabase con la consulta ya pegada (también queda copiada): solo toca <b>Run</b>.') + '</p>' +
+          '<div class="btns"><button class="' + (e.dbOk ? 'ghost' : (e.fnTraeBd ? 'alt' : 'gold')) + '" data-act="sql"' + (sqlCorto ? '' : ' disabled') + '>🧾 Abrir el editor con la consulta</button>' +
+          (e.dbOk ? '' : '<button class="ghost" data-act="revisar">✔️ Ya la corrí: revisar</button>') + '</div>') +
+      fila(e.appOk, '3. App', 'Tienes la v' + esc(C.VERSION) + (e.pubV ? ' · publicada v' + esc(e.pubV) : ''),
+        '<div class="btns"><button class="' + (e.appOk ? 'ghost' : 'gold') + '" data-act="app">🔄 Actualizar app</button></div>') +
       '<p class="sub" id="actRes" style="margin-bottom:0"></p></div>';
-    el.onclick = async (e) => {
-      const b = e.target.closest('[data-act]'); if (!b) return;
+    el.onclick = async (ev) => {
+      const b = ev.target.closest('[data-act]'); if (!b) return;
       const a = b.dataset.act;
       if (a === 'app') { b.disabled = true; b.textContent = 'Actualizando…'; App.actualizar(); return; }
-      if (a === 'copiarFn' || a === 'copiarSql') {
-        try {
-          const t = await (await fetch(App.ROOT + (a === 'copiarFn' ? 'supabase/functions/servidor/corto.ts' : 'supabase/instalar-corto.sql') + '?_=' + Date.now(), { cache: 'no-store' })).text();
-          await navigator.clipboard.writeText(t.trim()); toast('📋 Copiado: ahora pégalo en Supabase');
-        } catch (err) { toast('No se pudo copiar: ' + err.message); }
+      if (a === 'revisar') { verActualizar(); return; }
+      if (a === 'fn' || a === 'sql') {
+        const t = a === 'fn' ? fnCorto : sqlCorto;
+        // Se abre primero (dentro del toque, para que el navegador no lo bloquee) y después se copia.
+        window.open(a === 'fn' ? PANEL + '/functions' : PANEL + '/sql/new?content=' + encodeURIComponent(t), '_blank', 'noopener');
+        try { await navigator.clipboard.writeText(t); toast(a === 'fn' ? '📋 Línea copiada: pégala en servidor → Code → Deploy' : '📋 Consulta lista: toca Run en Supabase'); }
+        catch (err) { modal('<h2>Copia esto</h2><pre class="link" style="white-space:pre-wrap">' + esc(t) + '</pre><div class="btns"><button data-cerrar>Listo</button></div>'); }
         return;
       }
       if (a === 'bd') {
-        if (!await confirmar('Se instala la base de datos ' + fn.db_version + ' que viene con la función. No se borran datos y tarda unos segundos.\n\n¿Actualizar ahora?', 'Sí, actualizar')) return;
+        if (!await confirmar('Se instala la base de datos ' + e.fn.db_version + ' que viene con la función. No se borran datos y tarda unos segundos.\n\n¿Actualizar ahora?', 'Sí, actualizar')) return;
         b.disabled = true; b.textContent = 'Actualizando…'; $('actRes').textContent = '';
         try {
           const { data, error } = await App.sb.functions.invoke('servidor', { body: { accion: 'actualizar_bd' } });
           if (error) throw new Error('No se pudo conectar con la función "servidor"');
           if (!data || !data.ok) throw new Error((data && data.error) || 'No se pudo actualizar');
-          pub = await App.cargarPublica();
-          toast('✅ Base de datos actualizada: ' + data.antes + ' → ' + data.ahora); verResumen();
-        } catch (err) { $('actRes').textContent = '❌ ' + err.message; b.disabled = false; b.textContent = '⬆️ Actualizar base de datos'; }
+          pub = await App.cargarPublica(); toast('✅ Base de datos actualizada: ' + data.antes + ' → ' + data.ahora); verActualizar();
+        } catch (err) { $('actRes').textContent = '❌ ' + err.message + ' · Usa "Abrir el editor con la consulta".'; b.disabled = false; b.textContent = '⬆️ Actualizar con un toque'; }
       }
     };
   }
@@ -294,42 +316,68 @@
   };
 
   /* ---------- Ajustes ---------- */
-  let ajuste = socio ? 'planes' : 'links';
+  let ajuste = 'actualizar';
   $('aSeg').onclick = (e) => { const b = e.target.closest('[data-a]'); if (b) verAjuste(b.dataset.a); };
   const aBody = () => $('aBody');
   function verAjuste(a) {
     ajuste = a;
     $('aSeg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.a === a));
-    ({ links: verLinks, planes: verPlanes, reglas: verReglas, textos: verTextos, avisos: verAvisos, push: verPush, calif: verCalif, socios: verSocios, registro: verRegistro, cuenta: verCuenta })[a]();
+    ({ actualizar: verActualizar, links: verLinks, planes: verPlanes, reglas: verReglas, textos: verTextos, avisos: verAvisos, push: verPush, calif: verCalif, socios: verSocios, registro: verRegistro, cuenta: verCuenta })[a]();
   }
 
   // Precios y links de pago (2 por plan, uno activo)
   async function verLinks() {
     let links = [];
     try { links = await rpc('admin_links'); } catch (e) { aBody().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
-    const bloque = (tipo, titulo) => '<div class="card"><h2>' + titulo + '</h2><p class="sub" style="margin-top:0">El precio que se publica es el del espacio activo. Para cambiar el precio, edita el monto y su link, o activa el otro espacio.</p>' +
-      [1, 2].map((n) => { const l = links.find((x) => x.tipo === tipo && x.slot === n) || { monto: 0, url: '', texto: '', activo: false };
-        return '<div class="slotpago' + (l.activo ? ' on' : '') + '"><label class="check" style="margin:0"><input type="radio" name="act-' + tipo + '" value="' + n + '"' + (l.activo ? ' checked' : '') + '> <b>Espacio ' + n + '</b>' +
-          (l.activo ? ' <span class="pill ok">Activo</span>' : '') + '</label><div class="row"><div><label>Precio</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="monto" inputmode="numeric" value="' + (l.monto || '') + '"></div>' +
-          '<div><label>Texto de la publicación</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="texto" maxlength="300" value="' + esc(l.texto) + '" placeholder="Pago mensual"></div></div>' +
-          '<label>Link de pago (Mercado Pago)</label><input data-t="' + tipo + '" data-s="' + n + '" data-k="url" value="' + esc(l.url) + '" placeholder="https://mpago.la/…"></div>'; }).join('') +
-      (socio ? '' : '<div class="btns"><button data-guardar="' + tipo + '">💾 Guardar</button></div>') + '</div>';
-    aBody().innerHTML = bloque('premium_taller', '🚲 Premium de talleres (mensual)') + bloque('premium_taller_anual', '🚲 Premium de talleres · anual (365 días)') +
-      bloque('premium_cliente', '👤 Premium de clientes (mensual)') + bloque('premium_cliente_anual', '👤 Premium de clientes · anual (365 días)') +
+    const L = (tipo, n) => links.find((x) => x.tipo === tipo && x.slot === n) || { monto: 0, url: '', texto: '', activo: false, hasta: null };
+    const hoyCl = App.hoy();
+    // Cada período: precio normal (espacio 1) y promoción opcional (espacio 2). Mensual y anual activos al mismo tiempo.
+    const periodo = (tipo, titulo, ej) => {
+      const n = L(tipo, 1), pr = L(tipo, 2), vence = pr.hasta && pr.hasta < hoyCl;
+      const promoOn = pr.activo && pr.url && pr.monto && !vence;
+      const inp = (s, k, v, extra) => '<input data-t="' + tipo + '" data-s="' + s + '" data-k="' + k + '" value="' + esc(v == null ? '' : v) + '" ' + (extra || '') + '>';
+      return '<div class="slotpago' + (n.activo && n.url ? ' on' : '') + '"><h3 style="margin-top:0">' + titulo + ' ' +
+        (n.activo && n.url ? '<span class="pill ok">Publicado</span>' : '<span class="pill">Sin link: no se ofrece</span>') + (promoOn ? ' <span class="pill warn">🔥 Promo activa</span>' : '') + '</h3>' +
+        '<div class="row"><div><label>Precio</label>' + inp(1, 'monto', n.monto || '', 'inputmode="numeric" placeholder="' + ej + '"') + '</div>' +
+        '<div><label>Texto (opcional)</label>' + inp(1, 'texto', n.texto, 'maxlength="300"') + '</div></div>' +
+        '<label>Link de pago (Mercado Pago)</label>' + inp(1, 'url', n.url, 'placeholder="https://mpago.la/…"') +
+        '<details' + (pr.activo || pr.url ? ' open' : '') + ' style="margin-top:10px"><summary class="clic" style="font-weight:700">🔥 Promoción (opcional)</summary>' +
+        '<p class="sub">Mientras esté activa se cobra este precio y el normal se muestra tachado. Al pasar la fecha vuelve sola al precio normal.' +
+        (vence ? ' <b>Esta promoción ya terminó.</b>' : '') + '</p>' +
+        '<label class="check" style="margin:0 0 6px"><input type="checkbox" data-t="' + tipo + '" data-s="2" data-k="activo"' + (pr.activo ? ' checked' : '') + '> Promoción activa</label>' +
+        '<div class="row"><div><label>Precio promo</label>' + inp(2, 'monto', pr.monto || '', 'inputmode="numeric"') + '</div>' +
+        '<div><label>Hasta (vacío = sin fecha)</label>' + inp(2, 'hasta', pr.hasta || '', 'type="date"') + '</div></div>' +
+        '<label>Texto de la promo</label>' + inp(2, 'texto', pr.texto, 'maxlength="300" placeholder="Cyber: 40% de descuento"') +
+        '<label>Link de pago de la promo</label>' + inp(2, 'url', pr.url, 'placeholder="https://mpago.la/…"') + '</details></div>';
+    };
+    const plan = (base, titulo) => '<div class="card"><h2>' + titulo + '</h2><p class="sub" style="margin-top:0">El mensual y el anual se ofrecen al mismo tiempo: la persona elige.</p>' +
+      periodo(base, '📅 Mensual', '4990') + periodo(base + '_anual', '🗓️ Anual (365 días)', '49900') +
+      (socio ? '' : '<div class="btns"><button data-guardar="' + base + '">💾 Guardar precios</button></div>') + '</div>';
+    aBody().innerHTML = plan('premium_taller', '🚲 Premium de talleres') + plan('premium_cliente', '👤 Premium de clientes') +
       (socio ? '<div class="aviso warn"><div class="grow">🔒 Solo el administrador cambia los links de pago (ahí llega la plata).</div></div>' : '') +
-      '<p class="sub">💡 Plan anual: pon como precio 10 meses (pagan 10 y se llevan 12). Si dejas el link anual vacío, solo se ofrece el mensual.</p>' +
+      '<p class="sub">💡 Anual: pon como precio 10 meses (pagan 10 y se llevan 12). Si dejas un link vacío, ese período no se ofrece.</p>' +
       '<p class="sub">El abono de las reservas lo configura cada taller con su propio link: ese dinero le llega directo al taller y tú no lo ves.</p>';
     if (socio) aBody().querySelectorAll('input').forEach((i) => { i.disabled = true; });
     aBody().onclick = async (e) => {
       const b = e.target.closest('[data-guardar]'); if (!b) return;
-      const tipo = b.dataset.guardar, act = +((aBody().querySelector('input[name="act-' + tipo + '"]:checked') || {}).value || 0);
-      const val = (s, k) => aBody().querySelector('[data-t="' + tipo + '"][data-s="' + s + '"][data-k="' + k + '"]').value.trim();
+      const base = b.dataset.guardar;
+      const el = (tipo, s, k) => aBody().querySelector('[data-t="' + tipo + '"][data-s="' + s + '"][data-k="' + k + '"]');
+      const val = (tipo, s, k) => el(tipo, s, k).value.trim();
+      b.disabled = true;
       try {
-        for (const s of [1, 2]) await rpc('link_guardar', { p_tipo: tipo, p_slot: s, p_monto: App.numero(val(s, 'monto')), p_url: val(s, 'url'), p_texto: val(s, 'texto'), p_activar: s === act });
-        pub = await App.cargarPublica(); toast('💾 Guardado'); verLinks();
-      } catch (err) { toast(err.message); }
+        for (const tipo of [base, base + '_anual']) {
+          const m1 = App.numero(val(tipo, 1, 'monto')), u1 = val(tipo, 1, 'url');
+          if (u1 && !m1) throw new Error('Pon el precio del ' + (tipo.endsWith('anual') ? 'anual' : 'mensual'));
+          await rpc('link_guardar', { p_tipo: tipo, p_slot: 1, p_monto: m1, p_url: u1, p_texto: val(tipo, 1, 'texto'), p_activar: !!(u1 && m1) });
+          const on = el(tipo, 2, 'activo').checked, m2 = App.numero(val(tipo, 2, 'monto')), u2 = val(tipo, 2, 'url');
+          if (on && (!m2 || !u2)) throw new Error('Para activar la promoción del ' + (tipo.endsWith('anual') ? 'anual' : 'mensual') + ' pon su precio y su link');
+          await rpc('link_guardar', { p_tipo: tipo, p_slot: 2, p_monto: m2, p_url: u2, p_texto: val(tipo, 2, 'texto'), p_activar: on, p_hasta: val(tipo, 2, 'hasta') || null });
+        }
+        pub = await App.cargarPublica(); toast('💾 Precios guardados'); verLinks();
+      } catch (err) { toast(err.message); b.disabled = false; }
     };
   }
+
 
   // Planes: nombre, descripción, duración, beneficios y límites
   const ETIQ = { reservas_mes: 'Reservas online al mes', servicios: 'Servicios', promos: 'Promociones activas', equipo: 'Personas en el equipo', clientes_cuenta: 'Clientes con cuenta',
