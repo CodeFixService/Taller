@@ -30,6 +30,8 @@
     </div>
     <div id="promos"></div>
     <div class="card"><h2>📅 Mis reservas</h2><div class="grid" id="activas"></div></div>
+    <div class="card"><h2>📣 Invita a tus amigos ciclistas</h2><p class="muted" style="margin-top:0">Comparte el link o el QR de tu taller: tus amigos reservan su hora y se crean su cuenta gratis.</p>
+      <div class="btns"><button type="button" id="invCompartir">📤 Compartir</button><button class="alt" type="button" id="invQR">QR</button></div></div>
     <a class="card aviso clic" id="otros" href="../d/" style="text-decoration:none;color:inherit;display:flex"></a>
   </section>
 
@@ -67,6 +69,7 @@
 </nav>
 <script src="../shared/config.js"></script>
 <script src="../shared/vendor/supabase.js"></script>
+<script src="../shared/vendor/qrcode.js"></script>
 <script src="../shared/app.js"></script>
 <script>
 (async function () {
@@ -149,12 +152,12 @@
         (c === 'cliente_premium' && mes ? ' · <span class="precio">' + plata(mes.monto) + '</span> <span class="sub">cada ' + planes[c].duracion_dias + ' días</span>' : '') + '</h2>' +
         '<p class="muted" style="margin:0">' + esc(planes[c].descripcion) + '</p><ul>' + planes[c].beneficios.map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul></div>' : '').join('') +
       '<div class="card"><h2>' + (D.premium ? '🔁 Renovar' : '⭐ Hazte Premium') + '</h2>' +
-      (mes && ano ? '<div class="seg" id="pPer"><button data-a="0" class="' + (anual ? '' : 'on') + '">Mensual</button><button data-a="1" class="' + (anual ? 'on' : '') + '">Anual' +
+      (mes && ano ? '<div class="seg" id="pPer"><button data-a="0" class="' + (anual ? '' : 'on') + '">Mensual' + (mes.promo ? ' 🔥' : '') + '</button><button data-a="1" class="' + (anual ? 'on' : '') + '">Anual' + (ano.promo ? ' 🔥' : '') +
         (mes.monto * 12 > ano.monto ? ' · ahorras ' + plata(mes.monto * 12 - ano.monto) : '') + '</button></div>' : '') +
       (pend && pend.estado === 'en_revision' ? '<div class="aviso"><div class="grow">🧾 Tu comprobante está en revisión. Te avisamos apenas se apruebe.</div></div>'
         : !link ? '<p class="muted">Muy pronto.</p>'
         : (pend && pend.estado === 'rechazado' ? '<div class="aviso bad"><div class="grow">Tu último comprobante fue rechazado' + (pend.nota ? ': ' + esc(pend.nota) : '') + '.</div></div>' : '') +
-          '<p class="muted" style="margin-top:0">' + esc(App.txt('pago_instrucciones')) + '</p>' + (link.texto ? '<p class="sub">' + esc(link.texto) + '</p>' : '') +
+          '<p class="muted" style="margin-top:0">' + esc(App.txt('pago_instrucciones')) + '</p>' + App.promoTxt(link) + (link.texto ? '<p class="sub">' + esc(link.texto) + '</p>' : '') +
           '<a class="btn block gold" target="_blank" rel="noopener" href="' + esc(link.url) + '">1️⃣ Pagar ' + plata(link.monto) + (link === ano ? ' (1 año)' : '') + '</a>' +
           '<label for="pFile" class="btn block alt" style="margin-top:10px;color:var(--brand)">2️⃣ Subir comprobante</label><input type="file" id="pFile" accept="image/*" class="hidden">' +
           '<div id="pPrev" style="text-align:center"></div><button class="block hidden" id="pEnviar" style="margin-top:10px">Enviar comprobante</button><p class="err" id="pErr"></p>') + '</div>';
@@ -184,6 +187,9 @@
   $('cG').onclick = async () => { try { await rpc('mi_perfil_guardar', { p_nombre: $('cN').value, p_telefono: $('cT').value }); toast('💾 Guardado'); } catch (e) { toast(e.message); } };
   $('cPG').onclick = async () => { const { error } = await App.sb.auth.updateUser({ password: $('cP').value }); toast(error ? App.friendly(error) : '🔑 Contraseña cambiada'); };
   $('cSalir').onclick = () => App.salir();
+  const linkTaller = () => App.ROOT + 't/?s=' + encodeURIComponent(D.taller.slug);
+  $('invCompartir').onclick = () => App.compartir(linkTaller(), '🚲 Yo llevo mi bici a ' + D.taller.nombre + '. Reserva tu hora aquí y sigue tu bici desde el celular', D.taller.nombre);
+  $('invQR').onclick = () => App.verQR({ url: linkTaller(), titulo: 'Invita a tus amigos', archivo: 'qr-' + D.taller.slug + '.gif' });
   App.pie();
 })();
 </script>

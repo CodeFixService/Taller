@@ -159,7 +159,7 @@
   const pc = pub.premium_cliente, plan = (pub.planes || {}).cliente_premium;
   if (pc && plan) {
     $('premiumTeaser').innerHTML = '<div class="aviso"><div class="grow"><b>⭐ ' + esc(App.txt('premium_cliente_titulo') || 'Cliente Premium') + ' · ' + plata(pc.monto) +
-      ' al mes</b><div class="sub">' + esc(plan.beneficios.join(' · ')) + '</div></div></div>';
+      ' al mes' + (pc.antes ? ' 🔥 (antes ' + plata(pc.antes) + ')' : '') + '</b><div class="sub">' + esc(plan.beneficios.join(' · ')) + '</div></div></div>';
   }
   $('aEntrar').href = App.ROOT + 'index.html?volver=' + encodeURIComponent(location.pathname + location.search);
 

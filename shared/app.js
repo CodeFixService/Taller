@@ -34,6 +34,10 @@
   const telNorm = (t) => { let d = String(t || '').replace(/\D/g, ''); if (d.length === 9 && d[0] === '9') d = '56' + d; if (d.length === 8) d = '569' + d; return d; };
   const wa = (tel, txt) => 'https://wa.me/' + telNorm(tel) + (txt ? '?text=' + encodeURIComponent(txt) : '');
   const estrellas = (n) => { n = Math.round(Number(n) || 0); return '★'.repeat(n) + '☆'.repeat(5 - n); };
+  // Promoción de un precio Premium: "🔥 Antes $4.990 · hasta el 30/11 · Cyber"
+  const promoTxt = (l) => l && l.promo ? '<div class="aviso warn" style="margin:8px 0"><div class="grow">🔥 <b>Promoción</b>' +
+    (l.antes ? ': antes <span class="antes" style="margin:0">' + plata(l.antes) + '</span>, ahora <b>' + plata(l.monto) + '</b>' : '') +
+    (l.hasta ? ' · hasta el ' + fechaDe(l.hasta).toLocaleDateString('es-CL', { day: 'numeric', month: 'long' }) : '') + '</div></div>' : '';
   const nota = (o) => o && o.total ? '<span class="stars">★ ' + String(o.promedio).replace('.', ',') + '</span> <span class="sub">(' + o.total + ')</span>' : '<span class="sub">Sin calificaciones</span>';
 
   let toastT;
@@ -515,7 +519,7 @@
 
   global.App = {
     sb, ROOT, $, esc, plata, numero, iso, fechaDe, sumarDias, hoy, fCorta, fLarga, fHora, hace, DIAS, telNorm, wa, estrellas, nota,
-    toast, modal, confirmar, tema, pintarLogo, friendly, rpc, q, cargarPublica, txt, refrescar, requerir, entrar, salir, crearCuenta,
+    promoTxt, toast, modal, confirmar, tema, pintarLogo, friendly, rpc, q, cargarPublica, txt, refrescar, requerir, entrar, salir, crearCuenta,
     clave, mensajeAcceso, comprimirComprobante, comprimirLogo, comprimirFoto, descargar, verImagen, compartir, verQR, afiche, campana, irA, activarPush, ofrecerPush,
     pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino, revisarVersion, actualizar, mayor, chatBoton, abrirChat, borrarCuenta, horarioTxt,
     get cuenta() { return cuenta; },
