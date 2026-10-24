@@ -37,12 +37,18 @@
   /* ---------- Resumen y servidor ---------- */
   async function verResumen() {
     let r;
+    pub = await App.cargarPublica();
     try { r = await rpc('admin_resumen'); }
     catch (e) { $('v-resumen').innerHTML = '<div id="actCard"></div><p class="err">' + esc(e.message) + '</p>'; avisoActualizar(); return; }
     $('tabPagos').textContent = r.pagos_por_revisar; $('tabPagos').classList.toggle('hidden', !r.pagos_por_revisar);
     const u = r.uso, pct = Math.round(100 * u.db_bytes / u.db_limite);
     const tablas = Object.entries(u.tablas).sort((a, b) => b[1] - a[1]);
+    const pc = pub.premium_taller, pca = pub.premium_taller_anual, cc = pub.premium_cliente, cca = pub.premium_cliente_anual;
+    const pr = (l) => l ? plata(l.monto) + (l.promo ? ' 🔥' : '') : '<span class="sub">sin link</span>';
     $('v-resumen').innerHTML = '<div id="actCard"></div>' +
+      '<div class="card clic" data-ir="precios"><h2 style="margin-bottom:6px">💳 Precios Premium <span class="grow"></span><span class="btn small alt">✏️ Editar</span></h2>' +
+      '<table><tr><td></td><td class="r sub">Mensual</td><td class="r sub">Anual</td></tr><tr><td>🚲 Talleres</td><td class="r">' + pr(pc) + '</td><td class="r">' + pr(pca) + '</td></tr>' +
+      '<tr><td>👤 Clientes</td><td class="r">' + pr(cc) + '</td><td class="r">' + pr(cca) + '</td></tr></table></div>' +
       (r.pagos_por_revisar ? '<div class="aviso warn clic" data-ir="pagos"><div class="grow">💰 Tienes <b>' + r.pagos_por_revisar + '</b> pago(s) Premium por revisar.</div><span>›</span></div>' : '') +
       '<div class="stats">' +
       [['🚲 Talleres', r.talleres], ['⭐ Talleres Premium', r.talleres_premium], ['🟢 Activos 7 días', r.talleres_activos_7d], ['⏳ Vencen en 7 días', r.por_vencer],
@@ -60,7 +66,8 @@
       '<p class="sub">Versión de la base de datos: ' + esc(r.version) + ' · App: ' + esc(window.BT_CONFIG.VERSION) + '</p></div>';
     avisoActualizar();
     $('v-resumen').onclick = async (e) => {
-      const ir = e.target.closest('[data-ir]'); if (ir) { show(ir.dataset.ir); return; }
+      const ir = e.target.closest('[data-ir]');
+      if (ir) { if (ir.dataset.ir === 'precios') { ajuste = 'links'; show('ajustes'); } else show(ir.dataset.ir); return; }
       const b = e.target.closest('[data-l]'); if (!b) return;
       if (!await confirmar(b.dataset.l === 'comprobantes' ? 'Se borran TODOS los comprobantes ya revisados (los en revisión se mantienen). ¿Seguir?' : '¿Limpiar ahora?')) return;
       try { const x = await rpc('limpiar', { p_que: b.dataset.l }); toast('🧹 Borrados: ' + x.comprobantes + ' comprobantes, ' + x.notificaciones + ' avisos, ' + x.reservas + ' reservas, ' + (x.fotos || 0) + ' fotos'); verResumen(); }
@@ -330,7 +337,13 @@
   // Precios y links de pago (2 por plan, uno activo)
   async function verLinks() {
     let links = [];
-    try { links = await rpc('admin_links'); } catch (e) { aBody().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    try { links = await rpc('admin_links'); }
+    catch (e) {
+      aBody().innerHTML = '<div class="aviso warn"><div class="grow">⚠️ No se pudieron cargar los precios: la base de datos está desactualizada. Actualízala y vuelve aquí.</div></div>' +
+        '<div class="btns"><button id="lAct">🔄 Ir a Actualizar</button></div><p class="sub">' + esc(e.message) + '</p>';
+      $('lAct').onclick = () => verAjuste('actualizar');
+      return;
+    }
     const L = (tipo, n) => links.find((x) => x.tipo === tipo && x.slot === n) || { monto: 0, url: '', texto: '', activo: false, hasta: null };
     const hoyCl = App.hoy();
     // Cada período: precio normal (espacio 1) y promoción opcional (espacio 2). Mensual y anual activos al mismo tiempo.
@@ -343,7 +356,7 @@
         '<div class="row"><div><label>Precio</label>' + inp(1, 'monto', n.monto || '', 'inputmode="numeric" placeholder="' + ej + '"') + '</div>' +
         '<div><label>Texto (opcional)</label>' + inp(1, 'texto', n.texto, 'maxlength="300"') + '</div></div>' +
         '<label>Link de pago (Mercado Pago)</label>' + inp(1, 'url', n.url, 'placeholder="https://mpago.la/…"') +
-        (n.url || n.monto ? '<div class="btns" style="margin-top:8px">' + quitar(tipo, 1, 'Eliminar este precio') + '</div>' : '') +
+        (n.url || n.monto ? '<div class="btns" style="margin-top:8px;justify-content:flex-end">' + quitar(tipo, 1, 'Eliminar este precio') + '</div>' : '') +
         '<details' + (pr.activo || pr.url ? ' open' : '') + ' style="margin-top:10px"><summary class="clic" style="font-weight:700">🔥 Promoción (opcional)</summary>' +
         '<p class="sub">Mientras esté activa se cobra este precio y el normal se muestra tachado. Al pasar la fecha vuelve sola al precio normal.' +
         (vence ? ' <b>Esta promoción ya terminó.</b>' : '') + '</p>' +
@@ -352,12 +365,12 @@
         '<div><label>Hasta (vacío = sin fecha)</label>' + inp(2, 'hasta', pr.hasta || '', 'type="date"') + '</div></div>' +
         '<label>Texto de la promo</label>' + inp(2, 'texto', pr.texto, 'maxlength="300" placeholder="Cyber: 40% de descuento"') +
         '<label>Link de pago de la promo</label>' + inp(2, 'url', pr.url, 'placeholder="https://mpago.la/…"') +
-        (pr.url || pr.activo ? '<div class="btns" style="margin-top:8px">' + quitar(tipo, 2, 'Eliminar la promoción') + '</div>' : '') + '</details></div>';
+        (pr.url || pr.activo ? '<div class="btns" style="margin-top:8px;justify-content:flex-end">' + quitar(tipo, 2, 'Eliminar la promoción') + '</div>' : '') + '</details></div>';
     };
     const plan = (base, titulo) => '<div class="card"><h2>' + titulo + '</h2><p class="sub" style="margin-top:0">El mensual y el anual se ofrecen al mismo tiempo: la persona elige.</p>' +
       periodo(base, '📅 Mensual', '4990') + periodo(base + '_anual', '🗓️ Anual (365 días)', '49900') +
       (socio ? '' : '<div class="btns"><button data-guardar="' + base + '">💾 Guardar precios</button></div>') + '</div>';
-    const quitar = (tipo, s, txt) => socio ? '' : '<button class="small danger" type="button" data-quitar="' + tipo + '" data-qs="' + s + '">🗑️ ' + txt + '</button>';
+    const quitar = (tipo, s, txt) => socio ? '' : '<button class="small ghost" type="button" style="flex:0 0 auto;color:var(--bad)!important" data-quitar="' + tipo + '" data-qs="' + s + '">🗑️ ' + txt + '</button>';
     aBody().innerHTML = plan('premium_taller', '🚲 Premium de talleres') + plan('premium_cliente', '👤 Premium de clientes') +
       (socio ? '<div class="aviso warn"><div class="grow">🔒 Solo el administrador cambia los links de pago (ahí llega la plata).</div></div>' : '') +
       '<p class="sub">💡 Anual: pon como precio 10 meses (pagan 10 y se llevan 12). Si dejas un link vacío, ese período no se ofrece.</p>' +

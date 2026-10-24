@@ -38,6 +38,14 @@
   const promoTxt = (l) => l && l.promo ? '<div class="aviso warn" style="margin:8px 0"><div class="grow">🔥 <b>Promoción</b>' +
     (l.antes ? ': antes <span class="antes" style="margin:0">' + plata(l.antes) + '</span>, ahora <b>' + plata(l.monto) + '</b>' : '') +
     (l.hasta ? ' · hasta el ' + fechaDe(l.hasta).toLocaleDateString('es-CL', { day: 'numeric', month: 'long' }) : '') + '</div></div>' : '';
+  // Elegir período al pagar Premium: dos tarjetas lado a lado (mensual / anual) con su precio y el ahorro.
+  function periodos(mes, ano, esAnual, id) {
+    const op = (a, l, nom, sub) => '<button type="button" class="opc per' + ((a === '1') === esAnual ? ' on' : '') + '" data-a="' + a + '"><span class="grow"><b>' + nom + (l.promo ? ' 🔥' : '') + '</b>' +
+      '<span class="precio" style="display:block;font-size:20px;margin-top:2px">' + plata(l.monto) + '</span>' + (l.antes ? '<span class="antes" style="margin:0">' + plata(l.antes) + '</span>' : '') +
+      '<small>' + sub + '</small></span></button>';
+    const ahorro = mes.monto * 12 - ano.monto;
+    return '<div class="periodos" id="' + id + '">' + op('0', mes, 'Mensual', 'cada mes') + op('1', ano, 'Anual', ahorro > 0 ? '🎁 ahorras ' + plata(ahorro) : '365 días') + '</div>';
+  }
   const nota = (o) => o && o.total ? '<span class="stars">★ ' + String(o.promedio).replace('.', ',') + '</span> <span class="sub">(' + o.total + ')</span>' : '<span class="sub">Sin calificaciones</span>';
 
   let toastT;
@@ -545,7 +553,7 @@
 
   global.App = {
     sb, ROOT, $, esc, plata, numero, iso, fechaDe, sumarDias, hoy, fCorta, fLarga, fHora, hace, DIAS, telNorm, wa, estrellas, nota,
-    promoTxt, toast, modal, confirmar, tema, selectorModo, colorApp, COLORES, pintarLogo, friendly, rpc, q, cargarPublica, txt, refrescar, requerir, entrar, salir, crearCuenta,
+    promoTxt, periodos, toast, modal, confirmar, tema, selectorModo, colorApp, COLORES, pintarLogo, friendly, rpc, q, cargarPublica, txt, refrescar, requerir, entrar, salir, crearCuenta,
     clave, mensajeAcceso, comprimirComprobante, comprimirLogo, comprimirFoto, descargar, verImagen, compartir, verQR, afiche, campana, irA, activarPush, ofrecerPush,
     pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino, revisarVersion, actualizar, mayor, chatBoton, abrirChat, borrarCuenta, horarioTxt,
     get cuenta() { return cuenta; },
