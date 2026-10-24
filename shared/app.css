@@ -37,6 +37,10 @@
 .swatch-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; align-items: center; }
 .swatch-row button { width: 36px; height: 36px; padding: 0; border-radius: 50%; border: 3px solid var(--card); box-shadow: 0 0 0 1px var(--line); }
 .swatch-row button.on { box-shadow: 0 0 0 2px var(--text); }
+/* Elegir mensual / anual */
+.periodos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.periodos .opc { margin: 0; height: 100%; }
+.periodos .opc.on { border-width: 2px; }
 /* Gráficos */
 .chart { display: flex; align-items: flex-end; gap: 6px; height: 150px; margin-top: 10px; }
 .chart > div { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; font-size: 11px; color: var(--muted); }

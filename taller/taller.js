@@ -731,11 +731,10 @@
       '<div class="sub" style="margin-top:6px">Servicios: ' + uso.servicios + ' de ' + lim.servicios + barra(uso.servicios, lim.servicios) + '</div>' +
       '<div class="sub" style="margin-top:6px">Equipo: ' + uso.equipo + ' de ' + lim.equipo + ' · Promociones activas: ' + uso.promos + ' de ' + lim.promos + ' · Clientes con cuenta: ' + uso.clientes_cuenta + ' de ' + lim.clientes_cuenta + '</div></div>' +
       ['taller_free', 'taller_premium'].map((c) => planes[c] ? '<div class="card plan' + (c === 'taller_premium' ? ' premium' : '') + '"><h2>' + (c === 'taller_premium' ? '⭐ ' : '') + esc(planes[c].nombre) +
-        (c === 'taller_premium' && mes ? ' · <span class="precio">' + plata(mes.monto) + '</span> <span class="sub">cada ' + planes[c].duracion_dias + ' días</span>' : '') + '</h2>' +
+        (c === 'taller_premium' && (mes || ano) ? '<span class="sub" style="font-weight:600">' + [mes && plata(mes.monto) + '/mes', ano && plata(ano.monto) + '/año'].filter(Boolean).join(' · ') + '</span>' : '') + '</h2>' +
         '<p class="muted" style="margin:0">' + esc(planes[c].descripcion) + '</p><ul>' + planes[c].beneficios.map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul></div>' : '').join('') +
       '<div class="card"><h2>' + (prem ? '🔁 Renovar Premium' : '⭐ Activar Premium') + '</h2>' +
-      (mes && ano ? '<div class="seg" id="plPer"><button data-a="0" class="' + (link === ano ? '' : 'on') + '">Mensual' + (mes.promo ? ' 🔥' : '') + '</button><button data-a="1" class="' + (link === ano ? 'on' : '') + '">Anual' + (ano.promo ? ' 🔥' : '') +
-        (mes.monto * 12 > ano.monto ? ' · ahorras ' + plata(mes.monto * 12 - ano.monto) : '') + '</button></div>' : '') +
+      (mes && ano ? App.periodos(mes, ano, link === ano, 'plPer') : '') +
       (pend && pend.estado === 'en_revision' ? '<div class="aviso"><div class="grow">🧾 Tu comprobante de ' + plata(pend.monto) + ' está en revisión. Te avisamos apenas se apruebe.</div></div>'
         : !link ? '<p class="muted">El pago aún no está disponible. Escríbele al administrador.</p>'
         : (pend && pend.estado === 'rechazado' ? '<div class="aviso bad"><div class="grow">Tu último comprobante fue rechazado' + (pend.nota ? ': ' + esc(pend.nota) : '') + '.</div></div>' : '') +
