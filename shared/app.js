@@ -508,6 +508,15 @@
     try { v = String((await (await fetch(ROOT + 'version.json?_=' + Date.now(), { cache: 'no-store' })).json()).version || ''); } catch (e) { return; }
     if (!v || !mayor(v, cfg.VERSION)) return;
     avisada = true;
+    // Recién abierta la app: se actualiza sola (una vez por versión, para no quedar en un bucle si el servidor aún no publica).
+    let intento = '';
+    try { intento = sessionStorage.getItem('bt:autoAct') || ''; } catch (e) { /* nada */ }
+    if (performance.now() < 20000 && intento !== v) {
+      try { sessionStorage.setItem('bt:autoAct', v); } catch (e) { /* nada */ }
+      toast('🔄 Actualizando a la v' + v + '…');
+      actualizar();
+      return;
+    }
     const d = modal('<h2>🔄 Hay una versión nueva</h2><p class="muted" style="margin-top:0">Tienes la v' + esc(cfg.VERSION) + ' y ya está disponible la v' + esc(v) +
       '. Actualiza para tener las últimas mejoras.</p><div class="btns"><button class="ghost" data-cerrar>Después</button><button id="btActualizar">Actualizar ahora</button></div>');
     d.querySelector('#btActualizar').onclick = actualizar;
