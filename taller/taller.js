@@ -4,6 +4,8 @@
   const { $, esc, plata, rpc, q, sb, toast, modal, confirmar } = App;
   App.registrarSW();
   const yo = await App.requerir(['taller', 'equipo']);
+  // Núcleo (pagos.js): taller nuevo que debe su primer pago → pantalla de activación.
+  if (yo.rol === 'taller') { const ir = () => CFX_PAGOS.revisar({ rpc, salir: () => App.salir() }); if (window.CFX_PAGOS) ir(); else addEventListener('load', ir); }
   const pub = await App.cargarPublica();
   const T = yo.taller_id;
 
@@ -717,12 +719,13 @@
   }
 
   // ---- Plan Premium (pagar con link y subir comprobante)
-  let anual = false;
+  // Plan: precios y pago comunes a las 6 apps (núcleo: cfx_pago_estado y pagos.js; se editan en el Centro de Mando → Pagos).
   async function verPlan() {
-    const planes = pub.planes || {}, mes = pub.premium_taller, ano = pub.premium_taller_anual, link = (anual && ano) || mes || ano;
+    const planes = pub.planes || {};
     const t = P.taller, prem = P.premium;
-    let pend = null;
-    try { pend = await rpc('mi_pago_pendiente'); } catch (e) { /* nada */ }
+    let cx = null;
+    try { cx = await rpc('cfx_pago_estado'); } catch (e) { /* nada */ }
+    const pr = (cx && cx.config && cx.config.negocio) || {}, u = cx && cx.ultimo;
     const uso = P.uso, lim = P.plan.limites;
     const barra = (n, m) => '<div class="barra"><i style="width:' + Math.min(100, Math.round(100 * n / Math.max(m, 1))) + '%"></i></div>';
     body().innerHTML = '<div class="card plan' + (prem ? ' premium' : '') + '"><h2>' + (prem ? '⭐ Premium activo' : 'Plan gratis') + '</h2>' +
@@ -731,28 +734,13 @@
       '<div class="sub" style="margin-top:6px">Servicios: ' + uso.servicios + ' de ' + lim.servicios + barra(uso.servicios, lim.servicios) + '</div>' +
       '<div class="sub" style="margin-top:6px">Equipo: ' + uso.equipo + ' de ' + lim.equipo + ' · Promociones activas: ' + uso.promos + ' de ' + lim.promos + ' · Clientes con cuenta: ' + uso.clientes_cuenta + ' de ' + lim.clientes_cuenta + '</div></div>' +
       ['taller_free', 'taller_premium'].map((c) => planes[c] ? '<div class="card plan' + (c === 'taller_premium' ? ' premium' : '') + '"><h2>' + (c === 'taller_premium' ? '⭐ ' : '') + esc(planes[c].nombre) +
-        (c === 'taller_premium' && (mes || ano) ? '<span class="sub" style="font-weight:600">' + [mes && plata(mes.monto) + '/mes', ano && plata(ano.monto) + '/año'].filter(Boolean).join(' · ') + '</span>' : '') + '</h2>' +
+        (c === 'taller_premium' && pr.mensual ? '<span class="sub" style="font-weight:600">' + [plata(pr.mensual) + '/mes', pr.anual && plata(pr.anual) + '/año'].filter(Boolean).join(' · ') + '</span>' : '') + '</h2>' +
         '<p class="muted" style="margin:0">' + esc(planes[c].descripcion) + '</p><ul>' + planes[c].beneficios.map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul></div>' : '').join('') +
       '<div class="card"><h2>' + (prem ? '🔁 Renovar Premium' : '⭐ Activar Premium') + '</h2>' +
-      (mes && ano ? App.periodos(mes, ano, link === ano, 'plPer') : '') +
-      (pend && pend.estado === 'en_revision' ? '<div class="aviso"><div class="grow">🧾 Tu comprobante de ' + plata(pend.monto) + ' está en revisión. Te avisamos apenas se apruebe.</div></div>'
-        : !link ? '<p class="muted">El pago aún no está disponible. Escríbele al administrador.</p>'
-        : (pend && pend.estado === 'rechazado' ? '<div class="aviso bad"><div class="grow">Tu último comprobante fue rechazado' + (pend.nota ? ': ' + esc(pend.nota) : '') + '.</div></div>' : '') +
-          '<p class="muted" style="margin-top:0">' + esc(App.txt('pago_instrucciones')) + '</p>' + App.promoTxt(link) + (link.texto ? '<p class="sub">' + esc(link.texto) + '</p>' : '') +
-          '<a class="btn block gold" target="_blank" rel="noopener" href="' + esc(link.url) + '">1️⃣ Pagar ' + plata(link.monto) + (link === ano ? ' (1 año)' : '') + '</a>' +
-          '<label for="plFile" class="btn block alt" style="margin-top:10px;color:var(--brand)">2️⃣ Subir comprobante</label><input type="file" id="plFile" accept="image/*" class="hidden">' +
-          '<div id="plPrev" style="text-align:center"></div><button class="block hidden" id="plEnviar" style="margin-top:10px">Enviar comprobante</button><p class="err" id="plErr"></p>') + '</div>';
-    const per = $('plPer');
-    if (per) per.onclick = (e) => { const b = e.target.closest('[data-a]'); if (b) { anual = b.dataset.a === '1'; verPlan(); } };
-    const f = $('plFile');
-    if (f) {
-      let img = null;
-      f.onchange = async (e) => { const x = e.target.files[0]; if (!x) return; try { img = await App.comprimirComprobante(x); $('plPrev').innerHTML = '<img alt="Comprobante" src="' + img + '" style="max-height:240px;border-radius:12px;margin-top:10px">'; $('plEnviar').classList.remove('hidden'); } catch (err) { $('plErr').textContent = err.message; } };
-      $('plEnviar').onclick = async () => {
-        try { const r = await rpc('premium_pagar', { p_tipo: 'premium_taller', p_imagen: img, p_anual: !!ano && link === ano }); if (!r.ok) throw new Error(r.error); sb.functions.invoke('servidor').catch(() => {}); toast('🧾 Comprobante enviado'); verPlan(); }
-        catch (err) { $('plErr').textContent = err.message; }
-      };
-    }
+      (u && u.estado === 'pendiente' ? '<div class="aviso"><div class="grow">🧾 Tu comprobante de ' + plata(u.monto) + ' está en revisión. Te avisamos apenas se apruebe.</div></div>'
+        : (u && u.estado === 'rechazado' ? '<div class="aviso bad"><div class="grow">Tu último comprobante fue rechazado' + (u.motivo ? ': ' + esc(u.motivo) : '') + '.</div></div>' : '') +
+          (P.dueno ? '<button class="block gold" id="plPagar">💳 Pagar con link o transferencia</button>' : '<p class="sub">Pídele al dueño del taller que active Premium.</p>')) + '</div>';
+    if ($('plPagar')) $('plPagar').onclick = () => CFX_PAGOS.abrir({ rpc, alPagar: verPlan });
   }
 
   // ---- Equipo

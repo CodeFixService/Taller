@@ -144,35 +144,21 @@
     };
   }
 
-  let anual = false;
+  // Premium: precios y pago comunes a las 6 apps (núcleo: cfx_pago_estado y pagos.js).
   async function verPlan() {
-    const planes = pub.planes || {}, mes = pub.premium_cliente, ano = pub.premium_cliente_anual, link = (anual && ano) || mes || ano;
-    let pend = null;
-    try { pend = await rpc('mi_pago_pendiente'); } catch (e) { /* nada */ }
+    const planes = pub.planes || {};
+    let cx = null;
+    try { cx = await rpc('cfx_pago_estado'); } catch (e) { /* nada */ }
+    const pr = (cx && cx.config && cx.config.cliente) || {}, u = cx && cx.ultimo;
     $('planBody').innerHTML = (D.premium ? '<div class="card plan premium"><h2>⭐ Eres Premium</h2><p class="muted" style="margin:0">Hasta el ' + new Date(D.premium_hasta).toLocaleDateString('es-CL') + '. ¡Gracias!</p></div>' : '') +
       ['cliente_free', 'cliente_premium'].map((c) => planes[c] ? '<div class="card plan' + (c === 'cliente_premium' ? ' premium' : '') + '"><h2>' + (c === 'cliente_premium' ? '⭐ ' : '') + esc(planes[c].nombre) +
-        (c === 'cliente_premium' && (mes || ano) ? '<span class="sub" style="font-weight:600">' + [mes && plata(mes.monto) + '/mes', ano && plata(ano.monto) + '/año'].filter(Boolean).join(' · ') + '</span>' : '') + '</h2>' +
+        (c === 'cliente_premium' && pr.mensual ? '<span class="sub" style="font-weight:600">' + [plata(pr.mensual) + '/mes', pr.anual && plata(pr.anual) + '/año'].filter(Boolean).join(' · ') + '</span>' : '') + '</h2>' +
         '<p class="muted" style="margin:0">' + esc(planes[c].descripcion) + '</p><ul>' + planes[c].beneficios.map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul></div>' : '').join('') +
       '<div class="card"><h2>' + (D.premium ? '🔁 Renovar' : '⭐ Hazte Premium') + '</h2>' +
-      (mes && ano ? App.periodos(mes, ano, link === ano, 'pPer') : '') +
-      (pend && pend.estado === 'en_revision' ? '<div class="aviso"><div class="grow">🧾 Tu comprobante está en revisión. Te avisamos apenas se apruebe.</div></div>'
-        : !link ? '<p class="muted">Muy pronto.</p>'
-        : (pend && pend.estado === 'rechazado' ? '<div class="aviso bad"><div class="grow">Tu último comprobante fue rechazado' + (pend.nota ? ': ' + esc(pend.nota) : '') + '.</div></div>' : '') +
-          '<p class="muted" style="margin-top:0">' + esc(App.txt('pago_instrucciones')) + '</p>' + App.promoTxt(link) + (link.texto ? '<p class="sub">' + esc(link.texto) + '</p>' : '') +
-          '<a class="btn block gold" target="_blank" rel="noopener" href="' + esc(link.url) + '">1️⃣ Pagar ' + plata(link.monto) + (link === ano ? ' (1 año)' : '') + '</a>' +
-          '<label for="pFile" class="btn block alt" style="margin-top:10px;color:var(--brand)">2️⃣ Subir comprobante</label><input type="file" id="pFile" accept="image/*" class="hidden">' +
-          '<div id="pPrev" style="text-align:center"></div><button class="block hidden" id="pEnviar" style="margin-top:10px">Enviar comprobante</button><p class="err" id="pErr"></p>') + '</div>';
-    const per = $('pPer');
-    if (per) per.onclick = (e) => { const b = e.target.closest('[data-a]'); if (b) { anual = b.dataset.a === '1'; verPlan(); } };
-    const f = $('pFile');
-    if (f) {
-      let img = null;
-      f.onchange = async (e) => { const x = e.target.files[0]; if (!x) return; try { img = await App.comprimirComprobante(x); $('pPrev').innerHTML = '<img alt="Comprobante" src="' + img + '" style="max-height:240px;border-radius:12px;margin-top:10px">'; $('pEnviar').classList.remove('hidden'); } catch (err) { $('pErr').textContent = err.message; } };
-      $('pEnviar').onclick = async () => {
-        try { const r = await rpc('premium_pagar', { p_tipo: 'premium_cliente', p_imagen: img, p_anual: !!ano && link === ano }); if (!r.ok) throw new Error(r.error); App.sb.functions.invoke('servidor').catch(() => {}); toast('🧾 Comprobante enviado'); verPlan(); }
-        catch (err) { $('pErr').textContent = err.message; }
-      };
-    }
+      (u && u.estado === 'pendiente' ? '<div class="aviso"><div class="grow">🧾 Tu comprobante está en revisión. Te avisamos apenas se apruebe.</div></div>'
+        : (u && u.estado === 'rechazado' ? '<div class="aviso bad"><div class="grow">Tu último comprobante fue rechazado' + (u.motivo ? ': ' + esc(u.motivo) : '') + '.</div></div>' : '') +
+          '<button class="block gold" id="pPagar">💳 Pagar con link o transferencia</button>') + '</div>';
+    if ($('pPagar')) $('pPagar').onclick = () => CFX_PAGOS.abrir({ rpc, alPagar: verPlan });
   }
 
   App.pestanas((v) => { if (v === 'plan') verPlan(); if (v === 'inicio' || v === 'historial') cargar().catch(() => {}); });
@@ -202,5 +188,6 @@
 <script src="../shared/fotos.js"></script>
 <script src="../shared/voz.js"></script>
 <script src="../shared/respaldo.js"></script>
+<script src="../shared/pagos.js"></script>
 </body>
 </html>
