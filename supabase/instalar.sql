@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.9'::text $$;
+language sql immutable as $$ select '2.0'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -1883,7 +1883,7 @@ begin
   perform public.admin_editar(p_motivo);
   if p_clave not in ('minutos_pago', 'minutos_devolucion', 'horas_cancelacion', 'dias_saldo', 'dias_regalo_taller',
                      'dias_aviso_vencimiento', 'dias_comprobantes', 'soporte_whatsapp', 'vapid_publica',
-                     'registro_talleres', 'dias_referido', 'horas_libera_premium', 'dias_fotos', 'color_app') then
+                     'registro_talleres', 'dias_referido', 'horas_libera_premium', 'dias_fotos', 'color_app', 'version_liberada') then
     raise exception 'Ajuste no válido';
   end if;
   if p_clave = 'vapid_publica' and not public.is_admin() then raise exception 'Solo el administrador'; end if;
@@ -2578,6 +2578,9 @@ create extension if not exists pg_net with schema extensions;
 select cron.unschedule(jobid) from cron.job where jobname in ('bt-tareas', 'bt-push');
 
 select cron.schedule('bt-tareas', '*/5 * * * *', $$ select public.tareas_periodicas(); $$);
+
+-- v2.0: la app ya no se actualiza apenas se publica: llega a los usuarios cuando la liberas (Admin → Actualizar, o Centro de Mando → Apps).
+insert into public.config (clave, valor) values ('version_liberada', '"2.7"') on conflict (clave) do nothing;
 
 -- =====================================================================
 -- Actualización automática (núcleo CodeFix): cada 10 minutos la base revisa GitHub (rama main).

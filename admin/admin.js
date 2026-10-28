@@ -109,6 +109,8 @@
     const [sqlCorto, fnCorto] = await Promise.all(['supabase/instalar-corto.sql', 'supabase/functions/servidor/corto.ts'].map((f) =>
       fetch(App.ROOT + f + '?_=' + Date.now(), { cache: 'no-store' }).then((x) => (x.ok ? x.text() : '')).then((t) => t.trim()).catch(() => '')));
     if (ajuste !== 'actualizar') return;
+    let lib = '';
+    try { lib = String((((await App.cargarPublica()) || {}).config || {}).version_liberada || ''); } catch (x) { /* sin red */ }
     const fila = (ok, titulo, detalle, cuerpo) => '<div class="slotpago' + (ok ? '' : ' on') + '"><h3 style="margin:0">' + (ok ? '✅ ' : '⚠️ ') + titulo + '</h3>' +
       '<div class="sub">' + detalle + '</div>' + (cuerpo || '') + '</div>';
     el.innerHTML = '<div class="card"><h2>🔄 Actualizar ' + (e.todo ? '<span class="pill ok">Todo al día</span>' : '<span class="pill warn">Hay que actualizar</span>') + '</h2>' +
@@ -116,19 +118,20 @@
       fila(e.fnOk, '1. Función "servidor"', e.fn ? 'Versión ' + esc(e.fn.version || '?') + (e.fnOk ? '' : ' · la app necesita la ' + esc(C.SERVER_VERSION)) : 'No responde',
         socio || e.fnOk ? '' : '<p class="sub">Se copia la línea y se abre Supabase: entra a <b>servidor → Code</b>, borra todo, pega y toca <b>Deploy</b>. Supabase no deja que una app cambie sus funciones, por eso este paso es a mano (casi nunca cambia).</p>' +
           '<div class="btns"><button class="gold" data-act="fn">📋 Copiar línea y abrir Supabase</button></div>') +
-      fila(e.dbOk, '2. Base de datos', e.dbV ? 'Versión ' + esc(e.dbV) + (e.dbOk ? '' : ' · la app necesita la ' + esc(C.DB_VERSION)) : 'No responde',
-        socio ? '' : (!e.dbOk && e.fnTraeBd ? '<div class="btns"><button class="gold" data-act="bd">⬆️ Actualizar con un toque</button></div><p class="sub" style="text-align:center;margin:6px 0 0">o</p>' : '') +
-          '<p class="sub">' + (e.dbOk ? 'Si alguna vez algo falla, puedes reinstalarla (no borra datos):' : 'Se abre el SQL Editor de Supabase con la consulta ya pegada (también queda copiada): solo toca <b>Run</b>.') + '</p>' +
-          '<div class="btns"><button class="' + (e.dbOk ? 'ghost' : (e.fnTraeBd ? 'alt' : 'gold')) + '" data-act="sql"' + (sqlCorto ? '' : ' disabled') + '>🧾 Abrir el editor con la consulta</button>' +
-          (e.dbOk ? '' : '<button class="ghost" data-act="revisar">✔️ Ya la corrí: revisar</button>') + '</div>') +
-      fila(e.appOk, '3. App', 'Tienes la v' + esc(C.VERSION) + (e.pubV ? ' · publicada v' + esc(e.pubV) : ''),
-        '<div class="btns"><button class="' + (e.appOk ? 'ghost' : 'gold') + '" data-act="app">🔄 Actualizar app</button></div>') +
+      // La base se actualiza sola cada 10 minutos (desde GitHub): aquí solo se ve su estado.
+      fila(e.dbOk, '2. Base de datos', e.dbV ? 'Versión ' + esc(e.dbV) + (e.dbOk ? ' · se actualiza sola' : ' · actualizándose sola a la ' + esc(C.DB_VERSION) + ' (máx. 10 min)') : 'No responde',
+        e.dbOk ? '' : '<div class="btns"><button class="ghost" data-act="revisar">🔄 Revisar de nuevo</button></div>') +
+      fila(e.appOk, '3. Prueba la app en tu teléfono', 'Tienes la v' + esc(C.VERSION) + (e.pubV ? ' · publicada v' + esc(e.pubV) : ''),
+        '<div class="btns"><button class="' + (e.appOk ? 'ghost' : 'gold') + '" data-act="app">🔄 Actualizar mi app</button></div>') +
+      fila(!!lib && !App.mayor(e.pubV || C.VERSION, lib), '4. Liberar para todos', 'Tus usuarios tienen la v' + esc(lib || '—') + '. Al liberar, su app se actualiza sola.',
+        socio ? '' : '<div class="btns"><button class="gold" data-act="lib"' + (!e.dbOk || !e.fnOk || (lib && !App.mayor(e.pubV || C.VERSION, lib)) ? ' disabled' : '') + '>🚀 Liberar v' + esc(e.pubV || C.VERSION) + '</button></div>') +
       '<p class="sub" id="actRes" style="margin-bottom:0"></p></div>';
     el.onclick = async (ev) => {
       const b = ev.target.closest('[data-act]'); if (!b) return;
       const a = b.dataset.act;
       if (a === 'app') { b.disabled = true; b.textContent = 'Actualizando…'; App.actualizar(); return; }
       if (a === 'revisar') { verActualizar(); return; }
+      if (a === 'lib') { const v = e.pubV || C.VERSION; if (!(await App.confirmar('¿Liberar la v' + v + '? La app de todos se actualiza sola.', 'Liberar'))) return; try { await rpc('admin_config_guardar', { p_clave: 'version_liberada', p_valor: v, p_motivo: 'Liberar v' + v }); toast('v' + v + ' liberada para todos'); verActualizar(); } catch (x) { toast(x.message); } return; }
       if (a === 'fn' || a === 'sql') {
         const t = a === 'fn' ? fnCorto : sqlCorto;
         // Se abre primero (dentro del toque, para que el navegador no lo bloquee) y después se copia.

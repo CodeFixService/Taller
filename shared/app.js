@@ -509,7 +509,17 @@
     let v = '';
     try { v = String((await (await fetch(ROOT + 'version.json?_=' + Date.now(), { cache: 'no-store' })).json()).version || ''); } catch (e) { return; }
     if (!v || !mayor(v, cfg.VERSION)) return;
+    // Llega a todos solo cuando el admin la libera; el admin la ve antes para probarla.
+    let lib = '';
+    try { lib = String((((await cargarPublica()) || {}).config || {}).version_liberada || ''); } catch (e) { /* sin red */ }
+    const esAdmin = !!(cuenta && ['admin', 'socio'].includes(cuenta.rol));
+    if (lib && mayor(v, lib) && !esAdmin) return;
+    if (!lib && !esAdmin) return;
     avisada = true;
+    if (esAdmin && (!lib || mayor(v, lib))) { // el admin: aviso para probarla (no se instala sola)
+      const d = modal('<h2>🔄 Versión nueva para probar</h2><p class="muted" style="margin-top:0">Está publicada la v' + esc(v) + ' (tus usuarios siguen en la v' + esc(lib || cfg.VERSION) + '). Pruébala y libérala en Ajustes → Actualizar.</p><div class="btns"><button class="ghost" data-cerrar>Después</button><button id="btActualizar">Probar ahora</button></div>');
+      d.querySelector('#btActualizar').onclick = actualizar; return;
+    }
     // Recién abierta la app: se actualiza sola (una vez por versión, para no quedar en un bucle si el servidor aún no publica).
     let intento = '';
     try { intento = sessionStorage.getItem('bt:autoAct') || ''; } catch (e) { /* nada */ }
