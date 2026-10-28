@@ -145,7 +145,7 @@
     if (roles && !roles.includes(c.rol)) { location.replace(ROOT + destino(c)); return new Promise(() => {}); }
     if (c.taller && c.taller.color) tema(c.taller.color);
     // Núcleo (premium.js): con Premium la app se ve dorada y la primera vez saluda.
-    if (c.rol === 'cliente' || c.rol === 'taller') (window.CFX_PREMIUM ? Promise.resolve() : new Promise((r) => addEventListener('load', r))).then(() => window.CFX_PREMIUM && CFX_PREMIUM.marcar({ premium: !!c.premium, id: c.id, hasta: c.premium_hasta || (c.taller && c.taller.premium_hasta) }));
+    if (c.rol === 'cliente' || c.rol === 'taller') (window.CFX_PREMIUM ? Promise.resolve() : new Promise((r) => addEventListener('load', r))).then(() => window.CFX_PREMIUM && (window.CFX_AYUDA_PEND = { rpc: rpc, app: 'taller' }, window.CFX_AYUDA && CFX_AYUDA.iniciar(window.CFX_AYUDA_PEND), true) && CFX_PREMIUM.marcar({ premium: !!c.premium, id: c.id, hasta: c.premium_hasta || (c.taller && c.taller.premium_hasta) }));
     return c;
   }
   async function entrar(email, password) {

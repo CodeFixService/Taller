@@ -48,7 +48,8 @@
   const reservas = (desde, hasta, estados) => rpc('taller_reservas', { p_desde: desde, p_hasta: hasta, p_estados: estados || null });
 
   /* ---------- Navegación ---------- */
-  window.addEventListener('hashchange', () => { if (location.hash === '#plan') { subMas = 'plan'; show('mas'); } });
+  // #plan y #mas/<sección> (perfil, horario, servicios, abono…): abren esa parte de Más (la guía para partir los usa).
+  window.addEventListener('hashchange', () => { const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
   const show = App.pestanas((v) => {
     vista = v;
     if (v === 'hoy') pintarHoy();
@@ -876,6 +877,8 @@
   const showOrig = show;
   document.querySelectorAll('nav.tabs button').forEach((b) => b.addEventListener('click', () => { if (b.dataset.v !== 'detalle') volverA = b.dataset.v; }));
   const h = location.hash.slice(1);
+  const hm = /^mas\/(\w+)$/.exec(h);
   if (h === 'plan') { subMas = 'plan'; showOrig('mas'); }
+  else if (hm) { subMas = hm[1]; showOrig('mas'); }
   else showOrig(['hoy', 'agenda', 'reservas', 'clientes', 'mas'].includes(h) ? h : 'hoy');
 })();
