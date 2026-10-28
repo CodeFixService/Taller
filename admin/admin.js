@@ -1,4 +1,5 @@
-/* BiciTaller · Panel del administrador general. */
+/* BiciTaller · Panel del administrador general: talleres, usuarios y ajustes propios.
+   Precios, planes, textos, avisos a todos, pagos Premium y versiones se manejan en el Centro de Mando. */
 (async function () {
   'use strict';
   const { $, esc, plata, rpc, toast, modal, confirmar } = App;
@@ -30,8 +31,7 @@
     if (v === 'resumen') verResumen();
     if (v === 'talleres') cargarTalleres();
     if (v === 'clientes') cargarClientes();
-    if (v === 'pagos') cargarPagos();
-    if (v === 'ajustes') verAjuste(ajuste);
+    if (v === 'ajustes') verAjuste();
   });
 
   /* ---------- Resumen y servidor ---------- */
@@ -39,17 +39,10 @@
     let r;
     pub = await App.cargarPublica();
     try { r = await rpc('admin_resumen'); }
-    catch (e) { $('v-resumen').innerHTML = '<div id="actCard"></div><p class="err">' + esc(e.message) + '</p>'; avisoActualizar(); return; }
-    $('tabPagos').textContent = r.pagos_por_revisar; $('tabPagos').classList.toggle('hidden', !r.pagos_por_revisar);
+    catch (e) { $('v-resumen').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
     const u = r.uso, pct = Math.round(100 * u.db_bytes / u.db_limite);
     const tablas = Object.entries(u.tablas).sort((a, b) => b[1] - a[1]);
-    const pc = pub.premium_taller, pca = pub.premium_taller_anual, cc = pub.premium_cliente, cca = pub.premium_cliente_anual;
-    const pr = (l) => l ? plata(l.monto) + (l.promo ? ' 🔥' : '') : '<span class="sub">sin link</span>';
-    $('v-resumen').innerHTML = '<div id="actCard"></div>' +
-      '<div class="card clic" data-ir="precios"><h2 style="margin-bottom:6px">💳 Precios Premium <span class="grow"></span><span class="btn small alt">✏️ Editar</span></h2>' +
-      '<table><tr><td></td><td class="r sub">Mensual</td><td class="r sub">Anual</td></tr><tr><td>🚲 Talleres</td><td class="r">' + pr(pc) + '</td><td class="r">' + pr(pca) + '</td></tr>' +
-      '<tr><td>👤 Clientes</td><td class="r">' + pr(cc) + '</td><td class="r">' + pr(cca) + '</td></tr></table></div>' +
-      (r.pagos_por_revisar ? '<div class="aviso warn clic" data-ir="pagos"><div class="grow">💰 Tienes <b>' + r.pagos_por_revisar + '</b> pago(s) Premium por revisar.</div><span>›</span></div>' : '') +
+    $('v-resumen').innerHTML =
       '<div class="stats">' +
       [['🚲 Talleres', r.talleres], ['⭐ Talleres Premium', r.talleres_premium], ['🟢 Activos 7 días', r.talleres_activos_7d], ['⏳ Vencen en 7 días', r.por_vencer],
         ['👥 Clientes con cuenta', r.clientes], ['⭐ Clientes Premium', r.clientes_premium], ['🔧 Personas de equipo', r.equipo], ['📅 Reservas este mes', r.reservas_mes],
@@ -64,92 +57,13 @@
       '<button class="ghost small" data-l="fotos">Fotos más antiguas que ' + ((pub.config || {}).dias_fotos || 365) + ' días</button>' +
       '<button class="ghost small" data-l="reservas">Reservas expiradas/rechazadas (+60 días)</button><button class="danger small" data-l="todo">Limpiar todo</button></div>') +
       '<p class="sub">Versión de la base de datos: ' + esc(r.version) + ' · App: ' + esc(window.BT_CONFIG.VERSION) + '</p></div>';
-    avisoActualizar();
     $('v-resumen').onclick = async (e) => {
       const ir = e.target.closest('[data-ir]');
-      if (ir) { if (ir.dataset.ir === 'precios') { ajuste = 'links'; show('ajustes'); } else show(ir.dataset.ir); return; }
+      if (ir) { show(ir.dataset.ir); return; }
       const b = e.target.closest('[data-l]'); if (!b) return;
       if (!await confirmar(b.dataset.l === 'comprobantes' ? 'Se borran TODOS los comprobantes ya revisados (los en revisión se mantienen). ¿Seguir?' : '¿Limpiar ahora?')) return;
       try { const x = await rpc('limpiar', { p_que: b.dataset.l }); toast('🧹 Borrados: ' + x.comprobantes + ' comprobantes, ' + x.notificaciones + ' avisos, ' + x.reservas + ' reservas, ' + (x.fotos || 0) + ' fotos'); verResumen(); }
       catch (err) { toast(err.message); }
-    };
-  }
-
-  /* ---------- Actualizaciones: app, base de datos y función "servidor" ---------- */
-  const C = window.BT_CONFIG, REF = (/https:\/\/([a-z0-9]+)\.supabase\.co/.exec(C.SUPABASE_URL) || [])[1] || '';
-  const PANEL = 'https://supabase.com/dashboard/project/' + REF;
-  // Estado de las 3 piezas: app publicada, base de datos y función "servidor".
-  async function estadoVersiones() {
-    const [pubV, dbV, fn] = await Promise.all([
-      fetch(App.ROOT + 'version.json?_=' + Date.now(), { cache: 'no-store' }).then((x) => x.json()).then((j) => String(j.version)).catch(() => null),
-      rpc('db_version').catch(() => null),
-      App.sb.functions.invoke('servidor', { body: { accion: 'ping' } }).then((x) => (x.error ? null : x.data)).catch(() => null)]);
-    const e = { pubV, dbV, fn };
-    e.appOk = !pubV || !App.mayor(pubV, C.VERSION);
-    e.dbOk = !!dbV && !App.mayor(C.DB_VERSION, dbV);
-    e.fnOk = !!(fn && fn.version) && !App.mayor(C.SERVER_VERSION, fn.version);
-    e.fnTraeBd = !!(fn && fn.db_version && fn.bd) && !App.mayor(C.DB_VERSION, fn.db_version);
-    e.todo = e.appOk && e.dbOk && e.fnOk;
-    return e;
-  }
-  // En el Resumen: solo un aviso cuando falta algo (todo se hace en Ajustes → Actualizar).
-  async function avisoActualizar() {
-    const el = $('actCard'); if (!el) return;
-    const e = await estadoVersiones();
-    if (!$('actCard')) return;
-    $('actCard').innerHTML = e.todo ? '' : '<div class="aviso warn clic" id="irActualizar"><div class="grow">🔄 <b>Hay que actualizar</b> ' +
-      [!e.appOk && 'la app', !e.dbOk && 'la base de datos', !e.fnOk && 'la función'].filter(Boolean).join(', ') + '. Toca aquí.</div><span>›</span></div>';
-    const b = $('irActualizar'); if (b) b.onclick = () => { ajuste = 'actualizar'; show('ajustes'); };
-  }
-  // Ajustes → Actualizar: todo desde la app.
-  async function verActualizar() {
-    const el = aBody();
-    el.innerHTML = '<div class="card"><p class="sub" style="margin:0">🔄 Revisando versiones…</p></div>';
-    const e = await estadoVersiones();
-    const [sqlCorto, fnCorto] = await Promise.all(['supabase/instalar-corto.sql', 'supabase/functions/servidor/corto.ts'].map((f) =>
-      fetch(App.ROOT + f + '?_=' + Date.now(), { cache: 'no-store' }).then((x) => (x.ok ? x.text() : '')).then((t) => t.trim()).catch(() => '')));
-    if (ajuste !== 'actualizar') return;
-    let lib = '';
-    try { lib = String((((await App.cargarPublica()) || {}).config || {}).version_liberada || ''); } catch (x) { /* sin red */ }
-    const fila = (ok, titulo, detalle, cuerpo) => '<div class="slotpago' + (ok ? '' : ' on') + '"><h3 style="margin:0">' + (ok ? '✅ ' : '⚠️ ') + titulo + '</h3>' +
-      '<div class="sub">' + detalle + '</div>' + (cuerpo || '') + '</div>';
-    el.innerHTML = '<div class="card"><h2>🔄 Actualizar ' + (e.todo ? '<span class="pill ok">Todo al día</span>' : '<span class="pill warn">Hay que actualizar</span>') + '</h2>' +
-      '<p class="muted" style="margin-top:0">La app, la base de datos y la función "servidor" deben ir en la misma versión. Actualiza en este orden.</p>' +
-      fila(e.fnOk, '1. Función "servidor"', e.fn ? 'Versión ' + esc(e.fn.version || '?') + (e.fnOk ? '' : ' · la app necesita la ' + esc(C.SERVER_VERSION)) : 'No responde',
-        socio || e.fnOk ? '' : '<p class="sub">Se copia la línea y se abre Supabase: entra a <b>servidor → Code</b>, borra todo, pega y toca <b>Deploy</b>. Supabase no deja que una app cambie sus funciones, por eso este paso es a mano (casi nunca cambia).</p>' +
-          '<div class="btns"><button class="gold" data-act="fn">📋 Copiar línea y abrir Supabase</button></div>') +
-      // La base se actualiza sola cada 10 minutos (desde GitHub): aquí solo se ve su estado.
-      fila(e.dbOk, '2. Base de datos', e.dbV ? 'Versión ' + esc(e.dbV) + (e.dbOk ? ' · se actualiza sola' : ' · actualizándose sola a la ' + esc(C.DB_VERSION) + ' (máx. 10 min)') : 'No responde',
-        e.dbOk ? '' : '<div class="btns"><button class="ghost" data-act="revisar">🔄 Revisar de nuevo</button></div>') +
-      fila(e.appOk, '3. Prueba la app en tu teléfono', 'Tienes la v' + esc(C.VERSION) + (e.pubV ? ' · publicada v' + esc(e.pubV) : ''),
-        '<div class="btns"><button class="' + (e.appOk ? 'ghost' : 'gold') + '" data-act="app">🔄 Actualizar mi app</button></div>') +
-      fila(!!lib && !App.mayor(e.pubV || C.VERSION, lib), '4. Liberar para todos', 'Tus usuarios tienen la v' + esc(lib || '—') + '. Al liberar, su app se actualiza sola.',
-        socio ? '' : '<div class="btns"><button class="gold" data-act="lib"' + (!e.dbOk || !e.fnOk || (lib && !App.mayor(e.pubV || C.VERSION, lib)) ? ' disabled' : '') + '>🚀 Liberar v' + esc(e.pubV || C.VERSION) + '</button></div>') +
-      '<p class="sub" id="actRes" style="margin-bottom:0"></p></div>';
-    el.onclick = async (ev) => {
-      const b = ev.target.closest('[data-act]'); if (!b) return;
-      const a = b.dataset.act;
-      if (a === 'app') { b.disabled = true; b.textContent = 'Actualizando…'; App.actualizar(); return; }
-      if (a === 'revisar') { verActualizar(); return; }
-      if (a === 'lib') { const v = e.pubV || C.VERSION; if (!(await App.confirmar('¿Liberar la v' + v + '? La app de todos se actualiza sola.', 'Liberar'))) return; try { await rpc('admin_config_guardar', { p_clave: 'version_liberada', p_valor: v, p_motivo: 'Liberar v' + v }); toast('v' + v + ' liberada para todos'); verActualizar(); } catch (x) { toast(x.message); } return; }
-      if (a === 'fn' || a === 'sql') {
-        const t = a === 'fn' ? fnCorto : sqlCorto;
-        // Se abre primero (dentro del toque, para que el navegador no lo bloquee) y después se copia.
-        window.open(a === 'fn' ? PANEL + '/functions' : PANEL + '/sql/new?content=' + encodeURIComponent(t), '_blank', 'noopener');
-        try { await navigator.clipboard.writeText(t); toast(a === 'fn' ? '📋 Línea copiada: pégala en servidor → Code → Deploy' : '📋 Consulta lista: toca Run en Supabase'); }
-        catch (err) { modal('<h2>Copia esto</h2><pre class="link" style="white-space:pre-wrap">' + esc(t) + '</pre><div class="btns"><button data-cerrar>Listo</button></div>'); }
-        return;
-      }
-      if (a === 'bd') {
-        if (!await confirmar('Se instala la base de datos ' + e.fn.db_version + ' que viene con la función. No se borran datos y tarda unos segundos.\n\n¿Actualizar ahora?', 'Sí, actualizar')) return;
-        b.disabled = true; b.textContent = 'Actualizando…'; $('actRes').textContent = '';
-        try {
-          const { data, error } = await App.sb.functions.invoke('servidor', { body: { accion: 'actualizar_bd' } });
-          if (error) throw new Error('No se pudo conectar con la función "servidor"');
-          if (!data || !data.ok) throw new Error((data && data.error) || 'No se pudo actualizar');
-          pub = await App.cargarPublica(); toast('✅ Base de datos actualizada: ' + data.antes + ' → ' + data.ahora); verActualizar();
-        } catch (err) { $('actRes').textContent = '❌ ' + err.message + ' · Usa "Abrir el editor con la consulta".'; b.disabled = false; b.textContent = '⬆️ Actualizar con un toque'; }
-      }
     };
   }
 
@@ -295,150 +209,24 @@
     } catch (err) { toast(err.message); }
   };
 
-  /* ---------- Pagos Premium ---------- */
-  let pFiltro = 'en_revision';
-  $('pSeg').onclick = (e) => { const b = e.target.closest('[data-f]'); if (!b) return; pFiltro = b.dataset.f; $('pSeg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); cargarPagos(); };
-  async function cargarPagos() {
-    let l = [];
-    try { l = await rpc('admin_pagos', { p_estado: pFiltro || null }); } catch (e) { $('pLista').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
-    $('pLista').innerHTML = l.length ? l.map((g) => '<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:flex-start"><div><b>' + esc(g.quien) + '</b> <span class="pill">' +
-      (g.tipo === 'premium_taller' ? '🚲 Taller' : '👤 Cliente') + '</span>' + (g.anual ? ' <span class="pill pro">Anual</span>' : '') + '<div class="sub">' + esc(g.email) + ' · ' + App.fHora(g.created_at) + '</div>' +
-      (g.premium_hasta ? '<div class="sub">Premium actual hasta ' + new Date(g.premium_hasta).toLocaleDateString('es-CL') + '</div>' : '') + (g.nota ? '<div class="sub">Nota: ' + esc(g.nota) + '</div>' : '') +
-      '</div><div style="text-align:right"><span class="precio" style="font-size:20px">' + plata(g.monto) + '</span><div><span class="pill ' + (g.estado === 'aprobado' ? 'ok' : g.estado === 'rechazado' ? 'bad' : 'info') + '">' + g.estado.replace('_', ' ') + '</span></div></div></div>' +
-      '<div class="acc">' + (g.tiene_comprobante ? '<button class="small ghost" data-ver="' + g.id + '">👁️ Comprobante</button>' : '<span class="sub">Comprobante borrado</span>') +
-      (g.estado === 'en_revision' ? '<button class="small okb" data-ok="' + g.id + '">Aprobar</button><button class="small danger" data-no="' + g.id + '">Rechazar</button>' : '') + '</div></div>').join('')
-      : '<p class="empty">Nada por aquí.</p>';
-  }
-  $('pLista').onclick = async (e) => {
-    const b = e.target.closest('button'); if (!b) return;
-    try {
-      if (b.dataset.ver) { const img = await rpc('admin_pago_comprobante', { p_id: b.dataset.ver }); if (img) App.verImagen(img, 'Comprobante Premium', 'premium-' + b.dataset.ver.slice(0, 8) + '.jpg'); else toast('Ya fue borrado'); return; }
-      if (b.dataset.ok) {
-        if (!await confirmar('Revisa en tu Mercado Pago que el pago llegó.\n\n¿Aprobar y activar Premium? (si es anual se activan 365 días)', 'Sí, aprobar')) return;
-        await rpc('admin_pago_resolver', { p_id: b.dataset.ok, p_aprobar: true, p_nota: null }); toast('⭐ Premium activado');
-      }
-      if (b.dataset.no) {
-        const nota = prompt('Motivo del rechazo (lo verá la persona)', 'No encontramos el pago');
-        if (nota === null) return;
-        await rpc('admin_pago_resolver', { p_id: b.dataset.no, p_aprobar: false, p_nota: nota }); toast('Pago rechazado');
-      }
-      App.sb.functions.invoke('servidor').catch(() => {});
-      cargarPagos();
-    } catch (err) { toast(err.message); }
-  };
-
-  /* ---------- Ajustes ---------- */
-  let ajuste = 'actualizar';
-  $('aSeg').onclick = (e) => { const b = e.target.closest('[data-a]'); if (b) verAjuste(b.dataset.a); };
-  const aBody = () => $('aBody');
-  function verAjuste(a) {
-    ajuste = a;
-    $('aSeg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.a === a));
-    ({ actualizar: verActualizar, links: verLinks, planes: verPlanes, reglas: verReglas, textos: verTextos, avisos: verAvisos, push: verPush, calif: verCalif, socios: verSocios, registro: verRegistro, cuenta: verCuenta })[a]();
+  // Menú de la cuenta (núcleo) → Mi perfil.
+  addEventListener('hashchange', () => { if (location.hash === '#cuenta') { show('ajustes'); verAjuste('cuenta'); } });
+  /* ---------- Ajustes (cuadrícula del núcleo: solo lo propio de BiciTaller) ---------- */
+  let AJ = null, zona = null;
+  const aBody = () => zona;
+  function verAjuste(k) {
+    const S = [
+      { k: 'cuenta', ico: '👤', t: 'Mi perfil', d: 'Nombre, WhatsApp, color y clave', f: verCuenta },
+      { k: 'reglas', ico: '⚖️', t: 'Reglas', d: 'Días, abonos y límites', f: verReglas },
+      socio ? null : { k: 'push', ico: '🔔', t: 'Notificaciones', d: 'Claves push y servidor', f: verPush },
+      { k: 'calif', ico: '⭐', t: 'Calificaciones', d: 'Revisar y borrar', f: verCalif },
+      socio ? null : { k: 'socios', ico: '🤝', t: 'Socios', d: 'Quién te ayuda y qué puede hacer', f: verSocios },
+      { k: 'registro', ico: '📜', t: 'Registro de cambios', d: 'Lo que se hizo en el panel', f: verRegistro }
+    ].filter(Boolean).map((x) => Object.assign(x, { abrir: (z) => { zona = z; return x.f(); } }));
+    AJ = window.CFX_AJUSTES.montar($('v-ajustes'), S, { arriba: '<p class="muted" style="margin:0 0 10px">Precios, planes, textos, avisos a todos, pagos Premium y versiones se manejan en el Centro de Mando.</p>' });
+    if (k) AJ.abrir(k);
   }
 
-  // Precios y links de pago (2 por plan, uno activo)
-  async function verLinks() {
-    let links = [];
-    try { links = await rpc('admin_links'); }
-    catch (e) {
-      aBody().innerHTML = '<div class="aviso warn"><div class="grow">⚠️ No se pudieron cargar los precios: la base de datos está desactualizada. Actualízala y vuelve aquí.</div></div>' +
-        '<div class="btns"><button id="lAct">🔄 Ir a Actualizar</button></div><p class="sub">' + esc(e.message) + '</p>';
-      $('lAct').onclick = () => verAjuste('actualizar');
-      return;
-    }
-    const L = (tipo, n) => links.find((x) => x.tipo === tipo && x.slot === n) || { monto: 0, url: '', texto: '', activo: false, hasta: null };
-    const hoyCl = App.hoy();
-    // Cada período: precio normal (espacio 1) y promoción opcional (espacio 2). Mensual y anual activos al mismo tiempo.
-    const periodo = (tipo, titulo, ej) => {
-      const n = L(tipo, 1), pr = L(tipo, 2), vence = pr.hasta && pr.hasta < hoyCl;
-      const promoOn = pr.activo && pr.url && pr.monto && !vence;
-      const inp = (s, k, v, extra) => '<input data-t="' + tipo + '" data-s="' + s + '" data-k="' + k + '" value="' + esc(v == null ? '' : v) + '" ' + (extra || '') + '>';
-      return '<div class="slotpago' + (n.activo && n.url ? ' on' : '') + '"><h3 style="margin-top:0;display:flex;gap:6px;flex-wrap:wrap;align-items:center">' + titulo + ' ' +
-        (n.activo && n.url ? '<span class="pill ok">Publicado</span>' : '<span class="pill">Sin link: no se ofrece</span>') + (promoOn ? ' <span class="pill warn">🔥 Promo activa</span>' : '') + '</h3>' +
-        '<div class="row"><div><label>Precio</label>' + inp(1, 'monto', n.monto || '', 'inputmode="numeric" placeholder="' + ej + '"') + '</div>' +
-        '<div><label>Texto (opcional)</label>' + inp(1, 'texto', n.texto, 'maxlength="300"') + '</div></div>' +
-        '<label>Link de pago (Mercado Pago)</label>' + inp(1, 'url', n.url, 'placeholder="https://mpago.la/…"') +
-        (n.url || n.monto ? '<div class="btns" style="margin-top:8px;justify-content:flex-end">' + quitar(tipo, 1, 'Eliminar este precio') + '</div>' : '') +
-        '<details' + (pr.activo || pr.url ? ' open' : '') + ' style="margin-top:10px"><summary class="clic" style="font-weight:700">🔥 Promoción (opcional)</summary>' +
-        '<p class="sub">Mientras esté activa se cobra este precio y el normal se muestra tachado. Al pasar la fecha vuelve sola al precio normal.' +
-        (vence ? ' <b>Esta promoción ya terminó.</b>' : '') + '</p>' +
-        '<label class="check" style="margin:0 0 6px"><input type="checkbox" data-t="' + tipo + '" data-s="2" data-k="activo"' + (pr.activo ? ' checked' : '') + '> Promoción activa</label>' +
-        '<div class="row"><div><label>Precio promo</label>' + inp(2, 'monto', pr.monto || '', 'inputmode="numeric"') + '</div>' +
-        '<div><label>Hasta (vacío = sin fecha)</label>' + inp(2, 'hasta', pr.hasta || '', 'type="date"') + '</div></div>' +
-        '<label>Texto de la promo</label>' + inp(2, 'texto', pr.texto, 'maxlength="300" placeholder="Cyber: 40% de descuento"') +
-        '<label>Link de pago de la promo</label>' + inp(2, 'url', pr.url, 'placeholder="https://mpago.la/…"') +
-        (pr.url || pr.activo ? '<div class="btns" style="margin-top:8px;justify-content:flex-end">' + quitar(tipo, 2, 'Eliminar la promoción') + '</div>' : '') + '</details></div>';
-    };
-    const plan = (base, titulo) => '<div class="card"><h2>' + titulo + '</h2><p class="sub" style="margin-top:0">El mensual y el anual se ofrecen al mismo tiempo: la persona elige.</p>' +
-      periodo(base, '📅 Mensual', '4990') + periodo(base + '_anual', '🗓️ Anual (365 días)', '49900') +
-      (socio ? '' : '<div class="btns"><button data-guardar="' + base + '">💾 Guardar precios</button></div>') + '</div>';
-    const quitar = (tipo, s, txt) => socio ? '' : '<button class="small ghost" type="button" style="flex:0 0 auto;color:var(--bad)!important" data-quitar="' + tipo + '" data-qs="' + s + '">🗑️ ' + txt + '</button>';
-    aBody().innerHTML = '<div class="card"><p>⭐ Precios, links de pago y datos de transferencia del Premium ahora se configuran una sola vez para las 6 apps en el Centro de Mando → Pagos. Aquí ya no hace falta tocar nada.</p></div>'; if (aBody()) return;  // centralizado en el Centro de Mando
-    aBody().innerHTML = plan('premium_taller', '🚲 Premium de talleres') + plan('premium_cliente', '👤 Premium de clientes') +
-      (socio ? '<div class="aviso warn"><div class="grow">🔒 Solo el administrador cambia los links de pago (ahí llega la plata).</div></div>' : '') +
-      '<p class="sub">💡 Anual: pon como precio 10 meses (pagan 10 y se llevan 12). Si dejas un link vacío, ese período no se ofrece.</p>' +
-      '<p class="sub">El abono de las reservas lo configura cada taller con su propio link: ese dinero le llega directo al taller y tú no lo ves.</p>';
-    if (socio) aBody().querySelectorAll('input').forEach((i) => { i.disabled = true; });
-    aBody().onclick = async (e) => {
-      const q = e.target.closest('[data-quitar]');
-      if (q) {
-        const per = q.dataset.quitar.endsWith('anual') ? 'anual' : 'mensual';
-        if (!await confirmar(q.dataset.qs === '2' ? '¿Eliminar la promoción del ' + per + '?' : '¿Eliminar el precio ' + per + '? Ese período deja de ofrecerse hasta que pongas uno nuevo.', 'Sí, eliminar')) return;
-        try { await rpc('link_guardar', { p_tipo: q.dataset.quitar, p_slot: +q.dataset.qs, p_monto: 0, p_url: '', p_texto: '', p_activar: false, p_hasta: null }); pub = await App.cargarPublica(); toast('🗑️ Eliminado'); verLinks(); }
-        catch (err) { toast(err.message); }
-        return;
-      }
-      const b = e.target.closest('[data-guardar]'); if (!b) return;
-      const base = b.dataset.guardar;
-      const el = (tipo, s, k) => aBody().querySelector('[data-t="' + tipo + '"][data-s="' + s + '"][data-k="' + k + '"]');
-      const val = (tipo, s, k) => el(tipo, s, k).value.trim();
-      b.disabled = true;
-      try {
-        for (const tipo of [base, base + '_anual']) {
-          const m1 = App.numero(val(tipo, 1, 'monto')), u1 = val(tipo, 1, 'url');
-          if (u1 && !m1) throw new Error('Pon el precio del ' + (tipo.endsWith('anual') ? 'anual' : 'mensual'));
-          await rpc('link_guardar', { p_tipo: tipo, p_slot: 1, p_monto: m1, p_url: u1, p_texto: val(tipo, 1, 'texto'), p_activar: !!(u1 && m1) });
-          const on = el(tipo, 2, 'activo').checked, m2 = App.numero(val(tipo, 2, 'monto')), u2 = val(tipo, 2, 'url');
-          if (on && (!m2 || !u2)) throw new Error('Para activar la promoción del ' + (tipo.endsWith('anual') ? 'anual' : 'mensual') + ' pon su precio y su link');
-          await rpc('link_guardar', { p_tipo: tipo, p_slot: 2, p_monto: m2, p_url: u2, p_texto: val(tipo, 2, 'texto'), p_activar: on, p_hasta: val(tipo, 2, 'hasta') || null });
-        }
-        pub = await App.cargarPublica(); toast('💾 Precios guardados'); verLinks();
-      } catch (err) { toast(err.message); b.disabled = false; }
-    };
-  }
-
-
-  // Planes: nombre, descripción, duración, beneficios y límites
-  const ETIQ = { reservas_mes: 'Reservas online al mes', servicios: 'Servicios', promos: 'Promociones activas', equipo: 'Personas en el equipo', clientes_cuenta: 'Clientes con cuenta',
-    estadisticas: 'Estadísticas', recordatorios: 'Recordatorios de mantención', historial: 'Visitas en el historial', anticipacion_extra: 'Días extra para reservar antes', fotos: 'Fotos antes/después en la orden de trabajo' };
-  async function verPlanes() {
-    pub = await App.cargarPublica();
-    const planes = pub.planes;
-    aBody().innerHTML = ['taller_free', 'taller_premium', 'cliente_free', 'cliente_premium'].map((c) => { const p = planes[c]; return '<div class="card' + (/premium/.test(c) ? ' plan premium' : '') + '" data-plan="' + c + '"><h2>' +
-      ({ taller_free: '🚲 Taller gratis', taller_premium: '🚲⭐ Taller Premium', cliente_free: '👤 Cliente gratis', cliente_premium: '👤⭐ Cliente Premium' })[c] + '</h2>' +
-      '<div class="row"><div><label>Nombre</label><input data-k="nombre" maxlength="40" value="' + esc(p.nombre) + '"></div><div><label>Duración del pago (días)</label><input data-k="duracion" inputmode="numeric" value="' + p.duracion_dias + '"></div></div>' +
-      '<label>Descripción</label><input data-k="descripcion" maxlength="300" value="' + esc(p.descripcion) + '">' +
-      '<label>Beneficios (uno por línea)</label><textarea data-k="beneficios" rows="5">' + esc(p.beneficios.join('\n')) + '</textarea>' +
-      '<h3>Límites</h3><div class="row">' + Object.keys(p.limites).map((k) => typeof p.limites[k] === 'boolean'
-        ? '<label class="check" style="flex:1 1 100%"><input type="checkbox" data-l="' + k + '"' + (p.limites[k] ? ' checked' : '') + '> ' + esc(ETIQ[k] || k) + '</label>'
-        : '<div><label>' + esc(ETIQ[k] || k) + '</label><input data-l="' + k + '" inputmode="numeric" value="' + p.limites[k] + '"></div>').join('') + '</div>' +
-      '<div class="btns"><button data-gp="' + c + '">💾 Guardar plan</button></div></div>'; }).join('');
-    aBody().onclick = async (e) => {
-      const b = e.target.closest('[data-gp]'); if (!b) return;
-      const card = aBody().querySelector('[data-plan="' + b.dataset.gp + '"]'), v = (k) => card.querySelector('[data-k="' + k + '"]').value;
-      const lim = {};
-      card.querySelectorAll('[data-l]').forEach((i) => { lim[i.dataset.l] = i.type === 'checkbox' ? i.checked : App.numero(i.value); });
-      const motivo = await pedirMotivo('Cambiar el plan "' + v('nombre') + '"'); if (socio && !motivo) return;
-      try {
-        await rpc('admin_plan_guardar', { p_codigo: b.dataset.gp, p_nombre: v('nombre'), p_descripcion: v('descripcion'), p_limites: lim,
-          p_beneficios: v('beneficios').split('\n').map((x) => x.trim()).filter(Boolean), p_duracion: App.numero(v('duracion')), p_motivo: motivo });
-        toast('⭐ Plan guardado');
-      } catch (err) { toast(err.message); }
-    };
-  }
-
-  // Reglas (tiempos y días)
   function verReglas() {
     const c = pub.config || {};
     const campos = [['minutos_pago', 'Minutos para pagar el abono y subir el comprobante'], ['minutos_devolucion', 'Minutos para cancelar con devolución del abono'],
@@ -469,34 +257,6 @@
     reserva_politica: 'Política de cancelación (usa {devolucion} y {horas})', premium_taller_titulo: 'Título Premium taller', premium_taller_texto: 'Texto Premium taller',
     premium_cliente_titulo: 'Título Premium cliente', premium_cliente_texto: 'Texto Premium cliente', pago_instrucciones: 'Instrucciones para pagar Premium',
     bienvenida_taller: 'Bienvenida del taller nuevo', terminos: 'Términos (al crear cuenta)' };
-  async function verTextos() {
-    pub = await App.cargarPublica();
-    aBody().innerHTML = '<div class="card"><h2>✏️ Textos</h2>' + Object.keys(TXT).map((k) => '<label>' + esc(TXT[k]) + '</label><textarea data-x="' + k + '" rows="2">' + esc(pub.textos[k] || '') + '</textarea>').join('') +
-      '<div class="btns"><button id="xG">💾 Guardar textos</button></div></div>';
-    $('xG').onclick = async () => {
-      const cambios = Array.from(aBody().querySelectorAll('[data-x]')).filter((i) => (pub.textos[i.dataset.x] || '') !== i.value);
-      if (!cambios.length) { toast('Sin cambios'); return; }
-      const motivo = await pedirMotivo('Cambiar ' + cambios.length + ' texto(s)'); if (socio && !motivo) return;
-      try {
-        for (const i of cambios) await rpc('admin_texto_guardar', { p_clave: i.dataset.x, p_valor: i.value, p_motivo: motivo });
-        pub = await App.cargarPublica(); toast('✏️ Textos guardados');
-      } catch (e) { toast(e.message); }
-    };
-  }
-
-  // Avisos masivos (campanita + push)
-  function verAvisos() {
-    aBody().innerHTML = '<div class="card"><h2>📣 Enviar aviso</h2><p class="muted" style="margin-top:0">Llega a la campanita de la app y como notificación al celular.</p>' +
-      '<label for="vD">Para</label><select id="vD"><option value="talleres">Dueños de talleres</option><option value="equipos">Talleres y sus equipos</option><option value="clientes">Clientes</option><option value="todos">Todos</option></select>' +
-      '<label for="vT">Título</label><input id="vT" maxlength="90"><label for="vC">Mensaje</label><textarea id="vC" maxlength="240"></textarea>' +
-      '<div class="btns"><button id="vE">📣 Enviar</button></div></div>';
-    $('vE').onclick = async () => {
-      if (!await confirmar('¿Enviar el aviso?')) return;
-      try { const n = await rpc('admin_aviso', { p_destino: $('vD').value, p_titulo: $('vT').value, p_cuerpo: $('vC').value }); App.sb.functions.invoke('servidor').catch(() => {}); toast('📣 Enviado a ' + n + ' personas'); $('vT').value = ''; $('vC').value = ''; }
-      catch (e) { toast(e.message); }
-    };
-  }
-
   // Notificaciones push: claves
   function verPush() {
     const pubk = (pub.config || {}).vapid_publica;
@@ -623,7 +383,6 @@
 
   $('cargando').classList.add('hidden');
   App.campana($('campana'));
-  $('perfilBtn').onclick = () => { ajuste = 'cuenta'; if (location.hash === '#ajustes') verAjuste('cuenta'); else show('ajustes'); };
   App.chatBoton($('chatBtn'));
   App.pie();
   const h = location.hash.slice(1);

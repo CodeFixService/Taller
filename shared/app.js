@@ -144,8 +144,12 @@
     if (c.suspendido) { document.body.innerHTML = '<main><div class="card"><h2>Cuenta suspendida</h2><p class="muted">Contacta al administrador.</p><button onclick="App.salir()">Salir</button></div></main>'; return new Promise(() => {}); }
     if (roles && !roles.includes(c.rol)) { location.replace(ROOT + destino(c)); return new Promise(() => {}); }
     if (c.taller && c.taller.color) tema(c.taller.color);
-    // Núcleo (premium.js): con Premium la app se ve dorada y la primera vez saluda.
-    if (c.rol === 'cliente' || c.rol === 'taller') (window.CFX_PREMIUM ? Promise.resolve() : new Promise((r) => addEventListener('load', r))).then(() => window.CFX_PREMIUM && (window.CFX_AYUDA_PEND = { rpc: rpc, app: 'taller' }, window.CFX_AYUDA && CFX_AYUDA.iniciar(window.CFX_AYUDA_PEND), true) && CFX_PREMIUM.marcar({ premium: !!c.premium, id: c.id, hasta: c.premium_hasta || (c.taller && c.taller.premium_hasta) }));
+    // Núcleo (ayuda.js): cabecera común [campana][FREE/PRO][foto], menú de la cuenta, ayuda y sensación Premium.
+    const adm = c.rol === 'admin' || c.rol === 'socio';
+    window.CFX_AYUDA_PEND = Object.assign(window.CFX_AYUDA_PEND || {}, { rpc, app: 'taller', admin: adm, premium: !!c.premium, id: c.id, hasta: c.premium_hasta || (c.taller && c.taller.premium_hasta),
+      nombre: c.nombre || (c.taller && c.taller.nombre), email: c.email, quitar: '#hRol, #perfilBtn', salir,
+      cuenta: adm ? '#cuenta' : c.rol === 'cliente' ? '#cuenta' : '#mas/cuenta', panel: adm && !/\/admin\//.test(location.pathname) ? ROOT + 'admin/' : null });
+    if (window.CFX_AYUDA) window.CFX_AYUDA.iniciar(window.CFX_AYUDA_PEND);
     return c;
   }
   async function entrar(email, password) {

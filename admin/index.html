@@ -25,7 +25,7 @@
   td.r { text-align: right; font-variant-numeric: tabular-nums; }
 </style>
 <script src="../shared/humano.js"></script>
-<script>window.CFX_BARRA = { orden: ['resumen', 'talleres', '+', 'pagos', 'ajustes'], nuevo: { texto: 'Taller', ir: 'talleres', foco: '#nCrear' } }; // barra de abajo (núcleo)</script>
+<script>window.CFX_BARRA = { orden: ['resumen', 'talleres', '+', 'clientes', 'ajustes'], nuevo: { texto: 'Taller', ir: 'talleres', foco: '#nCrear' } }; // barra de abajo (núcleo)</script>
 </head>
 <body class="con-tabs">
 <header class="top">
@@ -58,24 +58,12 @@
     <p class="sub" id="cCuenta"></p>
     <div class="card"><ul class="list" id="cLista"></ul></div>
   </section>
-  <section class="view" id="v-pagos">
-    <div class="seg" id="pSeg"><button data-f="en_revision" class="on">🧾 Por revisar</button><button data-f="aprobado">✅ Aprobados</button><button data-f="rechazado">❌ Rechazados</button><button data-f="">Todos</button></div>
-    <div class="grid" id="pLista"></div>
-  </section>
-  <section class="view" id="v-ajustes">
-    <div class="seg" id="aSeg">
-      <button data-a="actualizar" class="on">🔄 Actualizar</button><button data-a="cuenta">👤 Mi perfil</button><button data-a="links">💳 Precios y links</button><button data-a="planes">⭐ Planes</button><button data-a="reglas">⚖️ Reglas</button>
-      <button data-a="textos">✏️ Textos</button><button data-a="avisos" class="solo-admin">📣 Avisos</button><button data-a="push" class="solo-admin">🔔 Notificaciones</button>
-      <button data-a="calif">⭐ Calificaciones</button><button data-a="socios" class="solo-admin">👥 Socios</button><button data-a="registro">📜 Registro</button>
-    </div>
-    <div id="aBody"></div>
-  </section>
+  <section class="view" id="v-ajustes"></section>
 </main>
 <nav class="tabs">
   <button data-v="resumen"><span class="i">📊</span>Resumen</button>
   <button data-v="talleres"><span class="i">🚲</span>Talleres</button>
   <button data-v="clientes"><span class="i">👥</span>Usuarios</button>
-  <button data-v="pagos"><span class="i">💰</span>Pagos<span class="badge hidden" id="tabPagos"></span></button>
   <button data-v="ajustes"><span class="i">⚙️</span>Ajustes</button>
 </nav>
 <script src="../shared/config.js?v=2.2"></script>

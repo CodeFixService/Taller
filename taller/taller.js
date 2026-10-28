@@ -33,8 +33,6 @@
     App.tema(t.color);
     App.pintarLogo($('hLogo'), t);
     $('hNombre').textContent = t.nombre;
-    $('hPlan').textContent = P.premium ? 'PREMIUM' : 'GRATIS';
-    $('hPlan').className = 'pill ' + (P.premium ? 'pro' : '');
     $('tabRev').textContent = P.por_revisar; $('tabRev').classList.toggle('hidden', !P.por_revisar);
     document.querySelectorAll('#mSeg .dueno').forEach((b) => b.classList.toggle('hidden', !P.dueno));
   }
