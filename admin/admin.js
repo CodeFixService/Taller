@@ -374,6 +374,7 @@
       periodo(base, '📅 Mensual', '4990') + periodo(base + '_anual', '🗓️ Anual (365 días)', '49900') +
       (socio ? '' : '<div class="btns"><button data-guardar="' + base + '">💾 Guardar precios</button></div>') + '</div>';
     const quitar = (tipo, s, txt) => socio ? '' : '<button class="small ghost" type="button" style="flex:0 0 auto;color:var(--bad)!important" data-quitar="' + tipo + '" data-qs="' + s + '">🗑️ ' + txt + '</button>';
+    aBody().innerHTML = '<div class="card"><p>⭐ Precios, links de pago y datos de transferencia del Premium ahora se configuran una sola vez para las 6 apps en el Centro de Mando → Pagos. Aquí ya no hace falta tocar nada.</p></div>'; if (aBody()) return;  // centralizado en el Centro de Mando
     aBody().innerHTML = plan('premium_taller', '🚲 Premium de talleres') + plan('premium_cliente', '👤 Premium de clientes') +
       (socio ? '<div class="aviso warn"><div class="grow">🔒 Solo el administrador cambia los links de pago (ahí llega la plata).</div></div>' : '') +
       '<p class="sub">💡 Anual: pon como precio 10 meses (pagan 10 y se llevan 12). Si dejas un link vacío, ese período no se ofrece.</p>' +
