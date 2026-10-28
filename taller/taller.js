@@ -858,7 +858,9 @@
       '<label for="uP">Contraseña nueva</label><input id="uP" type="password" autocomplete="new-password"><div class="btns"><button class="alt" id="uPG">Cambiar contraseña</button></div>' +
       '<div id="uPush"></div><div id="uModo" style="margin-top:12px"></div><div id="uSop" style="margin-top:12px"></div>' +
       (P.dueno ? '<h3>🧹 Comprobantes</h3><p class="sub" style="margin:0">Se borran solos a los ' + ((pub.config || {}).dias_comprobantes || 30) + ' días. Descarga los que quieras guardar antes de limpiar.</p>' +
-        '<div class="btns"><button class="ghost" id="uLimpiar">Borrar comprobantes ya revisados</button></div>' : '') +
+        '<div class="btns"><button class="ghost" id="uLimpiar">Borrar comprobantes ya revisados</button></div>' +
+        '<h3>💾 Respaldo</h3><p class="sub" style="margin:0">Descarga en Excel tus reservas, clientes, servicios, promociones y calificaciones. Los avisos y mensajes se borran solos a los 30 días (te avisamos antes).</p>' +
+        '<div class="btns"><button class="ghost" id="uRespaldo">⬇️ Descargar respaldo (Excel)</button></div>' : '') +
       '<div class="btns"><button class="danger" id="uSalir">Cerrar sesión</button></div></div>';
     App.ofrecerPush($('uPush'));
     App.selectorModo($('uModo'));
@@ -867,6 +869,8 @@
     $('uG').onclick = async () => { try { await rpc('mi_perfil_guardar', { p_nombre: $('uN').value, p_telefono: $('uT').value }); toast('💾 Guardado'); } catch (e) { toast(e.message); } };
     $('uPG').onclick = async () => { const { error } = await sb.auth.updateUser({ password: $('uP').value }); toast(error ? App.friendly(error) : '🔑 Contraseña cambiada'); };
     $('uSalir').onclick = () => App.salir();
+    const ur = $('uRespaldo');
+    if (ur) ur.onclick = async () => { try { CFX_RESPALDO.excel('respaldo-' + P.taller.nombre, await rpc('mi_respaldo')); toast('💾 Respaldo descargado'); } catch (e) { toast(e.message); } };
     const ul = $('uLimpiar');
     if (ul) ul.onclick = async () => { if (!await confirmar('¿Borrar todos los comprobantes ya revisados? No se puede deshacer.')) return; try { const n = await rpc('taller_limpiar_comprobantes'); toast('🧹 ' + n + ' borrados'); } catch (e) { toast(e.message); } };
   }

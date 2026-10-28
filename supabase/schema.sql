@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.9'::text $$;
+language sql immutable as $$ select '2.1'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -1879,7 +1879,7 @@ begin
   perform public.admin_editar(p_motivo);
   if p_clave not in ('minutos_pago', 'minutos_devolucion', 'horas_cancelacion', 'dias_saldo', 'dias_regalo_taller',
                      'dias_aviso_vencimiento', 'dias_comprobantes', 'soporte_whatsapp', 'vapid_publica',
-                     'registro_talleres', 'dias_referido', 'horas_libera_premium', 'dias_fotos', 'color_app') then
+                     'registro_talleres', 'dias_referido', 'horas_libera_premium', 'dias_fotos', 'color_app', 'version_liberada') then
     raise exception 'Ajuste no válido';
   end if;
   if p_clave = 'vapid_publica' and not public.is_admin() then raise exception 'Solo el administrador'; end if;
@@ -2562,3 +2562,193 @@ end $$;
 
 -- Que la API de Supabase vea las funciones nuevas al instante.
 notify pgrst, 'reload schema';
+
+-- =====================================================================
+-- v2.1 · Limpieza y respaldo
+--   · Avisos y mensajes se guardan 30 días (antes se avisa). Cada persona borra un aviso o todos (campanita).
+--   · Cada lunes: servicios desactivados y promociones vencidas, para borrarlos si ya no se ofrecen.
+--   · El taller descarga su respaldo en Excel. Funciones cfx_* para el Centro de Mando.
+-- =====================================================================
+alter table public.perfiles add column if not exists aviso_limpieza_at timestamptz;
+
+create or replace function public.recordar_catalogo() returns int
+language plpgsql security definer set search_path = '' as $$
+declare r record; k int := 0;
+begin
+  for r in select t.owner_id,
+             (select count(*) from public.servicios s where s.taller_id = t.id and not s.activo and s.created_at < now() - interval '30 days') as sv,
+             (select count(*) from public.promos o where o.taller_id = t.id and (not o.activa or o.hasta < (now() at time zone t.zona)::date - 7)) as pr
+           from public.talleres t where t.owner_id is not null and not t.suspendido
+  loop
+    continue when r.sv + r.pr = 0;
+    perform public.avisar(r.owner_id, '🧹 Ordena tu catálogo',
+      concat_ws(' y ', case when r.sv = 1 then '1 servicio desactivado' when r.sv > 1 then r.sv || ' servicios desactivados' end,
+                       case when r.pr = 1 then '1 promoción vencida' when r.pr > 1 then r.pr || ' promociones vencidas' end)
+        || '. Si ya no los ofreces, bórralos para que tu página se vea ordenada.', '/taller/#servicios');
+    k := k + 1;
+  end loop;
+  return k;
+end $$;
+
+create or replace function public.limpiar(p_que text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare w record; a int := 0; b int := 0; c int := 0; d int := 0; f int := 0; dias int := coalesce(public.cfg_int('dias_comprobantes'), 30);
+begin
+  if auth.uid() is not null then perform public.admin_check(); end if;
+  if p_que in ('comprobantes', 'todo', 'auto') then
+    delete from public.comprobantes k where k.created_at < now() - make_interval(days => case when p_que = 'comprobantes' then 0 else dias end)
+      and not exists (select 1 from public.reservas r where r.id = k.reserva_id and r.estado = 'en_revision')
+      and not exists (select 1 from public.pagos g where g.id = k.pago_id and g.estado = 'en_revision');
+    get diagnostics a = row_count;
+  end if;
+  if p_que in ('notificaciones', 'todo', 'auto') then
+    -- v2.1: avisos y mensajes se guardan 30 días; antes se avisa (máx. 1 vez por semana, al menos 2 días antes).
+    if p_que = 'auto' then
+      for w in select p.id,
+                 (select count(*) from public.notificaciones x where x.para = p.id and x.created_at < now() - interval '21 days') as av,
+                 (select count(*) from public.mensajes x where (x.cliente_id = p.id or (x.taller_id = p.taller_id and p.rol in ('taller', 'equipo')))
+                    and x.created_at < now() - interval '21 days') as ms
+               from public.perfiles p
+               where not p.suspendido and (p.aviso_limpieza_at is null or p.aviso_limpieza_at < now() - interval '7 days')
+                 and (exists (select 1 from public.notificaciones x where x.para = p.id and x.created_at < now() - interval '28 days')
+                   or exists (select 1 from public.mensajes x where (x.cliente_id = p.id or (x.taller_id = p.taller_id and p.rol in ('taller', 'equipo')))
+                    and x.created_at < now() - interval '28 days'))
+      loop
+        perform public.avisar(w.id, '🧹 Limpieza automática',
+          concat_ws(' y ', case when w.ms = 1 then '1 mensaje' when w.ms > 1 then w.ms || ' mensajes' end, case when w.av = 1 then '1 aviso' when w.av > 1 then w.av || ' avisos' end)
+            || ' con más de 30 días se borran solos en los próximos días. Tus reservas y clientes no se tocan.', '');
+        update public.perfiles set aviso_limpieza_at = now() where id = w.id;
+      end loop;
+      if extract(isodow from now() at time zone 'America/Santiago') = 1 then perform public.recordar_catalogo(); end if;
+    end if;
+    delete from public.notificaciones where created_at < now() - interval '30 days';
+    get diagnostics b = row_count;
+    delete from public.mensajes where created_at < now() - interval '30 days';
+  end if;
+  if p_que in ('reservas', 'todo', 'auto') then
+    delete from public.reservas where estado in ('expirada', 'rechazada') and updated_at < now() - interval '60 days';
+    get diagnostics c = row_count;
+  end if;
+  if p_que in ('fotos', 'todo', 'auto') then
+    delete from public.fotos_trabajo where created_at < now() - make_interval(days => coalesce(public.cfg_int('dias_fotos'), 365));
+    get diagnostics f = row_count;
+  end if;
+  if p_que in ('otros', 'todo', 'auto') then
+    delete from public.auditoria where created_at < now() - interval '365 days';
+    delete from public.invitaciones where created_at < now() - interval '2 days';
+    get diagnostics d = row_count;
+  end if;
+  if auth.uid() is not null then perform public.auditar('limpieza', p_que); end if;
+  return jsonb_build_object('comprobantes', a, 'notificaciones', b, 'reservas', c, 'otros', d, 'fotos', f);
+end $$;
+
+-- Respaldo del taller (Excel): clientes, reservas, servicios, promociones y calificaciones. Solo el dueño.
+create or replace function public.mi_respaldo() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare t uuid := public.taller_de(auth.uid());
+begin
+  if t is null or not public.es_dueno(t) then raise exception 'Solo el dueño del taller'; end if;
+  return jsonb_build_object(
+    'Reservas', (select coalesce(jsonb_agg(x order by x.fecha, x.hora), '[]') from (select fecha, hora, nombre as cliente, telefono, email, bici, servicio_nombre as servicio,
+        precio, abono_monto as abono, abono_estado, estado, nota, origen, created_at as creada from public.reservas where taller_id = t) x),
+    'Clientes', (select coalesce(jsonb_agg(x order by x.nombre), '[]') from (select p.nombre, u.email as correo, p.telefono, p.premium_hasta, p.created_at as creado
+        from public.perfiles p left join auth.users u on u.id = p.id where p.taller_id = t and p.rol = 'cliente') x),
+    'Servicios', (select coalesce(jsonb_agg(x order by x.orden), '[]') from (select nombre, descripcion, precio, duracion_min, activo, orden from public.servicios where taller_id = t) x),
+    'Promociones', (select coalesce(jsonb_agg(x order by x.creada), '[]') from (select titulo, texto, precio, precio_antes, hasta, activa, created_at as creada from public.promos where taller_id = t) x),
+    'Calificaciones', (select coalesce(jsonb_agg(x order by x.fecha), '[]') from (select created_at as fecha, autor, estrellas, comentario from public.calificaciones where taller_id = t) x));
+end $$;
+
+-- ---------- Centro de Mando: respaldo y limpieza (común a las 6 apps) ----------
+create or replace function public.cfx_respaldo() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  perform public.admin_check();
+  return jsonb_build_object(
+    'Talleres', (select coalesce(jsonb_agg(x order by x.creado), '[]') from (select t.nombre, t.slug, t.comuna, t.telefono, u.email as dueno, t.premium_hasta, t.suspendido,
+        (select count(*) from public.reservas r where r.taller_id = t.id) as reservas, t.created_at as creado
+      from public.talleres t left join auth.users u on u.id = t.owner_id) x),
+    'Cuentas', (select coalesce(jsonb_agg(x order by x.creada), '[]') from (select u.email as correo, p.nombre, p.rol, t.nombre as taller, p.premium_hasta, p.suspendido, p.created_at as creada
+      from public.perfiles p left join auth.users u on u.id = p.id left join public.talleres t on t.id = p.taller_id) x),
+    'Pagos', (select coalesce(jsonb_agg(x order by x.fecha), '[]') from (select g.created_at as fecha, u.email as correo, g.tipo, g.monto, g.estado, g.nota, g.resuelto_at as resuelto
+      from public.pagos g left join auth.users u on u.id = g.perfil_id) x),
+    'Ajustes', (select coalesce(jsonb_agg(jsonb_build_object('clave', clave, 'valor', valor #>> '{}') order by clave), '[]') from public.config),
+    'Registro', (select coalesce(jsonb_agg(to_jsonb(a) order by a.created_at), '[]') from public.auditoria a));
+end $$;
+
+create or replace function public.cfx_limpieza() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  perform public.admin_check();
+  return jsonb_build_array(
+    jsonb_build_object('clave', 'comprobantes', 'titulo', 'Comprobantes', 'detalle', 'Fotos de abonos y pagos ya revisados.',
+      'filas', (select count(*) from public.comprobantes k where not exists (select 1 from public.reservas r where r.id = k.reserva_id and r.estado = 'en_revision')
+        and not exists (select 1 from public.pagos g where g.id = k.pago_id and g.estado = 'en_revision'))),
+    jsonb_build_object('clave', 'notificaciones', 'titulo', 'Avisos y mensajes', 'detalle', 'Más de 30 días (se borran solos cada día).',
+      'filas', (select count(*) from public.notificaciones where created_at < now() - interval '30 days') + (select count(*) from public.mensajes where created_at < now() - interval '30 days')),
+    jsonb_build_object('clave', 'reservas', 'titulo', 'Reservas expiradas o rechazadas', 'detalle', 'Más de 60 días.',
+      'filas', (select count(*) from public.reservas where estado in ('expirada', 'rechazada') and updated_at < now() - interval '60 days')),
+    jsonb_build_object('clave', 'fotos', 'titulo', 'Fotos de trabajos', 'detalle', 'Más de ' || coalesce(public.cfg_int('dias_fotos'), 365) || ' días.',
+      'filas', (select count(*) from public.fotos_trabajo where created_at < now() - make_interval(days => coalesce(public.cfg_int('dias_fotos'), 365)))),
+    jsonb_build_object('clave', 'otros', 'titulo', 'Registro e invitaciones', 'detalle', 'Registro de más de 1 año e invitaciones vencidas.',
+      'filas', (select count(*) from public.auditoria where created_at < now() - interval '365 days') + (select count(*) from public.invitaciones where created_at < now() - interval '2 days')));
+end $$;
+
+create or replace function public.cfx_limpiar(p_clave text) returns int
+language plpgsql security definer set search_path = '' as $$
+declare r jsonb;
+begin
+  perform public.admin_check();
+  if p_clave not in ('comprobantes', 'notificaciones', 'reservas', 'fotos', 'otros') then raise exception 'Opción no válida'; end if;
+  r := public.limpiar(p_clave);
+  return (select coalesce(sum(v::int), 0) from jsonb_each_text(r) as t(k, v));
+end $$;
+
+revoke all on function public.recordar_catalogo(), public.mi_respaldo(), public.cfx_respaldo(), public.cfx_limpieza(), public.cfx_limpiar(text), public.limpiar(text) from public, anon;
+revoke all on function public.recordar_catalogo() from authenticated;
+grant execute on function public.mi_respaldo(), public.cfx_respaldo(), public.cfx_limpieza(), public.cfx_limpiar(text), public.limpiar(text) to authenticated;
+-- ---------------------------------------------------------------------
+-- CodeFix · Inventario (igual en las 6 apps; lo usa el Centro de Mando → Apps → Respaldo y limpieza).
+--   Muestra las tablas que esta versión ya NO usa (restos de versiones antiguas) con cuántas filas tienen.
+--   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
+--   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
+-- ---------------------------------------------------------------------
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bloqueos', 'public.calificaciones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.perfiles', 'public.planes', 'public.promos', 'public.push_subs', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
+create or replace function public.cfx_inventario() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare r record; n bigint; out jsonb := '[]'::jsonb;
+begin
+  perform public.admin_check();
+  for r in select s.nspname || '.' || c.relname as t, pg_total_relation_size(c.oid) as b from pg_class c join pg_namespace s on s.oid = c.relnamespace
+           where s.nspname in ('public', 'privado') and c.relkind in ('r', 'p') and not (s.nspname || '.' || c.relname = any (public.cfx_tablas()))
+           and not exists (select 1 from pg_depend d where d.objid = c.oid and d.deptype = 'e') order by 1
+  loop
+    execute 'select count(*) from ' || r.t into n;
+    out := out || jsonb_build_object('tabla', r.t, 'filas', n, 'bytes', r.b);
+  end loop;
+  return out;
+end $$;
+create or replace function public.cfx_inventario_datos(p_tabla text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare j jsonb;
+begin
+  perform public.admin_check();
+  if not exists (select 1 from jsonb_array_elements(public.cfx_inventario()) x where x ->> 'tabla' = p_tabla) then raise exception 'Esa tabla no está en la lista de sobrantes'; end if;
+  execute 'select coalesce(jsonb_agg(to_jsonb(t)), ''[]'') from (select * from ' || p_tabla || ' limit 20000) t' into j;
+  return j;
+end $$;
+create or replace function public.cfx_inventario_borrar(p_tabla text, p_confirmacion text default '') returns text
+language plpgsql security definer set search_path = '' as $$
+declare x jsonb;
+begin
+  perform public.admin_check();
+  select e into x from jsonb_array_elements(public.cfx_inventario()) e where e ->> 'tabla' = p_tabla;
+  if x is null then raise exception 'Esa tabla no está en la lista de sobrantes'; end if;
+  if (x ->> 'filas')::bigint > 0 and lower(trim(coalesce(p_confirmacion, ''))) not in ('sí', 'si') then
+    raise exception 'La tabla tiene % filas: descarga el respaldo y escribe "sí" para borrarla', x ->> 'filas';
+  end if;
+  execute 'drop table ' || p_tabla || ' cascade';
+  return p_tabla || ' borrada';
+end $$;
+revoke all on function public.cfx_tablas(), public.cfx_inventario(), public.cfx_inventario_datos(text), public.cfx_inventario_borrar(text, text) from public, anon;
+grant execute on function public.cfx_inventario(), public.cfx_inventario_datos(text), public.cfx_inventario_borrar(text, text) to authenticated;
+

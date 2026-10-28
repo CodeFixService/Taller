@@ -1,9 +1,9 @@
 /* BiciTaller · Service worker: app instalable, funciona con mala señal y recibe notificaciones.
    Siempre intenta traer la versión nueva de internet (así nunca queda una versión vieja);
    si no hay señal, usa la copia guardada. */
-const CACHE = 'bt-v2.8';
+const CACHE = 'bt-v2.9';
 const BASE = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
-  'shared/app.css', 'shared/app.js', 'shared/voz.js', 'shared/fotos.js', 'shared/auto.js', 'shared/barra.js', 'shared/tema.css', 'shared/iconos.js', 'shared/instalar.js', 'shared/config.js', 'shared/vendor/supabase.js', 'shared/vendor/qrcode.js',
+  'shared/app.css', 'shared/app.js', 'shared/respaldo.js', 'shared/voz.js', 'shared/fotos.js', 'shared/auto.js', 'shared/barra.js', 'shared/tema.css', 'shared/iconos.js', 'shared/instalar.js', 'shared/config.js', 'shared/vendor/supabase.js', 'shared/vendor/qrcode.js',
   'admin/', 'admin/admin.js', 'taller/', 'taller/taller.js', 'cliente/', 't/', 'r/', 'n/', 'd/'];
 
 self.addEventListener('install', (e) => {
