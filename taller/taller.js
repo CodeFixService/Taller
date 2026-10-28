@@ -49,7 +49,7 @@
 
   /* ---------- Navegación ---------- */
   // #plan y #mas/<sección> (perfil, horario, servicios, abono…): abren esa parte de Más (la guía para partir los usa).
-  window.addEventListener('hashchange', () => { const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
+  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
   const show = App.pestanas((v) => {
     vista = v;
     if (v === 'hoy') pintarHoy();
@@ -496,9 +496,16 @@
      MÁS
      ===================================================================== */
   let subMas = null;
-  $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) verMas(b.dataset.m); };
+  $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); } };
   function verMas(m) {
-    if (!m || ($('mSeg').querySelector('[data-m="' + m + '"]') || {}).classList?.contains('hidden')) m = P.dueno ? 'perfil' : 'equipo';
+    // Sin sección: menú en cuadrícula (igual en todas las apps). Con sección: la tira de secciones arriba.
+    if (!m || ($('mSeg').querySelector('[data-m="' + m + '"]') || {}).classList?.contains('hidden')) {
+      subMas = null; $('mSeg').classList.add('hidden');
+      body().innerHTML = '<div class="cfx-grilla">' + [...$('mSeg').querySelectorAll('button[data-m]:not(.hidden)')].map((b) => '<button type="button" data-m="' + b.dataset.m + '">' + b.innerHTML + '</button>').join('') + '</div>';
+      body().querySelectorAll('[data-m]').forEach((b) => { b.onclick = () => { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); }; });
+      return;
+    }
+    $('mSeg').classList.remove('hidden');
     subMas = m;
     $('mSeg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.m === m));
     const on = $('mSeg').querySelector('.on'); if (on) on.scrollIntoView({ inline: 'center', block: 'nearest' });
