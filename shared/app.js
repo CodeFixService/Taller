@@ -511,6 +511,7 @@
     // Recién abierta la app: se actualiza sola (una vez por versión, para no quedar en un bucle si el servidor aún no publica).
     let intento = '';
     try { intento = sessionStorage.getItem('bt:autoAct') || ''; } catch (e) { /* nada */ }
+    if (global.CodeFixAuto) { global.CodeFixAuto(v, actualizar); return; } // núcleo: siempre sola, sin ventana
     if (performance.now() < 20000 && intento !== v) {
       try { sessionStorage.setItem('bt:autoAct', v); } catch (e) { /* nada */ }
       toast('🔄 Actualizando a la v' + v + '…');
