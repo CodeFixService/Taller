@@ -242,3 +242,7 @@ footer.pie button { background: none; color: var(--brand); padding: 2px 4px; fon
 .chatin .chatenv { padding: 10px 14px; }
 .flotante { position: fixed; right: 14px; z-index: 9; width: 46px; height: 46px; border-radius: 50%; padding: 0; font-size: 20px; box-shadow: 0 6px 18px rgba(0, 0, 0, .25); }
 .flotante .badge { top: -4px; right: -4px; }
+/* Botón flotante de ayuda: el contenido termina antes de él y se esconde mientras bajas (vuelve al soltar). */
+body:has(> .flotante) main { padding-bottom: 76px; }
+.flotante { transition: opacity .2s, transform .2s; }
+.flotante.cfx-esconde { opacity: 0; transform: scale(.8); pointer-events: none; }

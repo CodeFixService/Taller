@@ -63,6 +63,7 @@
   </section>
 </main>
 <button class="flotante" id="ayuda" type="button" title="¿Necesitas ayuda? Escríbele al taller" style="bottom:calc(86px + env(safe-area-inset-bottom))"></button>
+<script>(function () { const b = document.getElementById('ayuda'); let t = 0; addEventListener('scroll', () => { b.classList.add('cfx-esconde'); clearTimeout(t); t = setTimeout(() => b.classList.remove('cfx-esconde'), 900); }, { passive: true }); })();</script>
 <nav class="tabs">
   <button data-v="inicio"><span class="i">🏠</span>Inicio</button>
   <button data-v="historial"><span class="i">🚲</span>Mi bici</button>
