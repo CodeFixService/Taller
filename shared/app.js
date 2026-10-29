@@ -147,7 +147,7 @@
     // Núcleo (ayuda.js): cabecera común [campana][FREE/PRO][foto], menú de la cuenta, ayuda y sensación Premium.
     const adm = c.rol === 'admin' || c.rol === 'socio';
     window.CFX_AYUDA_PEND = Object.assign(window.CFX_AYUDA_PEND || {}, { rpc, app: 'taller', admin: adm, premium: !!c.premium, id: c.id, hasta: c.premium_hasta || (c.taller && c.taller.premium_hasta),
-      nombre: c.nombre || (c.taller && c.taller.nombre), email: c.email, quitar: '#hRol, #perfilBtn', salir,
+      nombre: c.nombre || (c.taller && c.taller.nombre), email: c.email, quitar: '#hRol, #perfilBtn, #chatBtn', salir,
       cuenta: adm ? '#cuenta' : c.rol === 'cliente' ? '#cuenta' : '#mas/cuenta', panel: adm && !/\/admin\//.test(location.pathname) ? ROOT + 'admin/' : null });
     if (window.CFX_AYUDA) window.CFX_AYUDA.iniciar(window.CFX_AYUDA_PEND);
     return c;
@@ -345,6 +345,7 @@
       try { lista = await rpc('chat_lista'); } catch (e) { return; }
       const n = lista.reduce((a, c) => a + (+c.no_leidos || 0), 0);
       badge.textContent = n; badge.classList.toggle('hidden', !n);
+      document.querySelectorAll('.chat-num').forEach((x) => { x.textContent = n; x.classList.toggle('hidden', !n); });
     }
     btn.onclick = async () => { await cargar(); abrirLista(); };
     function abrirLista() {

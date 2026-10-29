@@ -262,7 +262,7 @@
     const pubk = (pub.config || {}).vapid_publica;
     aBody().innerHTML = '<div class="card"><h2>🔔 Notificaciones al celular</h2><p class="muted" style="margin-top:0">' + (pubk ? '✅ Las claves están creadas.' : '⚠️ Falta crear las claves.') +
       ' La función "servidor" las usa para enviar los avisos (guía, pasos 4 y 5).</p><div class="btns"><button id="kG" class="' + (pubk ? 'ghost' : '') + '">' + (pubk ? 'Crear claves nuevas' : 'Crear claves') + '</button>' +
-      '<button class="alt" id="kP">Probar función servidor</button></div><div id="kPush"></div><p class="sub" id="kR"></p></div>';
+      '<button class="alt" id="kP">Probar función servidor</button><button class="ghost" id="kF">📋 Copiar código de la función</button></div><div id="kPush"></div><p class="sub" id="kR"></p></div>';
     App.ofrecerPush($('kPush'));
     $('kG').onclick = async () => {
       if (pubk && !await confirmar('Al crear claves nuevas, todos deberán activar las notificaciones de nuevo. ¿Seguir?')) return;
@@ -273,6 +273,14 @@
         await rpc('admin_push_claves', { p_publica: b64u(raw), p_privada: jwk.d });
         pub = await App.cargarPublica(); toast('🔔 Claves creadas'); verPush();
       } catch (e) { toast(e.message); }
+    };
+    // Solo si cambia la función "servidor": se pega en Supabase → Edge Functions → servidor → Code → Deploy.
+    $('kF').onclick = async () => {
+      try {
+        const t = (await (await fetch(App.ROOT + 'supabase/functions/servidor/corto.ts?_=' + Date.now(), { cache: 'no-store' })).text()).trim();
+        if (!/import|serve|Deno/.test(t)) throw new Error('no se pudo leer el código');
+        await navigator.clipboard.writeText(t); toast('📋 Copiado: pégalo en Supabase → Edge Functions → servidor → Code → Deploy');
+      } catch (e) { toast('No se pudo copiar: ' + e.message); }
     };
     $('kP').onclick = async () => {
       const { data, error } = await App.sb.functions.invoke('servidor', { body: { accion: 'ping' } });
@@ -299,6 +307,7 @@
     aBody().innerHTML = '<div class="card"><h2>📜 Registro de cambios</h2><ul class="list">' + (l.map((a) => '<li><div class="grow"><b>' + esc(a.accion) + '</b> ' +
       (a.quien_rol === 'socio' ? '<span class="pill info">👥 ' + esc(a.quien_nombre) + '</span> ' : '') + '<span class="sub">' + esc(a.detalle) + '</span></div><span class="sub">' + App.fHora(a.created_at) + '</span></li>').join('') ||
       '<li class="muted">Sin registros.</li>') + '</ul></div>';
+    if (!socio) window.CFX_AJUSTES.registro(aBody(), rpc, { recargar: verRegistro });
   }
 
   // Socios: solo el administrador los crea, suspende o elimina.
@@ -383,7 +392,6 @@
 
   $('cargando').classList.add('hidden');
   App.campana($('campana'));
-  App.chatBoton($('chatBtn'));
   App.pie();
   const h = location.hash.slice(1);
   show(['resumen', 'talleres', 'clientes', 'pagos', 'ajustes'].includes(h) ? h : 'resumen');

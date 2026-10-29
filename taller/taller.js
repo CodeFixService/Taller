@@ -496,6 +496,8 @@
   let subMas = null;
   $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); } };
   function verMas(m) {
+    // Mensajes con los clientes: abre la lista de chats (el botón de la app, escondido arriba).
+    if (m === 'chat') { $('chatBtn').click(); history.replaceState(null, '', '#mas'); m = ''; }
     // Sin sección: menú en cuadrícula (igual en todas las apps). Con sección: la tira de secciones arriba.
     if (!m || ($('mSeg').querySelector('[data-m="' + m + '"]') || {}).classList?.contains('hidden')) {
       subMas = null; $('mSeg').classList.add('hidden');
@@ -506,7 +508,7 @@
     $('mSeg').classList.remove('hidden');
     subMas = m;
     $('mSeg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.m === m));
-    const on = $('mSeg').querySelector('.on'); if (on) on.scrollIntoView({ inline: 'center', block: 'nearest' });
+    const on = $('mSeg').querySelector('.on'); if (on) on.scrollIntoView({ inline: 'nearest', block: 'nearest' });
     ({ perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan,
       equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir })[m]();
   }
