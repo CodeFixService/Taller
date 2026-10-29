@@ -1,7 +1,7 @@
 /* BiciTaller · Service worker: app instalable, funciona con mala señal y recibe notificaciones.
    Siempre intenta traer la versión nueva de internet (así nunca queda una versión vieja);
    si no hay señal, usa la copia guardada. */
-const CACHE = 'bt-v2.18';
+const CACHE = 'bt-v2.19';
 const BASE = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'shared/app.css', 'shared/app.js', 'shared/ayuda.js', 'shared/premium.js', 'shared/humano.js', 'shared/verificar.js', 'shared/pagos.js', 'shared/respaldo.js', 'shared/voz.js', 'shared/fotos.js', 'shared/auto.js', 'shared/barra.js', 'shared/tema.css', 'shared/iconos.js', 'shared/instalar.js', 'shared/config.js', 'shared/vendor/supabase.js', 'shared/vendor/qrcode.js',
   'admin/', 'admin/admin.js', 'taller/', 'taller/taller.js', 'cliente/', 't/', 'r/', 'n/', 'd/'];
@@ -25,7 +25,7 @@ self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch (err) { d = { title: e.data && e.data.text() }; }
   e.waitUntil(self.registration.showNotification(d.title || 'BiciTaller', {
-    body: d.body || '', icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: d.tag, data: { url: d.url || '/' }
+    body: d.body || '', icon: 'icons/icon-192.png', badge: 'icons/badge.png', tag: d.tag, data: { url: d.url || '/' }
   }));
 });
 self.addEventListener('notificationclick', (e) => {
