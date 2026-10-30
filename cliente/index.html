@@ -63,7 +63,11 @@
   </section>
 </main>
 <button class="flotante" id="ayuda" type="button" title="¿Necesitas ayuda? Escríbele al taller" style="bottom:calc(86px + env(safe-area-inset-bottom))"></button>
-<script>(function () { const b = document.getElementById('ayuda'); let t = 0; addEventListener('scroll', () => { b.classList.add('cfx-esconde'); clearTimeout(t); t = setTimeout(() => b.classList.remove('cfx-esconde'), 900); }, { passive: true }); })();</script>
+<script>(function () {
+  // El ❓ va en la cabecera (junto a la campana) apenas esta se arma: flotando tapaba botones de las tarjetas.
+  const b = document.getElementById('ayuda'); let n = 0;
+  const mover = setInterval(() => { const c = document.querySelector('header .cfx-cab'); if (c) { c.insertBefore(b, c.querySelector('.cfx-plan')); b.classList.add('en-cab'); b.removeAttribute('style'); } if (c || ++n > 40) clearInterval(mover); }, 250);
+})();</script>
 <nav class="tabs">
   <button data-v="inicio"><span class="i">🏠</span>Inicio</button>
   <button data-v="historial"><span class="i">🚲</span>Mi bici</button>

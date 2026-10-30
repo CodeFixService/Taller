@@ -246,3 +246,5 @@ footer.pie button { background: none; color: var(--brand); padding: 2px 4px; fon
 body:has(> .flotante) main { padding-bottom: 76px; }
 .flotante { transition: opacity .2s, transform .2s; }
 .flotante.cfx-esconde { opacity: 0; transform: scale(.8); pointer-events: none; }
+.cfx-cab > .flotante.en-cab { position: relative; right: auto; bottom: auto; width: 36px; height: 36px; min-height: 0; font-size: 16px; display: grid; place-items: center; box-shadow: 0 1px 3px rgba(15, 23, 42, .12); }
+.cfx-cab > .flotante.en-cab svg { width: 20px; height: 20px; margin: 0; }
