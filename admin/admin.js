@@ -47,12 +47,9 @@
       [['🚲 Talleres', r.talleres], ['⭐ Talleres Premium', r.talleres_premium], ['🟢 Activos 7 días', r.talleres_activos_7d], ['⏳ Vencen en 7 días', r.por_vencer],
         ['👥 Clientes con cuenta', r.clientes], ['⭐ Clientes Premium', r.clientes_premium], ['🔧 Personas de equipo', r.equipo], ['📅 Reservas este mes', r.reservas_mes],
         ['📅 Reservas hoy', r.reservas_hoy], ['💰 Ingresos del mes', plata(r.ingresos_mes)], ['🆕 Talleres nuevos (7 días)', r.talleres_nuevos_7d == null ? '—' : r.talleres_nuevos_7d]].map((x) => '<div class="card"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>').join('') + '</div>' +
-      '<div class="card"><h2>🖥️ Servidor</h2><div class="sub">Base de datos: ' + MB(u.db_bytes) + ' de ' + MB(u.db_limite) + ' (' + pct + '%) · plan gratis de Supabase</div>' +
-      '<div class="barra"><i class="' + (pct >= 90 ? 'rojo' : pct >= 70 ? 'amarillo' : '') + '" style="width:' + Math.max(pct, 1) + '%"></i></div>' +
-      '<p class="sub">' + (pct >= 90 ? '🔴 Casi lleno: limpia o pasa a Supabase Pro.' : pct >= 70 ? '🟡 Va subiendo: programa una limpieza.' : '🟢 Todo bien.') + '</p>' +
-      '<table>' + tablas.map(([k, v]) => '<tr><td>' + esc(k) + '</td><td class="r">' + MB(v) + '</td></tr>').join('') + '</table>' +
+      '<div class="card"><h2>🧹 Limpieza</h2>' +  // el uso del servidor se ve en el Centro de Mando
       '<p class="sub">Comprobantes guardados: ' + u.comprobantes + ' (' + MB(u.comprobantes_bytes) + ') · Fotos antes/después: ' + (u.fotos || 0) + ' (' + MB(u.fotos_bytes || 0) + ') · Logos: ' + MB(u.logos_bytes) + ' · Avisos: ' + u.notificaciones + ' · Reservas: ' + u.reservas + '</p>' +
-      (socio ? '' : '<h3>🧹 Limpieza</h3><p class="sub" style="margin-top:0">Se hace sola todos los días a las 4 AM. También puedes limpiar ahora:</p>' +
+      (socio ? '' : '<p class="sub">Se hace sola todos los días a las 4 AM. También puedes limpiar ahora:</p>' +
       '<div class="btns"><button class="ghost small" data-l="comprobantes">Comprobantes revisados</button><button class="ghost small" data-l="notificaciones">Avisos viejos</button>' +
       '<button class="ghost small" data-l="fotos">Fotos más antiguas que ' + ((pub.config || {}).dias_fotos || 365) + ' días</button>' +
       '<button class="ghost small" data-l="reservas">Reservas expiradas/rechazadas (+60 días)</button><button class="danger small" data-l="todo">Limpiar todo</button></div>') +
