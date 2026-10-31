@@ -50,13 +50,8 @@
       <h2>👤 Mi cuenta</h2>
       <p class="muted" id="cEmail" style="margin-top:0"></p>
       <div class="aviso"><div class="grow">Tu calificación como cliente: <span id="cNota"></span><div class="sub">La ponen los talleres según puntualidad y trato. Solo se ve el promedio.</div></div></div>
-      <div class="row"><div><label for="cN">Nombre</label><input id="cN" maxlength="80"></div><div><label for="cT">WhatsApp</label><input id="cT" maxlength="30" inputmode="tel"></div></div>
-      <div class="btns"><button id="cG">💾 Guardar</button></div>
-      <label for="cP">Contraseña nueva</label><input id="cP" type="password" autocomplete="new-password">
-      <div class="btns"><button class="alt" id="cPG">Cambiar contraseña</button></div>
-      <div id="cPush"></div><div id="cModo" style="margin-top:12px"></div>
-      <h3>⭐ Mi perfil <span class="pill pro">PREMIUM</span></h3>
-      <div id="cEstilo"></div>
+      <!-- Perfil común del núcleo (CFX_PERFIL): nombre, WhatsApp, foto, ícono y color (Premium), modo, contraseña y notificaciones -->
+      <div id="cPerfil" style="margin-top:12px"></div>
       <div class="btns"><a class="btn ghost hidden" id="tienes">🚀 ¿Tienes un taller? Súmalo gratis</a></div>
       <div class="btns"><button class="danger" id="cSalir">Cerrar sesión</button></div>
     </div>
@@ -119,33 +114,7 @@
       (r.proxima_mantencion ? '<div class="sub">🔔 Próxima mantención: ' + App.fCorta(r.proxima_mantencion) + '</div>' : '') +
       (r.estado === 'completada' && !r.calificada ? '<div class="sub" style="color:var(--brand)">⭐ Toca para calificar al taller</div>' : '') + '</a>').join('') : '<p class="muted" style="margin:0">Aún no tienes visitas completadas.</p>';
     $('cEmail').textContent = yo.email; $('cNota').innerHTML = App.nota(D.mi_nota);
-    pintarEstilo();
-    $('cN').value = yo.nombre; $('cT').value = yo.telefono;
-  }
-
-  // Perfil Premium: foto, color, ícono y descripción.
-  function pintarEstilo() {
-    const COL = ['#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#db2777', '#dc2626', '#ea580c', '#d97706', '#334155', '#111827'];
-    const ICO = ['🚲', '🚴', '🚵', '🏔️', '⚡', '🏁', '😎', '💪'];
-    let foto = yo.foto || '', color = yo.color || '', icono = yo.icono || '';
-    const el = $('cEstilo');
-    if (!D.premium) { el.innerHTML = '<p class="sub" style="margin:0">Con Premium eliges tus colores, tu ícono o tu foto y una descripción. <a href="#plan">Ver Premium</a></p>'; return; }
-    el.innerHTML = '<div class="hero" style="margin:6px 0"><div class="logo" id="eAv"></div><div><label for="eF" class="btn small alt" style="margin:0;color:var(--brand)">📷 Foto</label>' +
-      '<input type="file" id="eF" accept="image/*" class="hidden"> <button class="small ghost" id="eSF" type="button">Quitar</button></div></div>' +
-      '<div class="swatches" id="eC" style="display:flex;flex-wrap:wrap;gap:8px">' + COL.map((c) => '<button type="button" data-c="' + c + '" style="width:34px;height:34px;padding:0;border-radius:50%;background:' + c + '" aria-label="Color"></button>').join('') + '</div>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px" id="eI">' + ICO.map((i) => '<button type="button" class="small ghost" data-i="' + i + '">' + i + '</button>').join('') + '</div>' +
-      '<label for="eD">Descripción</label><textarea id="eD" maxlength="300" placeholder="Ciclista de ruta los fines de semana 🚴">' + esc(yo.descripcion || '') + '</textarea>' +
-      '<div class="btns"><button id="eG" type="button">💾 Guardar mi perfil</button></div>';
-    const prev = () => { App.pintarLogo($('eAv'), { logo: foto, icono: icono || '🚲' }); $('eAv').style.backgroundColor = color || ''; };
-    prev();
-    $('eF').onchange = async (e) => { const f = e.target.files[0]; if (!f) return; try { foto = await App.comprimirLogo(f); prev(); } catch (err) { toast(err.message); } };
-    $('eSF').onclick = () => { foto = ''; prev(); };
-    $('eC').onclick = (e) => { const b = e.target.closest('[data-c]'); if (b) { color = b.dataset.c; App.tema(color); prev(); } };
-    $('eI').onclick = (e) => { const b = e.target.closest('[data-i]'); if (b) { icono = b.dataset.i; prev(); } };
-    $('eG').onclick = async () => {
-      try { await rpc('cliente_estilo', { p_color: color, p_icono: icono, p_foto: foto, p_descripcion: $('eD').value }); Object.assign(yo, { foto, color, icono, descripcion: $('eD').value }); toast('💾 Perfil guardado'); cargar(); }
-      catch (e) { toast(e.message); }
-    };
+    if (window.CFX_PERFIL && !$('cPerfil').dataset.pf) { $('cPerfil').dataset.pf = '1'; window.CFX_PERFIL.montar($('cPerfil'), { alGuardar: () => { Object.assign(yo, App.cuenta); return cargar(); } }); }
   }
 
   // Premium: precios y pago comunes a las 6 apps (núcleo: cfx_pago_estado y pagos.js).
@@ -174,10 +143,6 @@
   App.campana($('campana'));
   App.chatBoton($('ayuda'), '❓');
   $('tienes').href = '../n/#taller'; $('tienes').classList.remove('hidden');
-  App.ofrecerPush($('cPush'));
-  App.selectorModo($('cModo'));
-  $('cG').onclick = async () => { try { await rpc('mi_perfil_guardar', { p_nombre: $('cN').value, p_telefono: $('cT').value }); toast('💾 Guardado'); } catch (e) { toast(e.message); } };
-  $('cPG').onclick = async () => { const { error } = await App.sb.auth.updateUser({ password: $('cP').value }); toast(error ? App.friendly(error) : '🔑 Contraseña cambiada'); };
   $('cSalir').onclick = () => App.salir();
   const linkTaller = () => App.ROOT + 't/?s=' + encodeURIComponent(D.taller.slug);
   $('invCompartir').onclick = () => App.compartir(linkTaller(), '🚲 Yo llevo mi bici a ' + D.taller.nombre + '. Reserva tu hora aquí y sigue tu bici desde el celular', D.taller.nombre);

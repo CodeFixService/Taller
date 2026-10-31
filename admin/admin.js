@@ -346,43 +346,18 @@
     };
   }
 
+  // Nombre, WhatsApp, color de la app, modo, contraseña y notificaciones: perfil común del núcleo (CFX_PERFIL).
   function verCuenta() {
     const sop = String((pub.config || {}).soporte_whatsapp || '');
-    let color = (pub.config || {}).color_app || '#16a34a';
-    aBody().innerHTML = '<div class="card"><h2>👤 Mi perfil</h2><p class="muted" style="margin-top:0">' + esc(yo.email) + ' · ' + (socio ? 'Socio' : 'Administrador') + '</p>' +
-      '<div class="row"><div><label for="uN">Nombre</label><input id="uN" maxlength="80" value="' + esc(yo.nombre || '') + '"></div>' +
-      '<div><label for="uT">WhatsApp</label><input id="uT" inputmode="tel" maxlength="30" placeholder="+56 9 1234 5678" value="' + esc(yo.telefono || (socio ? '' : sop)) + '"></div></div>' +
-      (socio ? '' : '<label class="check"><input type="checkbox" id="uSop"' + (!sop || App.telNorm(sop) === App.telNorm(yo.telefono || sop) ? ' checked' : '') + '> Usarlo como WhatsApp de soporte (los talleres y clientes te escriben a este número)</label>') +
-      '<div class="btns"><button id="uG">💾 Guardar perfil</button></div></div>' +
-      '<div class="card"><h2>🎨 Apariencia</h2>' + (socio ? '' : '<label>Color de la app (inicio, registro, directorio y este panel)</label><div class="swatch-row" id="uCol">' +
-        App.COLORES.map((c) => '<button type="button" data-c="' + c + '" style="background:' + c + '" aria-label="Color ' + c + '"></button>').join('') +
-        '<input type="color" id="uColor" value="' + esc(color) + '" style="width:50px;height:36px;padding:2px" aria-label="Otro color"></div>' +
-        '<div class="btns"><button class="alt" id="uCG">💾 Guardar color</button></div>') +
-      '<div id="uModo" style="margin-top:8px"></div><p class="sub">Cada taller elige sus propios colores en Más → Perfil; los clientes Premium, en su cuenta.</p></div>' +
-      '<div class="card"><h2>🔑 Seguridad</h2><label for="uP">Contraseña nueva</label><input id="uP" type="password" autocomplete="new-password">' +
-      '<div class="btns"><button class="alt" id="uPG">Cambiar contraseña</button><button class="danger" id="uS">Cerrar sesión</button></div></div>';
-    App.selectorModo($('uModo'));
-    const marcar = () => { const r = $('uCol'); if (r) r.querySelectorAll('[data-c]').forEach((b) => b.classList.toggle('on', b.dataset.c === color)); App.tema(color); };
-    if ($('uCol')) {
-      marcar();
-      $('uCol').onclick = (e) => { const b = e.target.closest('[data-c]'); if (b) { color = b.dataset.c; $('uColor').value = color; marcar(); } };
-      $('uColor').oninput = () => { color = $('uColor').value; marcar(); };
-      $('uCG').onclick = async () => {
-        try { await rpc('admin_config_guardar', { p_clave: 'color_app', p_valor: color }); pub = await App.cargarPublica(); toast('🎨 Color guardado'); }
-        catch (e) { toast(e.message); }
-      };
-    }
-    $('uG').onclick = async () => {
-      try {
-        await rpc('mi_perfil_guardar', { p_nombre: $('uN').value, p_telefono: $('uT').value });
-        Object.assign(yo, { nombre: $('uN').value.trim(), telefono: $('uT').value.trim() });
-        if (!socio && $('uSop').checked && $('uT').value.trim() !== sop) {
-          await rpc('admin_config_guardar', { p_clave: 'soporte_whatsapp', p_valor: $('uT').value.trim() }); pub = await App.cargarPublica();
-        }
-        toast('💾 Perfil guardado');
-      } catch (e) { toast(e.message); }
+    aBody().innerHTML = '<div class="card" id="uPerfil"></div>' +
+      (socio ? '' : '<div class="card"><h2>📲 WhatsApp de soporte</h2><p class="sub" style="margin-top:0">Los talleres y clientes te escriben a este número.</p>' +
+        '<input id="uSopT" inputmode="tel" maxlength="30" placeholder="+56 9 1234 5678" value="' + esc(sop || yo.telefono || '') + '"><div class="btns"><button id="uSopG">💾 Guardar</button></div></div>') +
+      '<p class="sub">Cada taller elige sus propios colores en Más → Perfil; los clientes Premium, en su cuenta.</p>' +
+      '<div class="btns"><button class="danger" id="uS">Cerrar sesión</button></div>';
+    window.CFX_PERFIL.montar($('uPerfil'), { alGuardar: async () => { Object.assign(yo, App.cuenta); pub = await App.cargarPublica(); } });
+    if ($('uSopG')) $('uSopG').onclick = async () => {
+      try { await rpc('admin_config_guardar', { p_clave: 'soporte_whatsapp', p_valor: $('uSopT').value.trim() }); pub = await App.cargarPublica(); toast('💾 Guardado'); } catch (e) { toast(e.message); }
     };
-    $('uPG').onclick = async () => { const { error } = await App.sb.auth.updateUser({ password: $('uP').value }); toast(error ? App.friendly(error) : '🔑 Contraseña cambiada'); };
     $('uS').onclick = () => App.salir();
   }
 

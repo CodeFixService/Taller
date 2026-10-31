@@ -848,23 +848,18 @@
 
   // ---- Mi cuenta
   function verCuenta() {
-    body().innerHTML = '<div class="card"><h2>👤 Mi cuenta</h2><p class="muted" style="margin-top:0">' + esc(yo.email) + ' · ' + (yo.rol === 'taller' ? 'Dueño del taller' : 'Equipo') + '</p>' +
-      '<div class="row"><div><label for="uN">Nombre</label><input id="uN" maxlength="80" value="' + esc(yo.nombre) + '"></div><div><label for="uT">Teléfono</label><input id="uT" maxlength="30" value="' + esc(yo.telefono) + '"></div></div>' +
-      '<div class="btns"><button id="uG">💾 Guardar</button></div>' +
-      '<label for="uP">Contraseña nueva</label><input id="uP" type="password" autocomplete="new-password"><div class="btns"><button class="alt" id="uPG">Cambiar contraseña</button></div>' +
-      '<div id="uPush"></div><div id="uModo" style="margin-top:12px"></div><div id="uSop" style="margin-top:12px"></div>' +
+    // Nombre, WhatsApp, modo, contraseña y notificaciones: perfil común del núcleo (CFX_PERFIL).
+    body().innerHTML = '<div class="card" id="uPerfil"></div><div class="card"><p class="muted" style="margin-top:0">' + esc(yo.email) + ' · ' + (yo.rol === 'taller' ? 'Dueño del taller' : 'Equipo') + '</p>' +
+      '<div id="uSop"></div>' +
       (P.dueno ? '<h3>🧹 Comprobantes</h3><p class="sub" style="margin:0">Se borran solos a los ' + ((pub.config || {}).dias_comprobantes || 30) + ' días. Descarga los que quieras guardar antes de limpiar.</p>' +
         '<div class="btns"><button class="ghost" id="uLimpiar">Borrar comprobantes ya revisados</button></div>' +
         '<h3>🪪 Identidad</h3><div class="btns"><button class="ghost" id="uVerif">🪪 Verificar mi identidad</button></div>' +
         '<h3>💾 Respaldo</h3><p class="sub" style="margin:0">Descarga en Excel tus reservas, clientes, servicios, promociones y calificaciones. Los avisos y mensajes se borran solos a los 30 días (te avisamos antes).</p>' +
         '<div class="btns"><button class="ghost" id="uRespaldo">⬇️ Descargar respaldo (Excel)</button></div>' : '') +
       '<div class="btns"><button class="danger" id="uSalir">Cerrar sesión</button></div></div>';
-    App.ofrecerPush($('uPush'));
-    App.selectorModo($('uModo'));
+    window.CFX_PERFIL.montar($('uPerfil'), { alGuardar: () => { Object.assign(yo, App.cuenta); } });
     const sop = (pub.config || {}).soporte_whatsapp;
     if (sop) $('uSop').innerHTML = '<a class="btn alt block" target="_blank" rel="noopener" href="' + App.wa(sop, 'Hola 👋 Soy ' + yo.nombre + ' de ' + P.taller.nombre + ' (BiciTaller).') + '">📲 Escribir al soporte por WhatsApp</a>';
-    $('uG').onclick = async () => { try { await rpc('mi_perfil_guardar', { p_nombre: $('uN').value, p_telefono: $('uT').value }); toast('💾 Guardado'); } catch (e) { toast(e.message); } };
-    $('uPG').onclick = async () => { const { error } = await sb.auth.updateUser({ password: $('uP').value }); toast(error ? App.friendly(error) : '🔑 Contraseña cambiada'); };
     $('uSalir').onclick = () => App.salir();
     if ($('uVerif')) $('uVerif').onclick = () => CFX_VERIFICAR.abrir({ rpc });
     const ur = $('uRespaldo');

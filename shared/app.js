@@ -149,8 +149,42 @@
     window.CFX_AYUDA_PEND = Object.assign(window.CFX_AYUDA_PEND || {}, { rpc, app: 'taller', admin: adm, socio: c.rol === 'socio', premium: !!c.premium, id: c.id, hasta: c.premium_hasta || (c.taller && c.taller.premium_hasta),
       nombre: c.nombre || (c.taller && c.taller.nombre), email: c.email, quitar: '#hRol, #perfilBtn, #chatBtn', salir,
       cuenta: adm ? '#cuenta' : c.rol === 'cliente' ? '#cuenta' : '#mas/cuenta', panel: adm && !/\/admin\//.test(location.pathname) ? ROOT + 'admin/' : null });
+    window.CFX_PERFIL_APP = perfilApp(c);
     if (window.CFX_AYUDA) window.CFX_AYUDA.iniciar(window.CFX_AYUDA_PEND);
     return c;
+  }
+  // Perfil común del núcleo (ayuda.js → CFX_PERFIL): aquí solo cómo guarda BiciTaller.
+  //   Cliente Premium: foto, ícono, color y descripción (cliente_estilo). Admin: el color es el de la app (color_app). Taller: sus colores van en Más → Perfil del taller.
+  function perfilApp(c) {
+    const cli = c.rol === 'cliente', prem = () => !!(cuenta && cuenta.premium);
+    const estilo = async (o) => { await rpc('cliente_estilo', Object.assign({ p_color: cuenta.color || '', p_icono: cuenta.icono || '', p_foto: cuenta.foto || '', p_descripcion: cuenta.descripcion || '' }, o)); await refrescar(); };
+    const ad = {
+      nombre: () => cuenta.nombre || '', correo: () => cuenta.email,
+      campos: () => [{ k: 'telefono', t: 'WhatsApp', tipo: 'tel', max: 30, ph: '+56 9 1234 5678', v: cuenta.telefono || '' }]
+        .concat(cli && prem() ? [{ k: 'descripcion', t: 'Descripción', tipo: 'area', max: 300, ph: 'Ciclista de ruta los fines de semana 🚴', v: cuenta.descripcion || '' }] : []),
+      guardar: async (d) => {
+        await rpc('mi_perfil_guardar', { p_nombre: d.nombre, p_telefono: d.telefono });
+        if (cli && prem()) await estilo({ p_icono: d.icono || '', p_descripcion: d.descripcion || '' }); else await refrescar();
+      },
+      modo: () => { try { return localStorage.getItem('bt:modo') || 'auto'; } catch (e) { return 'auto'; } },
+      guardarModo: (m) => { try { localStorage.setItem('bt:modo', m); } catch (e) { /* nada */ } aplicarModo(); },
+      clave: async (n) => { const { error } = await sb.auth.updateUser({ password: n }); if (error) throw new Error(friendly(error)); }
+    };
+    if (cli) {
+      return Object.assign(ad, {
+        foto: () => cuenta.foto || '', guardarFoto: async (f) => estilo({ p_foto: f ? await comprimirLogo(f) : '' }),
+        iconos: ['🚲', '🚴', '🚵', '🏔️', '⚡', '🏁', '😎', '💪'], icono: () => cuenta.icono || '',
+        colores: ['#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#db2777', '#dc2626', '#ea580c', '#d97706', '#334155', '#111827'], libre: false,
+        color: () => cuenta.color || '', guardarColor: async (x) => { await estilo({ p_color: x }); tema(x); },
+        bloqueo: (que) => (prem() ? '' : 'Personalizar tu perfil'),
+        mejorar: () => { toast('⭐ Con Premium eliges tus colores, tu ícono o tu foto y una descripción'); location.hash = 'plan'; }
+      });
+    }
+    if (c.rol === 'admin') {
+      return Object.assign(ad, { colores: COLORES, libre: true, color: () => ((publica && publica.config) || {}).color_app || '#16a34a', probarColor: tema,
+        guardarColor: async (x) => { await rpc('admin_config_guardar', { p_clave: 'color_app', p_valor: x }); await cargarPublica(); tema(x); } });
+    }
+    return Object.assign(ad, { guardarColor: null });
   }
   async function entrar(email, password) {
     const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
