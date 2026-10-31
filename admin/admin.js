@@ -40,15 +40,13 @@
     pub = await App.cargarPublica();
     try { r = await rpc('admin_resumen'); }
     catch (e) { $('v-resumen').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
-    const u = r.uso, pct = Math.round(100 * u.db_bytes / u.db_limite);
-    const tablas = Object.entries(u.tablas).sort((a, b) => b[1] - a[1]);
     $('v-resumen').innerHTML =
       '<div class="stats">' +
       [['🚲 Talleres', r.talleres], ['⭐ Talleres Premium', r.talleres_premium], ['🟢 Activos 7 días', r.talleres_activos_7d], ['⏳ Vencen en 7 días', r.por_vencer],
         ['👥 Clientes con cuenta', r.clientes], ['⭐ Clientes Premium', r.clientes_premium], ['🔧 Personas de equipo', r.equipo], ['📅 Reservas este mes', r.reservas_mes],
         ['📅 Reservas hoy', r.reservas_hoy], ['💰 Ingresos del mes', plata(r.ingresos_mes)], ['🆕 Talleres nuevos (7 días)', r.talleres_nuevos_7d == null ? '—' : r.talleres_nuevos_7d]].map((x) => '<div class="card"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>').join('') + '</div>' +
       '<div class="card"><h2>🧹 Limpieza</h2>' +  // el uso del servidor se ve en el Centro de Mando
-      '<p class="sub">Comprobantes guardados: ' + u.comprobantes + ' (' + MB(u.comprobantes_bytes) + ') · Fotos antes/después: ' + (u.fotos || 0) + ' (' + MB(u.fotos_bytes || 0) + ') · Logos: ' + MB(u.logos_bytes) + ' · Avisos: ' + u.notificaciones + ' · Reservas: ' + u.reservas + '</p>' +
+
       (socio ? '' : '<p class="sub">Se hace sola todos los días a las 4 AM. También puedes limpiar ahora:</p>' +
       '<div class="btns"><button class="ghost small" data-l="comprobantes">Comprobantes revisados</button><button class="ghost small" data-l="notificaciones">Avisos viejos</button>' +
       '<button class="ghost small" data-l="fotos">Fotos más antiguas que ' + ((pub.config || {}).dias_fotos || 365) + ' días</button>' +
@@ -301,7 +299,7 @@
   async function verRegistro() {
     let l = [];
     try { l = await rpc('admin_auditoria'); } catch (e) { aBody().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
-    aBody().innerHTML = '<div class="card"><h2>📜 Registro de cambios</h2><ul class="list">' + (l.map((a) => '<li><div class="grow"><b>' + esc(a.accion) + '</b> ' +
+    aBody().innerHTML = '<div class="card"><ul class="list">' + (l.map((a) => '<li><div class="grow"><b>' + esc(a.accion) + '</b> ' +
       (a.quien_rol === 'socio' ? '<span class="pill info">👥 ' + esc(a.quien_nombre) + '</span> ' : '') + '<span class="sub">' + esc(a.detalle) + '</span></div><span class="sub">' + App.fHora(a.created_at) + '</span></li>').join('') ||
       '<li class="muted">Sin registros.</li>') + '</ul></div>';
     if (!socio) window.CFX_AJUSTES.registro(aBody(), rpc, { recargar: verRegistro });

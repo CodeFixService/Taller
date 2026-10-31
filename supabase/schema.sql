@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.9'::text $$;
+language sql immutable as $$ select '2.10'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -1447,7 +1447,7 @@ begin
   where id = r.id;
   perform public.avisar(r.cliente_id,
     case p_estado when 'recibida' then '🚲 Recibimos tu bici' when 'en_reparacion' then '🔧 Tu bici está en reparación'
-      when 'esperando_repuesto' then '📦 Esperando un repuesto' when 'lista' then '✅ ¡Tu bici está lista!'
+      when 'esperando_repuesto' then '📦 Esperando un repuesto' when 'lista' then '🔧 Tu bici está lista para retiro'
       when 'completada' then '🎉 ¡Gracias por venir!' when 'no_asistio' then '🚫 No llegaste a tu hora'
       when 'cancelada' then '❌ El taller canceló tu reserva' else '📅 Reserva actualizada' end,
     c.nombre || ' · ' || to_char(r.fecha, 'DD/MM'), '/r/?t=' || r.token);
@@ -1457,10 +1457,11 @@ end $$;
 create or replace function public.taller_trabajo(p_id uuid, p_items jsonb, p_diagnostico text, p_notas text,
   p_mecanico uuid, p_proxima date) returns void
 language plpgsql security definer set search_path = '' as $$
-declare tid uuid := public.taller_de(auth.uid()); tot int;
+declare tid uuid := public.taller_de(auth.uid()); tot int; antes uuid; r public.reservas;
 begin
   if tid is null then raise exception 'Sin acceso'; end if;
   if jsonb_typeof(p_items) <> 'array' then raise exception 'Ítems no válidos'; end if;
+  select mecanico_id into antes from public.reservas where id = p_id and taller_id = tid;
   if p_mecanico is not null and not exists (select 1 from public.perfiles where id = p_mecanico and taller_id = tid and rol in ('taller', 'equipo')) then
     raise exception 'Mecánico no válido';
   end if;
@@ -1468,8 +1469,14 @@ begin
     into tot from jsonb_array_elements(p_items) i;
   update public.reservas set items = p_items, total = tot, diagnostico = left(coalesce(p_diagnostico, ''), 1000),
     notas_internas = left(coalesce(p_notas, ''), 1000), mecanico_id = p_mecanico, proxima_mantencion = p_proxima, updated_at = now()
-  where id = p_id and taller_id = tid;
-  if not found then raise exception 'Reserva no encontrada'; end if;
+  where id = p_id and taller_id = tid
+  returning * into r;
+  if r.id is null then raise exception 'Reserva no encontrada'; end if;
+  -- Al mecánico que le asignan la reserva (si no se la asignó él mismo).
+  if p_mecanico is not null and p_mecanico is distinct from antes and p_mecanico <> auth.uid() then
+    perform public.avisar(p_mecanico, '📅 Te asignaron una reserva',
+      coalesce(nullif(r.nombre, ''), 'Cliente') || ' · ' || to_char(r.fecha, 'DD/MM') || ' ' || to_char(r.hora, 'HH24:MI'), '/taller/#agenda');
+  end if;
 end $$;
 
 -- Reserva hecha por el taller (teléfono, mesón): sin abono.
@@ -3118,6 +3125,28 @@ begin
   return n;
 end $$;
 
+-- ---------- Nueva versión disponible: push a todos al liberar (una sola vez por versión) ----------
+-- La llama el Centro de Mando después de liberar (Apps → Liberar) con las notas que se escriben ahí.
+create table if not exists public.cfx_versiones (version text primary key, notas text not null default '', avisados int not null default 0, creado timestamptz not null default now());
+alter table public.cfx_versiones enable row level security;
+create or replace function public.cfx_avisar_version(p_version text, p_notas text default '', p_app text default '') returns int
+language plpgsql security definer set search_path = '' as $$
+declare u uuid; n int := 0; v text := trim(coalesce(p_version, '')); nt text := left(trim(coalesce(p_notas, '')), 140);
+begin
+  perform public.admin_check();
+  if v !~ '^[0-9]+(\.[0-9]+){0,3}$' then raise exception 'Versión no válida'; end if;
+  if exists (select 1 from public.cfx_versiones where version = v) then return 0; end if;
+  for u in select * from public.cfx_destinatarios('todos') loop
+    perform public.cfx_avisar(u, '🚀 Nueva versión disponible', left(coalesce(nullif(trim(p_app), '') || ' ', '') || 'v' || v || case when nt <> '' then ' · ' || nt else '' end || '. Se actualiza sola al abrirla.', 240));
+    n := n + 1;
+  end loop;
+  insert into public.cfx_versiones (version, notas, avisados) values (v, nt, n);
+  perform public.cfx_anotar('version', 'v' || v || ' avisada a ' || n);
+  return n;
+end $$;
+revoke execute on function public.cfx_avisar_version(text, text, text) from public, anon;
+grant execute on function public.cfx_avisar_version(text, text, text) to authenticated;
+
 -- ---------- Keys de Premium (de un solo uso). Se guardan cifradas: el código completo solo se ve al crearlas. ----------
 create or replace function public.cfx_keys_crear(p_n int, p_rol text, p_dias int, p_nota text default '') returns jsonb
 language plpgsql security definer set search_path = '' as $$
@@ -3653,7 +3682,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bloqueos', 'public.calificaciones', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_cupones', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_pagos', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.perfiles', 'public.planes', 'public.promos', 'public.push_subs', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bloqueos', 'public.calificaciones', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_cupones', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_pagos', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.perfiles', 'public.planes', 'public.promos', 'public.push_subs', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
