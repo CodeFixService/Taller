@@ -96,7 +96,7 @@
       if (!t.direccion) falta.push(['perfil', 'Escribe tu dirección']);
     }
     $('bienvenida').innerHTML = falta.length ? '<div class="card"><h2>👋 ' + esc(App.txt('bienvenida_taller') ? 'Para empezar' : '') + '</h2><p class="muted" style="margin-top:0">' +
-      esc(App.txt('bienvenida_taller')) + '</p><ul class="list">' + falta.map((f) => '<li class="clic" data-m="' + f[0] + '"><span class="grow">◻️ ' + esc(f[1]) + '</span><span>›</span></li>').join('') + '</ul></div>' : '';
+      esc(App.txt('bienvenida_taller')) + '</p><ul class="list">' + falta.map((f) => '<li class="clic" data-m="' + f[0] + '" style="display:flex;align-items:center;gap:12px"><span aria-hidden="true" style="flex:none;width:22px;height:22px;border-radius:50%;border:2px solid color-mix(in srgb,var(--brand,#0ea5e9) 55%,transparent)"></span><span class="grow">' + esc(f[1]) + '</span><span>›</span></li>').join('') + '</ul></div>' : '';
     $('hLink').textContent = linkReservas(); $('hAbrir').href = linkReservas();
     $('kRev').textContent = P.por_revisar; $('kDev').textContent = P.por_devolver;
     // Plan

@@ -154,7 +154,7 @@ nav.cfx-barra > .cfx-mas .cfx-ico { display: grid !important; place-items: cente
 nav.cfx-barra > .cfx-mas .cfx-ico svg { display: block !important; margin: 0 !important; flex: none !important; }
 /* Computador: el contenido de cada pestaña centrado y con ancho máximo (a la derecha del menú lateral, sin espacio vacío) */
 @media (min-width: 900px) {
-  body.cfx-con-barra main, body.cfx-con-barra .cfx-centro { width: auto !important; max-width: 1040px !important; margin-left: auto !important; margin-right: auto !important; box-sizing: border-box; }
+  body.cfx-con-barra main, body.cfx-con-barra .cfx-centro { width: auto !important; max-width: 960px !important; margin-left: auto !important; margin-right: auto !important; box-sizing: border-box; }
   body.cfx-con-barra .con-nav { padding-left: 0 !important; }
 }
 /* ===== Núcleo 2.3 · Barra lista, espacio vacío, centrado y diseño moderno ===== */
@@ -252,3 +252,16 @@ input::placeholder, textarea::placeholder { text-overflow: ellipsis; opacity: .7
 /* Botones: el texto en una línea y el ícono al centro con el texto. */
 button, .btn, a.btn, .chip { align-items: center; }
 .chip, .seg > button, .tabs > button, .cp-tabs > button { white-space: nowrap; }
+/* ===== Núcleo 2.20 · Lo último de cada pestaña nunca queda bajo la barra ni el + (barra 62 px + mitad del + + 16 px) ===== */
+@media (max-width: 899px) {
+  body.cfx-con-barra { padding-bottom: calc(112px + env(safe-area-inset-bottom)) !important; }
+  body.cfx-con-barra .cfx-pad-barra { padding-bottom: calc(112px + env(safe-area-inset-bottom)) !important; }
+}
+/* Botones chicos (chips, ✕) con alto táctil de 40 px */
+button.chip, a.chip, [role="button"].chip { min-height: 40px; }
+/* Computador: el contenido centrado, sin estirarse a todo el ancho; tarjetas de números en grilla pareja */
+@media (min-width: 900px) {
+  body.cfx-con-barra .con-nav > main, body.cfx-con-barra .cfx-centrado { max-width: 960px !important; margin-left: auto !important; margin-right: auto !important; }
+  /* Tarjetas de números: llenan la fila pareja (auto-fit), sin hueco a la derecha */
+  .stats, .kpis, .cfx-kpis { display: grid !important; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) !important; gap: 12px !important; }
+}
