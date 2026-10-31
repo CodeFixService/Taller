@@ -495,24 +495,36 @@
      ===================================================================== */
   let subMas = null;
   $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); } };
-  function verMas(m) {
-    // Mensajes con los clientes: abre la lista de chats (el botón de la app, escondido arriba).
-    if (m === 'chat') { $('chatBtn').click(); history.replaceState(null, '', '#mas'); m = ''; }
-    // Sin sección: menú en cuadrícula (igual en todas las apps). Con sección: la tira de secciones arriba.
-    if (!m || ($('mSeg').querySelector('[data-m="' + m + '"]') || {}).classList?.contains('hidden')) {
-      subMas = null; $('mSeg').classList.add('hidden');
-      body().innerHTML = '<div class="cfx-grilla">' + [...$('mSeg').querySelectorAll('button[data-m]:not(.hidden)')].map((b) => '<button type="button" data-m="' + b.dataset.m + '">' + b.innerHTML + '</button>').join('') + '</div>';
-      body().querySelectorAll('[data-m]').forEach((b) => { b.onclick = () => { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); }; });
-      return;
+  // Más = menú común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (body() dibuja dentro de ella).
+  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller',
+    stats: 'Ventas y clientes', recordar: 'Ventas y clientes', plan: 'Tu plan', cuenta: 'Configuración' };
+  const K2 = { plan: 'premium', cuenta: 'micuenta', chat: 'mensajes' };
+  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', cuenta: '👤' };
+  let hojaMas = null;
+  function abrirSec(m) {
+    if (m === 'chat') { $('chatBtn').click(); return; }
+    const b = $('mSeg').querySelector('[data-m="' + m + '"]'); if (!b || b.classList.contains('hidden')) return;
+    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir };
+    if (!hojaMas || hojaMas.m !== m || !hojaMas.h.d.isConnected) {
+      const h = window.CFX_MENU.hoja((ICO[m] || '') + ' ' + esc(b.textContent.replace(/\d+$/, '').replace(/^[^\p{L}]+/u, '').trim()), () => { if (hojaMas && hojaMas.h === h) { hojaMas = null; subMas = null; } });
+      hojaMas = { m, h };
     }
-    $('mSeg').classList.remove('hidden');
     subMas = m;
-    $('mSeg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.m === m));
-    const on = $('mSeg').querySelector('.on'); if (on) on.scrollIntoView({ inline: 'nearest', block: 'nearest' });
-    ({ perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan,
-      equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir })[m]();
+    F[m]();
   }
-  const body = () => $('mBody');
+  function verMas(m) {
+    $('mSeg').classList.add('hidden');
+    if (!$('mBody').querySelector(':scope > .cfx-aj-w')) {
+      $('mBody').innerHTML = '';
+      const L = [...$('mSeg').querySelectorAll('button[data-m]:not(.hidden)')].map((b) => {
+        const t = b.textContent.replace(/\d+$/, '').replace(/^[^\p{L}]+/u, '').trim();
+        return { k: K2[b.dataset.m] || b.dataset.m, ico: ICO[b.dataset.m] || '•', t: b.dataset.m === 'cuenta' ? 'Mi cuenta' : t, d: b.dataset.m === 'cuenta' ? 'Identidad, respaldo y soporte' : '', grupo: GRUPO[b.dataset.m] || 'Tu taller', accion: () => abrirSec(b.dataset.m) };
+      });
+      window.CFX_MENU.montar($('mBody'), L, { perfil: { alGuardar: () => { Object.assign(yo, App.cuenta); } } });
+    }
+    if (m) abrirSec(m);
+  }
+  const body = () => (hojaMas && hojaMas.h.d.isConnected ? hojaMas.h.zona : $('mBody'));
 
   // ---- Compartir: link y QR de reservas (clientes) y de invitación (otros talleres)
   async function verCompartir() {
@@ -848,8 +860,8 @@
 
   // ---- Mi cuenta
   function verCuenta() {
-    // Nombre, WhatsApp, modo, contraseña y notificaciones: perfil común del núcleo (CFX_PERFIL).
-    body().innerHTML = '<div class="card" id="uPerfil"></div><div class="card"><p class="muted" style="margin-top:0">' + esc(yo.email) + ' · ' + (yo.rol === 'taller' ? 'Dueño del taller' : 'Equipo') + '</p>' +
+    // Nombre, WhatsApp, modo, contraseña y notificaciones: en Configuración del menú Más (perfil común del núcleo).
+    body().innerHTML = '<div class="card"><p class="muted" style="margin-top:0">' + esc(yo.email) + ' · ' + (yo.rol === 'taller' ? 'Dueño del taller' : 'Equipo') + '</p>' +
       '<div id="uSop"></div>' +
       (P.dueno ? '<h3>🧹 Comprobantes</h3><p class="sub" style="margin:0">Se borran solos a los ' + ((pub.config || {}).dias_comprobantes || 30) + ' días. Descarga los que quieras guardar antes de limpiar.</p>' +
         '<div class="btns"><button class="ghost" id="uLimpiar">Borrar comprobantes ya revisados</button></div>' +
@@ -857,7 +869,6 @@
         '<h3>💾 Respaldo</h3><p class="sub" style="margin:0">Descarga en Excel tus reservas, clientes, servicios, promociones y calificaciones. Los avisos y mensajes se borran solos a los 30 días (te avisamos antes).</p>' +
         '<div class="btns"><button class="ghost" id="uRespaldo">⬇️ Descargar respaldo (Excel)</button></div>' : '') +
       '<div class="btns"><button class="danger" id="uSalir">Cerrar sesión</button></div></div>';
-    window.CFX_PERFIL.montar($('uPerfil'), { alGuardar: () => { Object.assign(yo, App.cuenta); } });
     const sop = (pub.config || {}).soporte_whatsapp;
     if (sop) $('uSop').innerHTML = '<a class="btn alt block" target="_blank" rel="noopener" href="' + App.wa(sop, 'Hola 👋 Soy ' + yo.nombre + ' de ' + P.taller.nombre + ' (BiciTaller).') + '">📲 Escribir al soporte por WhatsApp</a>';
     $('uSalir').onclick = () => App.salir();

@@ -46,14 +46,11 @@
   </section>
 
   <section class="view" id="v-cuenta">
-    <!-- Perfil común del núcleo (CFX_PERFIL), siempre arriba: nombre, WhatsApp, foto, ícono y color (Premium), modo, contraseña y notificaciones -->
-    <div class="card" id="cPerfil"></div>
-    <div class="card">
-      <h2>👤 Mi cuenta</h2>
+    <!-- Menú común del núcleo (CFX_MENU): perfil arriba, tu calificación y Cuenta y ayuda; cada opción se abre en una hoja -->
+    <div id="cPerfil"></div>
+    <div class="card cfx-oc" id="cCalif">
       <p class="muted" id="cEmail" style="margin-top:0"></p>
       <div class="aviso"><div class="grow">Tu calificación como cliente: <span id="cNota"></span><div class="sub">La ponen los talleres según puntualidad y trato. Solo se ve el promedio.</div></div></div>
-      <div class="btns"><a class="btn ghost hidden" id="tienes">🚀 ¿Tienes un taller? Súmalo gratis</a></div>
-      <div class="btns"><button class="danger" id="cSalir">Cerrar sesión</button></div>
     </div>
   </section>
 </main>
@@ -114,7 +111,10 @@
       (r.proxima_mantencion ? '<div class="sub">🔔 Próxima mantención: ' + App.fCorta(r.proxima_mantencion) + '</div>' : '') +
       (r.estado === 'completada' && !r.calificada ? '<div class="sub" style="color:var(--brand)">⭐ Toca para calificar al taller</div>' : '') + '</a>').join('') : '<p class="muted" style="margin:0">Aún no tienes visitas completadas.</p>';
     $('cEmail').textContent = yo.email; $('cNota').innerHTML = App.nota(D.mi_nota);
-    if (window.CFX_PERFIL && !$('cPerfil').dataset.pf) { $('cPerfil').dataset.pf = '1'; window.CFX_PERFIL.montar($('cPerfil'), { alGuardar: () => { Object.assign(yo, App.cuenta); return cargar(); } }); }
+    if (window.CFX_MENU && !$('cPerfil').dataset.pf) { $('cPerfil').dataset.pf = '1'; window.CFX_MENU.montar($('cPerfil'), [
+      { k: 'calif', ico: '⭐', t: 'Mi calificación como cliente', d: 'Puntualidad y trato', grupo: 'Tu cuenta', nodo: $('cCalif') },
+      { k: 'premium', ico: '💎', t: D.premium ? 'Mi Premium' : 'Hazte Premium', dato: D.premium ? 'Premium' : 'Free', grupo: 'Tu cuenta', accion: () => document.querySelector('nav.tabs [data-v="plan"]').click() },
+      { k: 'tienes', ico: '🚀', t: '¿Tienes un taller?', d: 'Súmalo gratis', grupo: 'Tu cuenta', ir: '../n/#taller' }], { perfil: { alGuardar: () => { Object.assign(yo, App.cuenta); return cargar(); } } }); }
   }
 
   // Premium: precios y pago comunes a las 6 apps (núcleo: cfx_pago_estado y pagos.js).
@@ -142,8 +142,6 @@
   document.querySelector('nav.tabs [data-v="' + ir + '"]').click();
   App.campana($('campana'));
   App.chatBoton($('ayuda'), '❓');
-  $('tienes').href = '../n/#taller'; $('tienes').classList.remove('hidden');
-  $('cSalir').onclick = () => App.salir();
   const linkTaller = () => App.ROOT + 't/?s=' + encodeURIComponent(D.taller.slug);
   $('invCompartir').onclick = () => App.compartir(linkTaller(), '🚲 Yo llevo mi bici a ' + D.taller.nombre + '. Reserva tu hora aquí y sigue tu bici desde el celular', D.taller.nombre);
   $('invQR').onclick = () => App.verQR({ url: linkTaller(), titulo: 'Invita a tus amigos', archivo: 'qr-' + D.taller.slug + '.gif' });
