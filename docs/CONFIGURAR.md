@@ -26,9 +26,8 @@ En **Authentication → Sign In / Providers**:
   cliente tendrá que confirmar su correo antes de entrar.
 
 En **Authentication → URL Configuration** (sirve para "olvidé mi contraseña"):
-- **Site URL**: la dirección donde está la app. Para probar en GitHub Pages: `https://codefixservice.github.io/Taller/`
-  (después, la de Cloudflare: `https://TU-DOMINIO.pages.dev/`).
-- **Redirect URLs**: agrega `https://codefixservice.github.io/Taller/**` y, cuando la tengas, `https://TU-DOMINIO.pages.dev/**`.
+- **Site URL**: la dirección donde está la app. `https://taller.juanjosuecastilloloyola.workers.dev/` (Cloudflare Workers).
+- **Redirect URLs**: agrega `https://taller.juanjosuecastilloloyola.workers.dev/**`.
 
 ## 3. Tareas automáticas
 Ya quedan creadas con el paso 1 (cada 5 minutos: libera horas sin pago, recordatorios, vencimientos y limpieza diaria;
