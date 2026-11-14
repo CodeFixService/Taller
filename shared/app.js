@@ -552,14 +552,11 @@
     if (lib && mayor(v, lib) && !esAdmin) return;
     if (!lib && !esAdmin) return;
     avisada = true;
-    if (esAdmin && (!lib || mayor(v, lib))) { // el admin: aviso para probarla (no se instala sola)
-      const d = modal('<h2>🔄 Versión nueva para probar</h2><p class="muted" style="margin-top:0">Está publicada la v' + esc(v) + ' (tus usuarios siguen en la v' + esc(lib || cfg.VERSION) + '). Pruébala y libérala en Ajustes → Actualizar.</p><div class="btns"><button class="ghost" data-cerrar>Después</button><button id="btActualizar">Probar ahora</button></div>');
-      d.querySelector('#btActualizar').onclick = actualizar; return;
-    }
+    // G36 · núcleo: el admin (y el socio) la recibe sola apenas se publica; los usuarios, al liberarla, con el botón "🔄 Actualizar".
+    if (global.CodeFixAuto) { global.CodeFixAuto(v, actualizar, { admin: esAdmin }); return; }
     // Recién abierta la app: se actualiza sola (una vez por versión, para no quedar en un bucle si el servidor aún no publica).
     let intento = '';
     try { intento = sessionStorage.getItem('bt:autoAct') || ''; } catch (e) { /* nada */ }
-    if (global.CodeFixAuto) { global.CodeFixAuto(v, actualizar); return; } // núcleo: siempre sola, sin ventana
     if (performance.now() < 20000 && intento !== v) {
       try { sessionStorage.setItem('bt:autoAct', v); } catch (e) { /* nada */ }
       toast('🔄 Actualizando a la v' + v + '…');
