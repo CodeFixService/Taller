@@ -106,7 +106,7 @@
   }
   $('tLista').onchange = async (e) => {
     const s = e.target.closest('[data-prem]'); if (!s || !s.value) return;
-    let dias = s.value === 'otro' ? parseInt(prompt('¿Cuántos días de Premium?'), 10) : +s.value;
+    let dias = s.value === 'otro' ? parseInt(await (window.CFX_DIALOGO ? CFX_DIALOGO.pedir('¿Cuántos días de Premium?', '', { tipo: 'number' }) : prompt('¿Cuántos días de Premium?')), 10) : +s.value;
     s.value = '';
     if (isNaN(dias)) return;
     if (dias === 0 && !await confirmar('¿Quitar el Premium a este taller? Vuelve a la versión gratis.')) return;
