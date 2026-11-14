@@ -251,7 +251,73 @@
   addEventListener('click', (e) => { if (e.target.closest && e.target.closest('nav.cfx-barra')) verBarra(); }, { capture: true, passive: true });
   addEventListener('resize', () => { if (innerWidth >= 900) verBarra(); });
 
-  window.CodeFixBarra = { montar, ver: verBarra, ocultar: ocultarBarra };
+  // ---------- G20/G27: deslizar el dedo a la izquierda/derecha cambia de pestaña ----------
+  // G27: el gesto mueve SOLO el menú que se toca, nunca otro (antes podía terminar moviendo "Día / 7 días / 30 días" de la página).
+  // · Dedo sobre un menú de pestañas (arriba o la barra de abajo): si el menú se corre de lado, se corre él solo (nativo);
+  //   si cabe entero, pasa a la pestaña vecina de ESE menú.
+  // · Dedo dentro de la página: solo el menú principal de la pantalla (nav.tabs.sub / [role=tablist] / [data-cfx-pestanas]);
+  //   nunca filtros ni selectores de adentro (.seg, .seg2…). Sin menú principal, la barra de abajo.
+  // No actúa sobre campos, hojas/ventanas abiertas, tiras que se deslizan de lado, carruseles ni avisos deslizables.
+  const GRUPOS = 'nav.tabs.sub, [role=tablist], .seg, .segs, .seg2, .tabs2, [data-cfx-pestanas]';
+  const PRINCIPAL = 'nav.tabs.sub, [role=tablist], [data-cfx-pestanas]';
+  const esActiva = (b) => b.matches('.on, .active, .activo, [aria-selected=true], [aria-current=page], [aria-current=true]');
+  const visibles = (g) => Array.from(g.children).filter((b) => /^(A|BUTTON)$/.test(b.tagName) && !b.disabled && !b.hidden && b.offsetParent && !b.classList.contains('cfx-oculto') && !b.classList.contains('cfx-oc'));
+  const seCorre = (e) => e.scrollWidth > e.clientWidth + 4 && /auto|scroll/.test(getComputedStyle(e).overflowX);
+  function correLado(el) {
+    for (let e = el; e && e !== document.body; e = e.parentElement) if (seCorre(e)) return true;
+    return false;
+  }
+  function grupoPagina() {
+    const L = Array.from(document.querySelectorAll(PRINCIPAL)).filter((g) => {
+      if (g.closest('.cfx-barra, .cfx-hoja-m, dialog, [hidden]') || !g.offsetParent) return false;
+      const r = g.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight && visibles(g).some(esActiva);
+    });
+    return L[0] || null;  // el primero de la página: el menú principal
+  }
+  function pasar(dir, grupo) {
+    const g = grupo && grupo.nodeType === 1 ? grupo : (grupoPagina() || barraNav());
+    if (!g) return false;
+    let L = visibles(g);
+    if (g.classList.contains('cfx-barra')) L = L.filter((b) => !b.classList.contains('cfx-mas') && b.dataset.k !== '+' && (b.tagName === 'A' ? !!b.getAttribute('href') : true));
+    const i = L.findIndex(esActiva), b = i < 0 ? null : L[i + dir];
+    if (!b) return false;
+    b.click();
+    // Solo se corre el menú (nunca la página) para que la pestaña elegida se vea.
+    const r = b.getBoundingClientRect(), rg = g.getBoundingClientRect();
+    if (r.left < rg.left) g.scrollLeft -= rg.left - r.left + 12; else if (r.right > rg.right) g.scrollLeft += r.right - rg.right + 12;
+    return true;
+  }
+  let dz = null;
+  addEventListener('touchstart', (e) => {
+    dz = null;
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0], el = e.target;
+    if (!el || !el.closest || el.closest('input, textarea, select, [contenteditable], canvas, video, iframe, dialog, .cfx-hoja-m, .cfx-pnl, .cfx-mv, .cfx-aviso-desl, .cfx-emerg, [data-cfx-sin-deslizar]')) return;
+    if (document.documentElement.classList.contains('cfx-hoja-on') || document.querySelector('dialog[open]')) return;
+    if (t.clientX < 18 || t.clientX > innerWidth - 18) return;  // la orilla es del gesto "atrás" del teléfono
+    // El menú bajo el dedo (también si algo chico de la cabecera, como la pestañita ⌄ de la cuenta, cuelga encima de su orilla).
+    const bajo = (g) => { if (!g.offsetParent && getComputedStyle(g).position !== 'fixed') return false; const r = g.getBoundingClientRect(); return t.clientX > r.left && t.clientX < r.right && t.clientY > r.top && t.clientY < r.bottom; };
+    const menu = el.closest('nav.cfx-barra, ' + GRUPOS) || Array.from(document.querySelectorAll('nav.cfx-barra, ' + GRUPOS)).filter((g) => !g.closest('dialog, .cfx-hoja-m, [hidden]') && bajo(g)).pop();
+    if (!menu && el.closest('header, .cfx-cab, .cfx-pest')) return;  // la cabecera no cambia de pestaña
+    if (menu) {
+      // Si se corre de lado, se corre solo él (el navegador lo hace; si el dedo partió sobre algo que lo tapa, lo corremos aquí).
+      if (!seCorre(menu)) dz = { x: t.clientX, y: t.clientY, t: Date.now(), g: menu };
+      else if (!menu.contains(el)) dz = { x: t.clientX, y: t.clientY, t: Date.now(), g: menu, correr: true };
+      return;
+    }
+    if (correLado(el)) return;
+    dz = { x: t.clientX, y: t.clientY, t: Date.now(), g: null };
+  }, { passive: true });
+  addEventListener('touchend', (e) => {
+    if (!dz) return; const t = e.changedTouches[0], dx = t.clientX - dz.x, dy = t.clientY - dz.y, dt = Date.now() - dz.t, g = dz.g, correr = dz.correr; dz = null;
+    if (correr) { if (Math.abs(dx) > 24 && Math.abs(dx) > Math.abs(dy)) g.scrollBy({ left: -dx, behavior: 'smooth' }); return; }
+    if (dt > 700 || Math.abs(dx) < 80 || Math.abs(dx) < Math.abs(dy) * 2.2) return;
+    const sel = window.getSelection && String(window.getSelection()); if (sel) return;
+    pasar(dx < 0 ? 1 : -1, g);
+  }, { passive: true });
+  addEventListener('touchcancel', () => { dz = null; }, { passive: true });
+
+  window.CodeFixBarra = { montar, ver: verBarra, ocultar: ocultarBarra, pasar };
   const iniciar = () => setTimeout(() => { montar(); setTimeout(() => document.documentElement.classList.add('cfx-barra-lista'), 1200); }, 0);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar); else iniciar();
   // Barras que la app dibuja después (al iniciar sesión).

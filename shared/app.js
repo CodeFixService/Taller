@@ -10,6 +10,9 @@
     const s = document.querySelector('script[src*="shared/app.js"]');
     return s ? s.src.replace(/shared\/app\.js.*$/, '') : location.origin + '/';
   })();
+  // G35 · 🔒 Clave pausada tras 3 intentos (núcleo qr.js): se entra con el enlace al correo y se desbloquea solo.
+  const qrIni = () => global.CFX_QR.iniciar({ sb, funcion: 'servidor', qrLib: ROOT + 'shared/vendor/qrcode.js' });
+  if (global.CFX_QR) qrIni(); else { const q = document.createElement('script'); q.src = ROOT + 'shared/qr.js'; q.onload = qrIni; document.head.appendChild(q); }
 
   /* ---------- Utilidades ---------- */
   const $ = (id) => document.getElementById(id);
@@ -187,8 +190,9 @@
     return Object.assign(ad, { guardarColor: null });
   }
   async function entrar(email, password) {
-    const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
-    if (error) throw new Error(friendly(error));
+    const pw = () => sb.auth.signInWithPassword({ email: email.trim(), password });  // G35: 3 claves malas → enlace al correo
+    const { error } = await (global.CFX_QR ? global.CFX_QR.clave(email, pw) : pw());
+    if (error) throw new Error(error.code === 'cfx_bloqueado' ? error.message : friendly(error));
     const c = await refrescar();
     if (!c) throw new Error('Tu cuenta no tiene perfil. Contacta al administrador.');
     sincronizarPush();

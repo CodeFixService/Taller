@@ -4,6 +4,35 @@
 // · Todo texto "Cargando…" se ve como cajas con brillo (esqueleto) en vez de letras.
 // API: CFX_CARGA.boton(btn, promesa) · CFX_CARGA.esqueleto(el, filas) · CFX_CARGA.barra(true|false)
 (function () {
+  // G20 · 🧪 Probar "como en incógnito": ?cfx-limpio=… borra la caché y el service worker de esta dirección y vuelve a abrir sin el parámetro.
+  // (Una página no puede abrir una ventana de incógnito; esto deja la versión de prueba sin nada guardado de antes. La sesión se mantiene.)
+  try {
+    const u = new URL(location.href);
+    if (u.searchParams.has('cfx-limpio')) {
+      u.searchParams.delete('cfx-limpio');
+      document.documentElement.style.visibility = 'hidden';
+      Promise.all([
+        window.caches ? caches.keys().then((k) => Promise.all(k.map((x) => caches.delete(x)))) : 0,
+        navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then((r) => Promise.all(r.map((x) => x.unregister()))) : 0
+      ]).catch(() => {}).then(() => location.replace(u.toString()));
+      return;
+    }
+    // G24 · 🧹 ?cfx-cero=1 (CM → Apps → 🧹 Limpiar y abrir): además borra lo guardado y la sesión (localStorage, sessionStorage,
+    // IndexedDB y cookies): la app abre como recién instalada, igual que en incógnito. Va con cfx-limpio para que una versión vieja igual limpie la caché.
+    if (u.searchParams.has('cfx-cero')) {
+      u.searchParams.delete('cfx-cero');
+      document.documentElement.style.visibility = 'hidden';
+      try { localStorage.clear(); } catch (e) { /* nada */ }
+      try { sessionStorage.clear(); } catch (e) { /* nada */ }
+      try { document.cookie.split(';').forEach((c) => { const n = c.split('=')[0].trim(); if (n) document.cookie = n + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/'; }); } catch (e) { /* nada */ }
+      Promise.all([
+        window.caches ? caches.keys().then((k) => Promise.all(k.map((x) => caches.delete(x)))) : 0,
+        navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then((r) => Promise.all(r.map((x) => x.unregister()))) : 0,
+        window.indexedDB && indexedDB.databases ? indexedDB.databases().then((l) => Promise.all(l.map((d) => d.name && new Promise((ok) => { const q = indexedDB.deleteDatabase(d.name); q.onsuccess = q.onerror = q.onblocked = ok; })))) : 0
+      ]).catch(() => {}).then(() => location.replace(u.toString()));
+      return;
+    }
+  } catch (e) { /* nada */ }
   if (window.CFX_CARGA) return;
   const d = document;
   // El color y el plan de la última vez se ponen al abrir (antes de pintar): el + y la barra parten con su color final, sin saltos.

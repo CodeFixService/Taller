@@ -22,13 +22,17 @@
   //  · dominio propio (mando.codefix.app)                → <sub>.codefix.app
   //  · pruebas, GitHub Pages o Pages.dev                 → los Workers de la cuenta
   const CUENTA_WORKERS = 'juanjosuecastilloloyola.workers.dev';
+  // G33 · Dominio de CodeFix ✅ (cfx_sitio, lo guarda el CM): los links entre apps, QR y "compartir" usan https://<sub>.<dominio>/.
+  const SUBS = { saas: 'cm', aplicaciones: 'despega', barberia: 'barberia', emprendedor: 'billetera', taller: 'bicitaller', estacionamiento: 'estaciona' };
+  function dom() { try { const s = JSON.parse(localStorage.getItem('cfx:sitio') || 'null'); return s && s.activo && /^[a-z0-9.-]+\.[a-z]{2,24}$/.test(s.dominio || '') ? s.dominio : ''; } catch (e) { return ''; } }
   function web(worker, sub) {
-    const h = location.hostname, p = h.split('.');
+    const h = location.hostname, p = h.split('.'), d = dom();
+    if (d && SUBS[worker]) return 'https://' + SUBS[worker] + '.' + d + '/';
     if (/\.workers\.dev$/.test(h) && p.length >= 4) return 'https://' + worker + '.' + p.slice(1).join('.') + '/';
     if (/^(localhost|127\.|\d+\.\d+\.\d+\.\d+$)|github\.io$|pages\.dev$/.test(h) || p.length < 2) return 'https://' + worker + '.' + CUENTA_WORKERS + '/';
     return 'https://' + sub + '.' + (p.length >= 3 ? p.slice(1).join('.') : h) + '/';
   }
-  const panelCM = () => web('saas', 'mando') + 'admin/';
+  const panelCM = () => web('saas', 'cm') + 'admin/';
   const css = document.createElement('style');
   css.textContent =
     // Cabecera común: [campana][FREE/PRO][foto] a la derecha del encabezado de cada app.
@@ -61,6 +65,13 @@
     '.cfx-srv-det h4{margin:12px 0 4px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--cfx-texto-2,#5b6472)}.cfx-srv-res{margin:10px 0 0;font-size:13px;color:var(--cfx-texto-2,#5b6472)}' +
     '.cfx-srv-f{display:flex;justify-content:space-between;gap:8px;font-size:13.5px;padding:4px 0;border-top:1px dashed var(--cfx-borde,#e2e7ec)}.cfx-srv-f span{min-width:0;overflow-wrap:anywhere}.cfx-srv-f small{color:var(--cfx-texto-2,#5b6472);flex:none}.cfx-srv-err{display:block;color:var(--cfx-aviso,#ea580c);font-size:12px;margin:2px 0 4px}' +
     '.cfx-srv-puntos{display:flex;justify-content:center;gap:6px}.cfx-srv-puntos i{width:7px;height:7px;border-radius:4px;background:var(--cfx-borde,#d4dae1);cursor:pointer;transition:width .2s,background .2s}.cfx-srv-puntos i.on{width:18px;background:var(--brand,var(--marca,#2563eb))}' +
+    '.cfx-av-vacio,.cfx-av-pista{margin:6px 0 12px;color:var(--cfx-texto-2,#5b6472);font-size:14px}.cfx-av-lista{display:flex;flex-direction:column;gap:8px}' +
+    '.cfx-av-f{position:relative;display:flex;flex-direction:column;gap:2px;padding:12px 14px;border-radius:14px;background:var(--cfx-campo,#f3f5f8);border:1px solid var(--cfx-borde,#e2e7ec);cursor:pointer;min-width:0}' +
+    '.cfx-av-f.nuevo{border-left:4px solid var(--brand,var(--marca,#2563eb))}.cfx-av-f b{font-size:15px;overflow-wrap:anywhere}.cfx-av-f small{color:var(--cfx-texto-2,#5b6472);font-size:12px}.cfx-av-f span{font-size:14px;color:var(--cfx-texto-2,#5b6472);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    '.cfx-av-todos{width:100%;margin:14px 0 4px;min-height:44px;border-radius:12px;border:1.5px solid var(--cfx-borde,#e2e7ec);background:transparent;color:#dc2626;font:700 15px/1 inherit;cursor:pointer}' +
+    '.cfx-av-tit{margin:0 0 4px;font-size:18px;line-height:1.3;overflow-wrap:anywhere}.cfx-av-de{margin:0 0 8px;color:var(--cfx-texto-2,#5b6472);font-size:13px}.cfx-av-txt{margin:0 0 12px;font-size:16px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}.cfx-av-img{display:block;max-width:100%;border-radius:12px;margin:0 0 12px}' +
+    '.cfx-av-ir{display:flex;align-items:center;justify-content:center;min-height:44px;border-radius:12px;background:var(--brand,var(--marca,#2563eb));color:#fff!important;font-weight:700;text-decoration:none;margin:0 0 12px}' +
+    '.cfx-av-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px}.cfx-av-nav button{min-height:44px;padding:0 14px;border-radius:12px;border:1.5px solid var(--cfx-borde,#e2e7ec);background:var(--cfx-campo,#f3f5f8);color:var(--cfx-texto,#111827);font:700 14px/1 inherit;cursor:pointer;white-space:nowrap}.cfx-av-nav button:disabled{opacity:.4}.cfx-av-nav small{color:var(--cfx-texto-2,#5b6472)}' +
     '.cfx-x-oculta{display:none!important}.cfx-aviso-desl{touch-action:pan-y;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;will-change:transform}.cfx-aviso-desl *{-webkit-user-drag:none}' +
     '@keyframes cfxPista{0%,100%{transform:none}35%{transform:translateX(-42px)}60%{transform:translateX(-42px)}}.cfx-pista{animation:cfxPista 1.1s cubic-bezier(.2,.8,.2,1)}' +
     '.cfx-emerg{position:fixed;inset:auto;width:auto;height:fit-content;box-sizing:border-box;top:calc(10px + env(safe-area-inset-top));left:12px;right:12px;margin:0 auto;max-width:460px;z-index:2147483600;display:flex;gap:12px;align-items:center;padding:12px 14px;border-radius:18px;border:1px solid var(--cfx-borde,#e2e7ec);' +
@@ -89,7 +100,7 @@
     '.cfx-pest{position:absolute!important;left:auto!important;right:var(--cfx-pest-d,12px)!important;top:100%;z-index:3;width:34px!important;height:12px!important;min-width:0!important;min-height:0!important;max-height:12px!important;padding:0!important;margin:0!important;' +
     'border:1px solid var(--cfx-borde,#e2e7ec)!important;border-top:0!important;border-radius:0 0 10px 10px!important;font-size:0!important;line-height:0!important;' +
     'background:var(--cfx-tarjeta,#fff)!important;color:var(--cfx-texto-2,#5b6472)!important;display:grid!important;place-items:center;cursor:pointer;box-shadow:0 4px 10px rgba(15,23,42,.10)!important;-webkit-tap-highlight-color:transparent}' +
-    '.cfx-pest::before{content:"";position:absolute;inset:-6px -8px -18px}.cfx-pest svg{width:12px;height:12px;display:block}.cfx-pest:focus:not(:focus-visible){outline:0}' +
+    '.cfx-pest::before{content:"";position:absolute;inset:-6px -8px -18px}header:has(+nav.tabs.sub) .cfx-pest::before,.cfx-cab:has(+nav.tabs.sub) .cfx-pest::before{bottom:0}.cfx-pest svg{width:12px;height:12px;display:block}.cfx-pest:focus:not(:focus-visible){outline:0}' +
     'html.cfx-premium .cfx-pest{color:#b07a00}.cfx-cab.cfx-fija .cfx-pest{right:1px}' +
     '[data-cfx-campana]{position:relative}[data-cfx-n]::after{content:attr(data-cfx-n);position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;border-radius:8px;background:#dc2626;color:#fff;font:700 10px/16px system-ui,sans-serif;font-style:normal;text-align:center;padding:0 4px;box-sizing:border-box;pointer-events:none;z-index:1}[data-cfx-n-izq]::after{right:auto;left:-4px}' +
     '.cfx-pnl-velo{position:fixed;inset:0;z-index:2147481500;background:rgba(15,23,42,.35);opacity:0;transition:opacity .22s}.cfx-pnl-velo.on{opacity:1}' +
@@ -150,7 +161,7 @@
     '.cfx-hm-c{display:flex;flex-direction:column;max-height:92dvh;border-radius:24px 24px 0 0;background:var(--cfx-tarjeta,#fff);color:var(--cfx-texto,#111827);box-shadow:0 -12px 40px rgba(0,0,0,.28);animation:cfxSube .22s cubic-bezier(.2,.8,.2,1) both;touch-action:pan-y}' +
     '.cfx-hm-cab{position:relative;display:flex;align-items:center;gap:10px;padding:18px 16px 12px;border-bottom:1px solid var(--cfx-borde,#e2e7ec);cursor:grab;flex:none}' +
     '.cfx-hm-tir{position:absolute;left:50%;top:7px;translate:-50% 0;width:42px;height:5px;border-radius:3px;background:var(--cfx-borde,#d6dbe3)}' +
-    '.cfx-hm-cab h2{flex:1;min-width:0;margin:0;font:800 18px/1.25 var(--cfx-letra,system-ui,sans-serif);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    '.cfx-hm-cab h2{flex:1;min-width:0;margin:0;font:800 18px/1.25 var(--cfx-letra,system-ui,sans-serif);white-space:normal;overflow-wrap:anywhere}' +
     '.cfx-hm-x{flex:none;width:40px!important;height:40px!important;min-height:0!important;padding:0!important;margin:0!important;display:grid!important;place-items:center;border-radius:12px!important;border:1.5px solid var(--cfx-borde,#e2e7ec)!important;background:var(--cfx-campo,#f3f5f8)!important;color:var(--cfx-texto,#111827)!important;cursor:pointer}' +
     '.cfx-hm-zona{overflow:auto;overscroll-behavior:contain;padding:16px 16px calc(28px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}.cfx-hm-zona>.card:first-child,.cfx-hm-zona>.tarjeta:first-child{margin-top:0}' +
     '@media (min-width:700px){.cfx-hoja-m{align-items:center}.cfx-hm-c{border-radius:24px;max-height:86vh}}' +
@@ -312,7 +323,9 @@
     const rol = CFG.admin ? (CFG.socio ? 'SOCIO' : 'ADMIN') : '';
     plan.textContent = rol || (esPro() ? 'PRO' : 'FREE'); plan.classList.toggle('pro', !rol && esPro()); plan.classList.toggle('rol', !!rol);
     plan.setAttribute('aria-label', rol ? (rol === 'ADMIN' ? 'Administrador' : 'Socio') : esPro() ? 'Plan PRO' : 'Plan FREE: ver Premium');
-    const n = (CFG.admin ? 0 : pend().length + (estado.sin_leer || 0));
+    // Globito de la campana (G20): solo avisos sin leer + chat de soporte. Antes sumaba también "Lo que me falta" (tareas de la guía),
+    // por eso seguía marcando aunque se borraran todos los avisos; esas tareas se ven en la guía, no en la campana.
+    const n = CFG.admin && !CFG.avisos ? 0 : (avN || 0) + (CFG.admin ? 0 : estado.sin_leer || 0);
     av.innerHTML = (CFG.foto ? '<img src="' + esc(CFG.foto) + '" alt="">' : iniciales()) + (n ? '<i>' + n + '</i>' : '');
     pest.innerHTML = CHEV_ABAJO;
     // El número va solo en la campana (no junto a la flechita), como atributo: la app puede rehacer el contenido de su campana sin borrarlo.
@@ -380,6 +393,67 @@
       if (a === 'atajo') location.href = at.href; else if (a === 'salir') confirmarSalir(); else if (a === 'perfil') abrirPerfil(); else accion(a);
     };
   }
+  // ---------- 🔔 Ventana de avisos (G20) ----------
+  // CFX_AYUDA.iniciar({ …, avisos: { lista, borrar, leer, limpiar } }): la campana abre una hoja con los avisos (deslizar = borrar);
+  // tocar uno abre otra hoja con el texto completo y ‹ › para pasar uno por uno. lista() → [{ id, titulo, cuerpo, de, fecha, leido, url, imagen }].
+  let avN = 0, avL = [];
+  const fechaAv = (f) => { try { return f ? new Date(f).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : ''; } catch (e) { return ''; } };
+  async function contarAvisos() {
+    if (!CFG.avisos || typeof CFG.avisos.lista !== 'function') return;
+    try { avL = (await CFG.avisos.lista()) || []; avN = avL.filter((x) => !x.leido).length; pintarBoya(); } catch (e) { /* sin red */ }
+  }
+  async function ventanaAvisos() {
+    const A = CFG.avisos, h = hoja('<span class="cfx-hm-ic no-ico">' + SVG_CAMPANA + '</span><span class="cfx-hm-tx">Avisos</span>', contarAvisos);
+    h.zona.innerHTML = '<p class="cfx-av-vacio">Cargando…</p>';
+    try { avL = (await A.lista()) || []; } catch (e) { h.zona.innerHTML = '<p class="cfx-av-vacio">Sin conexión.</p>'; return; }
+    const pintar = () => {
+      avN = avL.filter((x) => !x.leido).length; pintarBoya();
+      if (!avL.length) { h.zona.innerHTML = '<p class="cfx-av-vacio">Sin avisos por ahora.</p>'; return; }
+      h.zona.innerHTML = '<p class="cfx-av-pista">Desliza un aviso hacia el lado para borrarlo.</p><div class="cfx-av-lista">' + avL.map((x, i) =>
+        '<div class="cfx-av-f' + (x.leido ? '' : ' nuevo') + '" data-i="' + i + '" role="button" tabindex="0"><b>' + esc(x.titulo || 'Aviso') + '</b>' +
+        '<small>' + esc([x.de, fechaAv(x.fecha)].filter(Boolean).join(' · ')) + '</small><span>' + esc(String(x.cuerpo || '').slice(0, 90)) + '</span>' +
+        '<button type="button" aria-label="Borrar aviso" data-b="' + i + '"></button></div>').join('') + '</div>' +
+        (A.limpiar ? '<button type="button" class="cfx-av-todos">Borrar todos</button>' : '');
+      avisosDeslizar();
+    };
+    pintar();
+    h.zona.onclick = async (ev) => {
+      const b = ev.target.closest('[data-b]');
+      if (b) { const x = avL[+b.dataset.b]; avL = avL.filter((y) => y !== x); try { await A.borrar(x.id); } catch (e) { /* se reintenta al abrir */ } return pintar(); }
+      if (ev.target.closest('.cfx-av-todos')) {
+        if (!confirm('¿Borrar todos tus avisos? Solo verás los que lleguen desde ahora.')) return;
+        await salirTodos(); try { await A.limpiar(); avL = []; } catch (e) { aviso((e && e.message) || 'No se pudo borrar.'); } return pintar();
+      }
+      const f = ev.target.closest('.cfx-av-f'); if (f) unAviso(+f.dataset.i, pintar);
+    };
+    h.zona.onkeydown = (ev) => { const f = ev.target.closest && ev.target.closest('.cfx-av-f'); if (f && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); unAviso(+f.dataset.i, pintar); } };
+  }
+  function unAviso(i, repintar) {
+    const A = CFG.avisos, h = hoja('<span class="cfx-hm-tx">Aviso</span>', repintar);
+    const ver = (j) => {
+      i = j; const x = avL[i]; if (!x) return h.cerrar();
+      if (!x.leido) { x.leido = true; if (A.leer) Promise.resolve(A.leer(x.id)).catch(() => {}); avN = avL.filter((y) => !y.leido).length; pintarBoya(); }
+      const url = String(x.url || ''), ext = /^https?:\/\//i.test(url), int = /^(apps\/[a-z]+\/|\.\/|#)/.test(url);
+      h.zona.innerHTML = '<h3 class="cfx-av-tit"></h3><p class="cfx-av-de">' + esc([x.de, fechaAv(x.fecha)].filter(Boolean).join(' · ')) + '</p><p class="cfx-av-txt"></p>' +
+        (/^https?:\/\//i.test(x.imagen || '') ? '<img class="cfx-av-img" src="' + esc(x.imagen) + '" alt="" loading="lazy">' : '') +
+        (ext || int ? '<a class="cfx-av-ir" href="' + esc(url) + '"' + (ext ? ' target="_blank" rel="noopener"' : '') + '>' + (ext ? 'Ver más' : 'Abrir') + '</a>' : '') +
+        (avL.length > 1 ? '<div class="cfx-av-nav"><button type="button" data-n="-1" aria-label="Aviso anterior"' + (i ? '' : ' disabled') + '>‹ Anterior</button><small>' + (i + 1) + ' de ' + avL.length + '</small>' +
+          '<button type="button" data-n="1" aria-label="Aviso siguiente"' + (i < avL.length - 1 ? '' : ' disabled') + '>Siguiente ›</button></div>' : '');
+      h.zona.querySelector('.cfx-av-txt').textContent = x.cuerpo || '';
+      h.zona.querySelector('.cfx-av-tit').textContent = x.titulo || 'Aviso';
+    };
+    h.zona.onclick = (ev) => { const b = ev.target.closest('[data-n]'); if (b) ver(i + +b.dataset.n); else if (ev.target.closest('.cfx-av-ir')) h.cerrar(); };
+    // Deslizar de lado sobre el texto también pasa al siguiente/anterior.
+    let x0 = null; h.zona.addEventListener('pointerdown', (e) => { x0 = e.clientX; });
+    h.zona.addEventListener('pointerup', (e) => { if (x0 === null) return; const dx = e.clientX - x0; x0 = null; if (Math.abs(dx) > 60) { const j = i + (dx < 0 ? 1 : -1); if (avL[j]) ver(j); } });
+    ver(i);
+  }
+  // La campana de la app (link o botón) abre la ventana del núcleo cuando la app le pasa sus avisos.
+  document.addEventListener('click', (ev) => {
+    if (!CFG.avisos || !boya) return;
+    const c = ev.target.closest && ev.target.closest('[data-cfx-campana]'); if (!c || !boya.contains(c)) return;
+    ev.preventDefault(); ev.stopPropagation(); ventanaAvisos();
+  }, true);
   // Campana del núcleo (cuando la pantalla no trae una): muestra si los avisos al teléfono están activos y permite activarlos.
   async function avisosNucleo() {
     const I = window.CodeFixInstalar, h = hoja('<span class="cfx-hm-ic no-ico">' + SVG_CAMPANA + '</span><span class="cfx-hm-tx">Avisos</span>');
@@ -617,6 +691,8 @@
       { k: 'terminos', ico: '📄', t: 'Términos y condiciones', accion: a('terminos') },
       { k: 'privacidad', ico: '🔒', t: 'Política de privacidad', accion: a('privacidad') },
       !adm && { k: 'misdatos', ico: '🗂️', t: 'Mis datos y privacidad', accion: a('misdatos') },
+      // G32 d · 🔑 Celular con sesión → aprueba el QR del computador (núcleo qr.js, si la app lo activó).
+      window.CFX_QR && CFX_QR.listo() && !matchMedia('(pointer:fine)').matches && { k: 'computador', ico: 'qr', t: 'Entrar en un computador', accion: () => CFX_QR.celular() },
       { k: 'salir', ico: '🚪', t: 'Cerrar sesión', rojo: true, accion: confirmarSalir }
     ].filter((x) => x && !(yaEstan || []).includes(x.k)).map((x) => Object.assign(x, { grupo: g }));
   }
@@ -719,11 +795,11 @@
     if (w.Api && w.U) return 'estaciona';
     if (/BiciTaller/i.test(t)) return 'taller';
     if (/Barber/i.test(t)) return 'barberia';
-    if (/Órbita|Orbita/i.test(t)) return 'orbita';
+    if (/Despega|Órbita|Orbita/i.test(t)) return 'orbita';
     if (/Mando/i.test(t)) return 'mando';
     return '';
   }
-  const NOMBRE = { billetera: 'Libreta de Cobros', orbita: 'Órbita', barberia: 'Barbería', taller: 'BiciTaller', estaciona: 'Estaciona', mando: 'Centro de Mando' };
+  const NOMBRE = { billetera: 'Libreta de Cobros', orbita: 'Despega Pyme', barberia: 'Barbería', taller: 'BiciTaller', estaciona: 'Estaciona', mando: 'Centro de Mando' };
   // Lo propio de cada tipo de negocio (va como sección 5).
   const PROPIO = {
     barberia: ['Reservas y abono previo',
@@ -913,6 +989,7 @@
   // ---------- Inicio ----------
   async function revisar() {
     if (!R) return;
+    contarAvisos();
     try { estado = await R('cfx_guia') || estado; } catch (e) { return; }
     estado.items = estado.items || [];
     pintarBoya();
@@ -922,6 +999,7 @@
   //   una sola llamada al tener la cuenta (también para el admin): cabecera común, ayuda y sensación Premium (CFX_PREMIUM, nunca al admin).
   //   cuenta / panel: dirección (#… o url) o función para "Mi cuenta" y "Panel de administración". Se puede volver a llamar (p. ej. al cambiar la foto).
   // ---------- Referidos: ?ref=CODIGO en el link queda guardado y se asocia al crear/entrar a la cuenta nueva ----------
+  const PANEL_EN_CM = ['orbita', 'barberia', 'billetera', 'taller', 'estaciona'];  // G34/G35: apps con su panel en el CM (Cerebro no)
   const PERSONALES = ['mando', 'contenido'], SOCIOS_NUCLEO = ['billetera', 'orbita', 'estaciona'];
   try { const rf = new URLSearchParams(location.search).get('ref'); if (rf && /^[A-Za-z0-9]{4,12}$/.test(rf)) localStorage.setItem('cfx-ref', rf.toUpperCase()); } catch (e) { /* nada */ }
   async function refRegistrar() {
@@ -934,7 +1012,8 @@
       '<div class="ca-pie"><button type="button" data-cerrar>Cerrar</button></div>');
     try {
       const r = await R('cfx_ref_mio'); if (!r || !r.codigo) throw new Error('Tu cuenta no tiene código.');
-      const link = RAIZ + '?ref=' + r.codigo, z = caja.querySelector('#caRef');
+      // G25: CFX_REF_RUTA (config de la app, ej. 'n/') = página donde el invitado SÍ puede crear su cuenta (la raíz solo deja ingresar).
+      const link = RAIZ + (/^[a-z0-9/_-]*$/i.test(window.CFX_REF_RUTA || '') ? window.CFX_REF_RUTA || '' : '') + '?ref=' + r.codigo, z = caja.querySelector('#caRef');
       z.innerHTML = '<p style="text-align:center;margin:6px 0"><b style="font-size:24px;letter-spacing:.06em">' + esc(r.codigo) + '</b></p><p style="word-break:break-all;font-size:13px;opacity:.8">' + esc(link) + '</p>' +
         '<p>Invitaste a <b>' + r.invitados + '</b> persona' + (r.invitados === 1 ? '' : 's') + (r.pagaron ? ' · ' + r.pagaron + ' ya pagaron' : '') + (r.invitados >= 3 ? ' 🏆' : '') + '</p>' +
         '<button type="button" class="ca-op" data-a="share"><span>📤</span><b>Compartir mi link</b></button><button type="button" class="ca-op" data-a="copiar"><span>📋</span><b>Copiar link</b></button>';
@@ -992,12 +1071,23 @@
     if (pinFuera && Date.now() - pinFuera > 5 * 60 * 1000) { try { sessionStorage.removeItem('cfx-pin-ok'); } catch (e) { /* nada */ } pinRevisar(); }
   });
 
+  // Dirección para compartir de esta app: la del dominio si está ✅, si no la de siempre.
+  function sitio() { try { const s = JSON.parse(localStorage.getItem('cfx:sitio') || 'null'); if (s && s.activo && /^https:\/\/[a-z0-9.-]+\/$/.test(s.url || '')) return s.url; } catch (e) { /* nada */ } return RAIZ; }
   function iniciar(o) {
     if (!o || !o.rpc) return;
     const primera = !R;
     R = o.rpc; APP = o.app || APP;
+    if (primera) R('cfx_sitio').then((s) => { try { if (s && typeof s === 'object') localStorage.setItem('cfx:sitio', JSON.stringify({ dominio: s.dominio || '', url: s.url || '', activo: !!s.activo })); } catch (e) { /* nada */ } }).catch(() => { /* base sin la función todavía */ });
     if (primera) pinRevisar();
     Object.assign(CFG, o);
+    // G34 · 🧭 Panel universal: las apps con su panel ya en el Centro de Mando no se usan como administrador (public.admin_email()):
+    // el admin que entra va directo al CM (su usuario y clave siguen sirviendo allí). Socios, negocios y clientes, normal.
+    if (CFG.admin && !CFG.socio && PANEL_EN_CM.includes(APP)) {
+      // Socios del núcleo (cfx_socios) entran como admin en algunas apps: se confirma en la base antes de mandarlos al CM (ellos siguen en su panel).
+      if (!SOCIOS_NUCLEO.includes(APP)) { location.replace(panelCM()); return; }
+      R('cfx_es_socio').then((s) => { if (!s) location.replace(panelCM()); }).catch(() => { /* base sin socios: se queda */ });
+    }
+    contarAvisos();
     if (!CFG.foto && !(window.CFX_PERFIL_APP || {}).foto) CFG.foto = lsL(fotoKey()) || null;  // foto guardada por BASE (este celular)
     try { if (!sessionStorage.getItem('cfx-inicio')) sessionStorage.setItem('cfx-inicio', location.pathname + location.search); } catch (e) { /* nada */ }
     if (window.CFX_PREMIUM && 'premium' in o) window.CFX_PREMIUM.marcar({ premium: !CFG.admin && !!CFG.premium, id: CFG.id, hasta: CFG.hasta, beneficios: CFG.beneficios });
@@ -1046,7 +1136,7 @@
   // ---------- Otras apps CodeFix (debajo del ingreso de cada app) ----------
   // Bajo el formulario de ingreso se muestran las otras apps: al tocar una se abre su registro. El CM y Cerebro (personales) no se muestran
   // ni la llevan; un formulario con data-sin-apps tampoco. La app donde estás no sale.
-  const OTRAS = [['emprendedor', 'billetera', 'Billetera', 'Cobros y deudas', '#0f8a5f', '#crear'], ['aplicaciones', 'apps', 'Órbita', 'Tienda y pedidos', '#2563eb', ''],
+  const OTRAS = [['emprendedor', 'billetera', 'Billetera', 'Cobros y deudas', '#0f8a5f', '#crear'], ['aplicaciones', 'apps', 'Despega Pyme', 'Tienda y pedidos', '#2563eb', ''],
     ['barberia', 'barberia', 'Barbería', 'Reservas de hora', '#b8860b', 'registro/'], ['taller', 'bicitaller', 'BiciTaller', 'Taller de bicis', '#16a34a', 'n/'],
     ['estacionamiento', 'estaciona', 'Estaciona', 'Arrienda o publica', '#1d4ed8', '']];
   const h0 = location.hostname.split('.')[0];
@@ -1096,7 +1186,7 @@
   // La cabecera se vuelve a poner si la app redibuja su encabezado.
   setInterval(() => { if (R && (!boya || !boya.isConnected || (boya.classList.contains('cfx-fija') && encabezado()))) { if (boya && boya.classList.contains('cfx-fija')) boya.remove(); pintarBoya(); } else if (boya && boya.parentNode && boya.parentNode !== document.body) marcarExtras(boya.parentNode); }, 1500);
 
-  window.CFX_AYUDA = { iniciar, chat, terminos, privacidad, guia, revisar, menu, web, panelCM };
+  window.CFX_AYUDA = { iniciar, chat, terminos, privacidad, guia, revisar, menu, web, panelCM, sitio, avisos: contarAvisos, ventanaAvisos };
   window.CFX_LEGAL = { version: LEGAL.version, desde: LEGAL.desde, revisar: legal, terminos, privacidad, misDatos };
   // ---------- Tiras de filtros/pestañas que no caben: se deslizan de lado y se desvanecen en la orilla ----------
   function marcarTira(x) {
@@ -1125,7 +1215,7 @@
       if (x.classList.contains('cfx-desliza')) return marcarTira(x);
       if (x.childElementCount < 2 || x.scrollWidth <= x.clientWidth + 4 || !x.clientWidth || x.closest('.cfx-barra, .cfx-cab, header, dialog')) return;
       const hijos = [...x.children], botones = hijos.filter((h) => /^(BUTTON|A)$/.test(h.tagName) || h.classList.contains('chip'));
-      if (botones.length < hijos.length * 0.7 || getComputedStyle(x).display.indexOf('flex') < 0) return;
+      if (botones.length < hijos.length * 0.7 || getComputedStyle(x).display.indexOf('flex') < 0 || getComputedStyle(x).flexWrap === 'wrap') return; // una fila que baja de línea no es tira (p. ej. Agregar / Preguntar en la vitrina)
       x.classList.add('cfx-desliza'); x.addEventListener('scroll', () => marcarTira(x), { passive: true }); marcarTira(x);
     });
   }
@@ -1302,7 +1392,17 @@
   // Fechas y textos del navegador en español de Chile (el selector de fecha muestra dd-mm-aaaa).
   if (!/^es-CL$/i.test(document.documentElement.lang)) document.documentElement.lang = 'es-CL';
   let tTiras = 0;
-  const pedirTiras = () => { clearTimeout(tTiras); tTiras = setTimeout(() => { separarBotones(); tiras(); avisosDeslizar(); selAccion(); cuentaEnMas(); archivos(); letraMinima(); }, 120); };
+  // G20: botones de un solo ícono (sin palabras) y casi cuadrados → redondos (.cfx-redondo en tema.css). La barra de abajo y el + no se tocan.
+  const SOLO_IC = /^[\p{Extended_Pictographic}\u{FE0F}\u{200D}\s‹›←→✕×+−]*$/u;
+  function redondos() {
+    document.querySelectorAll('button:not(.cfx-redondo):not([data-cfx-cuadrado]), a.icon-btn:not(.cfx-redondo), header a:not(.cfx-redondo)').forEach((b) => {
+      if (b.closest('.cfx-barra, nav.tabs, .cfx-pnl, .prods, .cfx-mh-grid') || b.classList.contains('cfx-mas') || !b.offsetParent) return;
+      const t = (b.textContent || '').trim(); if (!SOLO_IC.test(t) || (!t && !b.querySelector('svg, img, .ico-svg'))) return;
+      const w = b.offsetWidth, h = b.offsetHeight; if (!w || w > 56 || Math.abs(w - h) > 6) return;
+      b.style.setProperty('--cfx-r', Math.max(w, h) + 'px'); b.classList.add('cfx-redondo'); // tamaño fijo: sin relleno no queda óvalo
+    });
+  }
+  const pedirTiras = () => { clearTimeout(tTiras); tTiras = setTimeout(() => { separarBotones(); tiras(); avisosDeslizar(); selAccion(); cuentaEnMas(); archivos(); letraMinima(); redondos(); }, 120); };
   new MutationObserver(pedirTiras).observe(document.documentElement, { childList: true, subtree: true });
   addEventListener('resize', pedirTiras); addEventListener('hashchange', pedirTiras); pedirTiras();
 
