@@ -44,3 +44,11 @@
 - Pantalla: Más → 🏷️ Bicis usadas (verUsadas/editarUsada: fotos, informe tocando ⬜→✅→🔧→🔁, ✅ Todo bien en lo que falta, 📣 Publicar, ✅ Se vendió, 📲 Compartir). /t/ muestra #usadas; ficha pública nueva u/?t=token (📲 Me interesa / 💬 Hacer una oferta por WhatsApp al taller). u/ en FILES de sw.js.
 - 🔄 Más → Parte de pago (verTradein, solo pantalla): venta = nueva × máx(0,75·0,88^años; 0,2) × estado (1/0,85/0,7/0,5), oferta = venta × (1 − ganancia%) − arreglos, redondeo a $5.000; margen en localStorage. 🏷️ Pasar a usadas = borrador con modelo/año/precio.
 - Error visto: inputs con onchange repintaban el resultado al salir del campo y se perdía el toque del botón → solo oninput (categoría UI).
+
+## 🪪 G59f · Módulo Pasaporte de la bici (2.91, bd 2.34 · núcleo 2.87) — prueba SaaS/pruebas/g59f_pasaporte.js
+- cfx_modulos_app() suma 'pasaporte'. Catálogo + demo en el núcleo.
+- Tabla pasaportes (bici, serie única por taller, color, dueño, teléfono/tel_norm, robada/robada_at/robada_nota, token = QR público, clave = del dueño). reservas.pasaporte_id (sin FK) = historial; trigger zz_pasaporte_enlazar enlaza solas las órdenes nuevas del mismo teléfono + bici.
+- RPC: taller_pasaportes() ({bloqueado} sin módulo) · taller_pasaporte(id) con historial (lista/completada, sin ítems rechazados) · taller_pasaporte_guardar(p) = todo el equipo (p.reserva enlaza la orden + las de ese teléfono y bici) · taller_pasaporte_borrar = solo dueño · públicas: pasaporte_ver(token, clave) (serie tapada salvo 4 últimos; con clave = es_dueno) y pasaporte_reportar(token, clave, robada, nota) → avisa al dueño del taller.
+- Pantalla: Más → 🪪 Pasaporte de la bici (lista, 🚨 robadas primero, buscar) y orden → 🪪 Pasaporte (crea con bici/dueño/teléfono de la orden). En el pasaporte: 🚨 Reportar robo / ✅ La recuperó, 🖨️ Sticker QR (2 de 5 cm), 📲 Enviar al dueño (link con clave), 👀 Ver ficha.
+- Público: p/?t=token (&c=clave del dueño: 🚨 Me la robaron / ✅ La recuperé). r/ muestra "🪪 Ver mi pasaporte" con la clave. p/ en FILES de sw.js.
+

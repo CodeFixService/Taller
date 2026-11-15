@@ -41,7 +41,7 @@
     document.querySelectorAll('#mSeg .dueno').forEach((b) => b.classList.toggle('hidden', !P.dueno));
     $('mSeg').querySelector('[data-m=modulos]').classList.toggle('hidden', !P.dueno || !P.venta);  // 🧩 solo con la venta prendida (CM → Apps → 🚲 → 🧩)
     $('mSeg').querySelector('[data-m=stock]').classList.toggle('hidden', !P.dueno && !tiene('stock'));  // G59d 📦: el equipo solo si el taller lo tiene
-    ['usadas', 'tradein'].forEach((m) => $('mSeg').querySelector('[data-m=' + m + ']').classList.toggle('hidden', !P.dueno && !tiene(m === 'usadas' ? 'certificadas' : m)));  // G59e
+    ['usadas', 'tradein', 'pasaporte'].forEach((m) => $('mSeg').querySelector('[data-m=' + m + ']').classList.toggle('hidden', !P.dueno && !tiene(m === 'usadas' ? 'certificadas' : m)));  // G59e · G59f
   }
   // G59 🧩 ¿El taller puede usar este módulo? (venta apagada = todos lo tienen)
   const tiene = (k) => !!(P && P.modulos && P.modulos[k]);
@@ -70,7 +70,7 @@
 
   /* ---------- Navegación ---------- */
   // #plan y #mas/<sección> (perfil, horario, servicios, abono…): abren esa parte de Más (la guía para partir los usa).
-  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock|usadas|tradein)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
+  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock|usadas|tradein|pasaporte)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
   const show = App.pestanas((v) => {
     vista = v;
     if (v === 'hoy') pintarHoy();
@@ -425,7 +425,7 @@
       (r.motivo ? '<div class="sub">Motivo: ' + esc(r.motivo) + '</div>' : '') +
       '<div class="btns">' + (r.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(r.telefono, 'Hola ' + r.nombre.split(' ')[0] + ' 👋 Te escribimos de ' + P.taller.nombre + ': ' +
         (msgCliente || '') + '\nTu reserva: ' + link) + '">📲 WhatsApp</a>' : '') +
-      '<button class="small ghost" id="dLink">🔗 Enlace del cliente</button>' + (r.tiene_comprobante ? '<button class="small ghost" data-comp="' + r.id + '">👁️ Comprobante</button>' : '') + '</div>' +
+      '<button class="small ghost" id="dLink">🔗 Enlace del cliente</button>' + (tiene('pasaporte') ? '<button class="small ghost" id="dPas">🪪 Pasaporte</button>' : P.venta && r.bici ? '<button class="small ghost" type="button" data-sin-atras data-ofrecer="pasaporte">🪪 Pasaporte</button>' : '') + (r.tiene_comprobante ? '<button class="small ghost" data-comp="' + r.id + '">👁️ Comprobante</button>' : '') + '</div>' +
       (r.estado === 'en_revision' ? botonesRevisar(r) : '') +
       (r.estado === 'lista' && !tiene('aviso_lista') && P.venta ? '<div class="aviso" style="margin-top:12px"><div class="grow">🔔 Avísale solo con el total y el link, y recuérdale si no la retira.</div><button class="small" type="button" data-sin-atras data-ofrecer="aviso_lista">🧩 Ver</button></div>' : '') +
       (r.abono_estado === 'devolver' ? '<div class="aviso warn" style="margin-top:12px"><div class="grow">Devuelve el abono de ' + plata(r.abono_monto) + ' al cliente.</div><button class="small okb" data-devuelto="' + r.id + '">✓ Ya lo devolví</button></div>' : '') +
@@ -453,6 +453,7 @@
     show('detalle');
     $('dVolver').onclick = () => history.length > 1 ? show(volverA) : show('reservas');
     $('dLink').onclick = () => { navigator.clipboard.writeText(link).then(() => toast('🔗 Enlace copiado')); };
+    const pas = $('dPas'); if (pas) pas.onclick = () => editarPasaporte(r.pasaporte_id || null, { bici: r.bici, dueno: r.nombre, telefono: r.telefono, reserva: r.id }, () => abrirDetalle(r.id));  // G59f
     $('v-detalle').onclick = async (ev) => {
       if (await accionesComunes(ev)) return;
       const be = ev.target.closest('[data-e]'); if (!be) return;
@@ -607,15 +608,15 @@
   let subMas = null;
   $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); } };
   // Más = menú común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (body() dibuja dentro de ella).
-  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes',
+  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes', pasaporte: 'Ventas y clientes',
     stats: 'Ventas y clientes', recordar: 'Ventas y clientes', plan: 'Tu plan', modulos: 'Tu plan', cuenta: 'Configuración' };
   const K2 = { plan: 'premium', cuenta: 'micuenta', chat: 'mensajes' };
-  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', usadas: '🏷️', tradein: '🔄', cuenta: '👤' };
+  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', usadas: '🏷️', tradein: '🔄', pasaporte: '🪪', cuenta: '👤' };
   let hojaMas = null;
   function abrirSec(m) {
     if (m === 'chat') { $('chatBtn').click(); return; }
     const b = $('mSeg').querySelector('[data-m="' + m + '"]'); if (!b || b.classList.contains('hidden')) return;
-    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, usadas: verUsadas, tradein: verTradein };
+    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, usadas: verUsadas, tradein: verTradein, pasaporte: verPasaportes };
     if (!hojaMas || hojaMas.m !== m || !hojaMas.h.d.isConnected) {
       const h = window.CFX_MENU.hoja((ICO[m] || '') + ' ' + esc(b.textContent.replace(/\d+$/, '').replace(/^[^\p{L}]+/u, '').trim()), () => { if (hojaMas && hojaMas.h === h) { hojaMas = null; subMas = null; } });
       hojaMas = { m, h };
@@ -1115,6 +1116,82 @@
     b.querySelectorAll('input').forEach((i) => { i.oninput = calc; }); v('#tiE').onchange = calc;  // sin onchange en inputs: al salir del campo repintaba y se perdía el toque
     if (window.CFX_FABRICA) CFX_FABRICA.bici(v('#tiT'));
     calc();
+  }
+
+  // ---- G59f 🧩 🪪 Pasaporte de la bici: sticker QR en el cuadro (historial, dueño, robo reportado) → ficha pública /p/
+  const linkPas = (x, dueno) => App.ROOT + 'p/?t=' + x.token + (dueno ? '&c=' + x.clave : '');
+  async function verPasaportes() {
+    body().innerHTML = '<p class="empty">Cargando…</p>';
+    let s;
+    try { s = await rpc('taller_pasaportes'); } catch (e) { body().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    if (s.bloqueado) { body().innerHTML = modOfrecer('pasaporte', '🪪 Pasaporte de la bici', 'Pégale un sticker QR al cuadro: guarda el historial de mantenciones y el dueño. Si se la roban, quien la escanee ve “REPORTADA COMO ROBADA”.'); return; }
+    const L = s.pasaportes;
+    body().innerHTML = '<div class="card"><h2>🪪 Pasaportes <span class="pill">' + L.length + '</span></h2><p class="sub" style="margin-top:0">Cada bici con su sticker QR: historial, dueño y aviso de robo. Créalo desde la orden o aquí.</p>' +
+      (L.length > 6 ? '<input id="pBus" type="search" placeholder="🔍 Buscar bici, nº de serie o dueño" aria-label="Buscar pasaporte">' : '') +
+      '<ul class="list" id="pLista"></ul><div class="btns"><button id="pNuevo" type="button">＋ Nuevo pasaporte</button></div></div>';
+    const pintar = () => {
+      const f = (body().querySelector('#pBus') || { value: '' }).value.trim().toLowerCase();
+      const l = L.filter((x) => !f || (x.bici + ' ' + x.serie + ' ' + x.dueno + ' ' + x.telefono).toLowerCase().includes(f));
+      body().querySelector('#pLista').innerHTML = l.length ? l.map((x) => '<li class="clic" data-pa="' + x.id + '"><span style="font-size:26px;flex:none">' + (x.robada ? '🚨' : '🚲') + '</span>' +
+        '<div class="grow"><b>' + esc(x.bici) + '</b><div class="sub">' + esc([x.dueno, x.serie && 'Nº ' + x.serie].filter(Boolean).join(' · ')) + ' · 🔧 ' + x.servicios + '</div></div>' +
+        (x.robada ? '<span class="pill bad">Robada</span>' : '') + '</li>').join('') : '<li class="muted">' + (L.length ? 'Nada con esa búsqueda.' : 'Toca ＋ o abre una orden → 🪪 Pasaporte.') + '</li>';
+    };
+    pintar();
+    const bus = body().querySelector('#pBus'); if (bus) bus.oninput = pintar;
+    body().onclick = (e) => {
+      const u = e.target.closest('[data-pa]'); if (u) { editarPasaporte(u.dataset.pa); return; }
+      if (e.target.closest('#pNuevo')) editarPasaporte(null);
+    };
+  }
+  // Sticker para imprimir y pegar en el cuadro (2 por si se pierde uno).
+  function stickerPas(x) {
+    const w = window.open('', '_blank');
+    if (!w) { toast('Permite las ventanas emergentes para imprimir'); return; }
+    let img = ''; try { const qr = window.qrcode(0, 'M'); qr.addData(linkPas(x)); qr.make(); img = qr.createDataURL(8, 4); } catch (e) { img = ''; }
+    const uno = '<div class="s"><b>🪪 PASAPORTE DE LA BICI</b><img alt="QR" src="' + img + '"><span>Escanéame: historial y aviso de robo</span><small>' + esc(P.taller.nombre) + '</small></div>';
+    w.document.write('<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Sticker ' + esc(x.bici) + '</title><style>body{font-family:system-ui,sans-serif;margin:20px;color:#0f172a}' +
+      '.s{display:inline-flex;flex-direction:column;align-items:center;gap:4px;width:5cm;padding:8px;margin:6px;border:2px dashed #94a3b8;border-radius:12px;text-align:center}' +
+      '.s b{font-size:11px}.s img{width:4cm;height:4cm;image-rendering:pixelated}.s span{font-size:10px}.s small{font-size:9px;color:#475569}</style></head><body>' + uno + uno +
+      '<script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>');
+    w.document.close();
+  }
+  async function editarPasaporte(id, base, alGuardar) {
+    let x;
+    try { x = id ? await rpc('taller_pasaporte', { p_id: id }) : Object.assign({ bici: '', serie: '', color: '', dueno: '', telefono: '', robada: false, robada_nota: '', historial: [] }, base || {}); }
+    catch (e) { toast(e.message); return; }
+    const d = modal('<h2>' + (id ? '🪪 ' + esc(x.bici) : '🪪 Nuevo pasaporte') + '</h2>' +
+      (x.robada ? '<div class="aviso bad" style="display:block"><b>🚨 Reportada como robada</b>' + (x.robada_at ? ' el ' + App.fCorta(x.robada_at.slice(0, 10)) : '') + (x.robada_nota ? '<div class="sub">' + esc(x.robada_nota) + '</div>' : '') + '</div>' : '') +
+      '<label for="paB">Marca y modelo</label><input id="paB" maxlength="120" value="' + esc(x.bici) + '" placeholder="Ej: Trek Marlin 7 aro 29">' +
+      '<div class="row"><div><label for="paS">Nº de serie</label><input id="paS" maxlength="60" value="' + esc(x.serie) + '" placeholder="Bajo el pedalier"></div><div><label for="paC">Color</label><input id="paC" maxlength="40" value="' + esc(x.color) + '"></div></div>' +
+      '<div class="row"><div><label for="paD">Dueño</label><input id="paD" maxlength="80" value="' + esc(x.dueno) + '"></div><div><label for="paT">Teléfono</label><input id="paT" maxlength="30" inputmode="tel" value="' + esc(x.telefono) + '"></div></div>' +
+      (id ? '<h3>🔧 Historial <span class="pill">' + x.historial.length + '</span></h3>' + (x.historial.length ? '<ul class="list">' + x.historial.map((h) => '<li><div class="grow"><b>' + App.fCorta(h.fecha) + '</b> · ' + esc(h.servicio) +
+        (h.trabajos.length ? '<div class="sub">' + esc(h.trabajos.join(', ')) + '</div>' : '') + '</div></li>').join('') + '</ul>' : '<p class="sub">Cada orden lista o entregada de esta bici queda aquí.</p>') : '') +
+      '<div class="btns">' + (id && P.dueno ? '<button class="danger" id="paX" type="button">🗑️ Borrar</button>' : '') +
+        (id ? '<button class="' + (x.robada ? 'okb' : 'danger') + '" id="paR" type="button">' + (x.robada ? '✅ La recuperó' : '🚨 Reportar robo') + '</button>' : '') +
+        '<button id="paG" type="button">💾 ' + (id ? 'Guardar' : 'Crear pasaporte') + '</button></div>' +
+      (id ? '<div class="btns"><button class="alt" id="paQ" type="button">🖨️ Sticker QR</button>' + (x.telefono ? '<a class="btn alt" id="paW" target="_blank" rel="noopener" href="' + App.wa(x.telefono, 'Hola ' + x.dueno.split(' ')[0] +
+        ' 👋 Te escribimos de ' + P.taller.nombre + ': este es el 🪪 pasaporte de tu ' + x.bici + '. Ahí ves su historial y, si te la roban, la reportas en 1 toque 👉 ' + linkPas(x, true)) + '">📲 Enviar al dueño</a>' : '') +
+        '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(linkPas(x)) + '">👀 Ver ficha</a></div>' : ''));
+    const q1 = (s) => d.querySelector(s);
+    if (window.CFX_FABRICA) CFX_FABRICA.bici(q1('#paB'));
+    const datos = (robada, nota) => ({ id: id || null, bici: q1('#paB').value, serie: q1('#paS').value, color: q1('#paC').value, dueno: q1('#paD').value, telefono: q1('#paT').value,
+      reserva: x.reserva || null, robada, robada_nota: nota });
+    const guardar = async (robada, nota, msg) => {
+      try {
+        const nid = await rpc('taller_pasaporte_guardar', { p: datos(robada, nota) });
+        d.close(); toast(msg || '💾 Guardado');
+        if (alGuardar) alGuardar(nid); else if (subMas === 'pasaporte') verPasaportes();
+        if (!id) editarPasaporte(nid, null, alGuardar);
+      } catch (err) { toast(err.message); }
+    };
+    q1('#paG').onclick = () => guardar(!!x.robada, x.robada_nota || '', id ? null : '🪪 Pasaporte creado: imprime el sticker');
+    const rb = q1('#paR'); if (rb) rb.onclick = async () => {
+      if (x.robada) { if (await confirmar('¿' + (x.dueno.split(' ')[0] || 'El dueño') + ' recuperó la ' + x.bici + '? Se quita el aviso de robo.')) guardar(false, '', '✅ Aviso de robo quitado'); return; }
+      const n = await pedirTexto('🚨 Reportar robo', 'Dónde y cuándo (lo ve quien la escanee)', '');
+      if (n !== null) guardar(true, n, '🚨 Reportada como robada');
+    };
+    const qb = q1('#paQ'); if (qb) qb.onclick = () => stickerPas(x);
+    const xb = q1('#paX'); if (xb) xb.onclick = async () => { if (!await confirmar('¿Borrar el pasaporte de "' + x.bici + '"? El sticker QR deja de funcionar.')) return; try { await rpc('taller_pasaporte_borrar', { p_id: id }); d.close(); verPasaportes(); } catch (e) { toast(e.message); } };
   }
   async function verPlan() {
     const planes = pub.planes || {};

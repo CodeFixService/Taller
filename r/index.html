@@ -50,6 +50,7 @@
       </div>
       <div id="bloque" style="margin-top:12px"></div>
     </div>
+    <div class="card hidden" id="cPas"><h2>🪪 Pasaporte de tu bici</h2><p class="sub" style="margin-top:0">Su historial de mantenciones y, si te la roban, la reportas en 1 toque.</p><div class="btns"><a class="btn" id="pasLink" href="#">🪪 Ver mi pasaporte</a></div></div>
     <div class="card hidden pres" id="cPres"><h2>🧾 Aprueba tu presupuesto</h2><p class="sub" style="margin-top:0">Elige Sí o No en cada arreglo. Solo se cobra lo que apruebes.</p>
       <div id="presItems"></div><p style="margin:10px 0">Total aprobado: <b id="presTot"></b></p><button type="button" id="presEnviar" style="width:100%">Enviar respuesta</button></div>
     <div class="card hidden" id="cTrabajo"><h2>🔧 Tu bici</h2><ul class="tl" id="tl"></ul><div id="detalle"></div></div>
@@ -178,6 +179,9 @@
         (r.proxima_mantencion && r.estado === 'completada' ? '<p class="sub">🔔 Próxima mantención recomendada: ' + App.fLarga(r.proxima_mantencion) + '</p>' : '');
     }
 
+    // G59f 🪪 Pasaporte de la bici (con la clave del dueño para reportar robo).
+    $('cPas').classList.toggle('hidden', !r.pasaporte);
+    if (r.pasaporte) $('pasLink').href = '../p/?t=' + encodeURIComponent(r.pasaporte.token) + '&c=' + encodeURIComponent(r.pasaporte.clave);
     // G59 🧩 ✅ Presupuesto por link: el cliente responde cada ítem pendiente.
     const pend = (r.items || []).map((it, i) => [it, i]).filter(([it]) => it.aprob === 'pend');
     const verPres = !!(r.presupuesto && r.presupuesto.estado === 'enviado' && pend.length);

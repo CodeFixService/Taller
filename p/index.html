@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16a34a">
+<title>Pasaporte de la bici</title>
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icons/icon-192.png">
+<link rel="stylesheet" href="../shared/vendor/bootstrap-utilities.min.css">
+<link rel="stylesheet" href="../shared/app.css?v=2.2">
+<link rel="stylesheet" href="../shared/tema.css">
+<style>
+  .p-robada { background: var(--cfx-bad, #dc2626); color: #fff; border-radius: 14px; padding: 14px; font-weight: 800; text-align: center; }
+  .p-robada .sub { color: #fff; opacity: .9; font-weight: 400; }
+</style>
+<script src="../shared/seguro.js"></script>
+<script src="../shared/carga.js"></script>
+<script src="../shared/humano.js"></script>
+</head>
+<body>
+<main>
+  <p class="empty" id="cargando">Cargando…</p>
+  <div class="hidden" id="todo">
+    <div class="card">
+      <div class="sub">🪪 Pasaporte de la bici</div>
+      <h1 id="tit" style="margin:4px 0"></h1>
+      <div class="sub" id="datos"></div>
+      <div id="estado" style="margin-top:12px"></div>
+      <div class="btns" id="acc"></div>
+    </div>
+    <div class="card hidden" id="cDueno">
+      <h2>🔐 Eres el dueño</h2>
+      <p class="sub" style="margin-top:0" id="dTxt"></p>
+      <div class="btns"><button type="button" id="bRobo"></button></div>
+    </div>
+    <div class="card">
+      <h2>🔧 Historial de mantenciones</h2>
+      <ul class="list" id="hist"></ul>
+    </div>
+    <div class="card">
+      <div class="hero"><div class="logo" id="logo"></div><div class="grow"><b id="tNom"></b><div class="sub" id="tDir"></div></div></div>
+      <div class="btns"><a class="btn ghost" id="tVer" href="#">🚲 Ver el taller</a></div>
+    </div>
+  </div>
+</main>
+<script src="../shared/config.js?v=2.2"></script>
+<script src="../shared/vendor/supabase.js"></script>
+<script src="../shared/app.js?v=2.2"></script>
+<script>
+(async function () {
+  'use strict';
+  // G59f 🪪 Pasaporte público de la bici (lo abre el QR del cuadro): historial y si está reportada como robada.
+  // Con &c=clave (link que el taller le manda al dueño) el dueño reporta 🚨 robo o ✅ recuperada.
+  const { $, esc } = App;
+  App.registrarSW();
+  const qs = new URLSearchParams(location.search), token = qs.get('t') || '', clave = qs.get('c') || '';
+  if (token.length < 20) { $('cargando').textContent = 'Enlace no válido. Escanea el QR del cuadro de la bici.'; return; }
+  await App.cargarPublica();
+  let b;
+  const cargar = async () => {
+    try { b = await App.rpc('pasaporte_ver', { p_token: token, p_clave: clave }); } catch (e) { $('cargando').textContent = '⚠️ ' + e.message; return; }
+    if (!b) { $('cargando').textContent = 'Este pasaporte ya no está activo.'; return; }
+    pintar();
+  };
+  const pintar = () => {
+    const t = b.taller;
+    document.title = 'Pasaporte · ' + b.bici;
+    App.tema(t.color);
+    $('tit').textContent = b.bici;
+    $('datos').textContent = [b.color && 'Color ' + b.color, b.serie && 'Nº de serie ' + b.serie, b.dueno && 'Dueño: ' + b.dueno].filter(Boolean).join(' · ');
+    $('estado').innerHTML = b.robada
+      ? '<div class="p-robada">🚨 REPORTADA COMO ROBADA' + (b.robada_at ? '<div class="sub">el ' + esc(App.fLarga(b.robada_at.slice(0, 10))) + '</div>' : '') + (b.robada_nota ? '<div class="sub">' + esc(b.robada_nota) + '</div>' : '') + '</div>' +
+        '<p class="sub">¿La viste o te la quieren vender? No la compres y avisa al taller.</p>'
+      : '<div class="aviso" style="display:block">✅ Sin reporte de robo</div>';
+    $('acc').innerHTML = b.robada && t.telefono && !b.es_dueno ? '<a class="btn danger" target="_blank" rel="noopener" href="' + App.wa(t.telefono, 'Hola ' + t.nombre + ' 👋 Vi la ' + b.bici +
+      ' que está reportada como robada (pasaporte ' + location.href.split('?')[0] + '?t=' + token + '). Está en: ') + '">📲 La vi: avisar al taller</a>' : '';
+    $('cDueno').classList.toggle('hidden', !b.es_dueno);
+    if (b.es_dueno) {
+      $('dTxt').textContent = b.robada ? 'Si ya la recuperaste, quita el aviso.' : 'Si te la roban, repórtala: quien escanee el QR lo verá y le avisamos al taller.';
+      $('bRobo').textContent = b.robada ? '✅ La recuperé' : '🚨 Me la robaron';
+      $('bRobo').className = b.robada ? 'okb' : 'danger';
+    }
+    $('hist').innerHTML = b.historial.length ? b.historial.map((h) => '<li><div class="grow"><b>' + esc(App.fCorta(h.fecha)) + '</b> · ' + esc(h.servicio) +
+      (h.trabajos.length ? '<div class="sub">' + esc(h.trabajos.join(', ')) + '</div>' : '') + '</div></li>').join('') : '<li class="muted">Todavía sin mantenciones registradas.</li>';
+    App.pintarLogo($('logo'), t);
+    $('tNom').textContent = t.nombre;
+    $('tDir').textContent = [t.direccion, t.comuna].filter(Boolean).join(', ');
+    $('tVer').href = '../t/?s=' + encodeURIComponent(t.slug);
+    $('cargando').classList.add('hidden'); $('todo').classList.remove('hidden');
+  };
+  $('bRobo').onclick = async () => {
+    const D = window.CFX_DIALOGO;
+    let nota = '';
+    if (!b.robada) {
+      nota = D ? await D.pedir('🚨 ¿Dónde y cuándo te la robaron? (lo verá quien escanee el QR)', '') : '';
+      if (nota === null) return;
+    } else if (D && !await D.confirmar('¿Recuperaste tu ' + b.bici + '? Se quita el aviso de robo.')) return;
+    $('bRobo').disabled = true;
+    try {
+      const x = await App.rpc('pasaporte_reportar', { p_token: token, p_clave: clave, p_robada: !b.robada, p_nota: nota || '' });
+      if (!x.ok) throw new Error(x.error);
+      App.toast(b.robada ? '✅ Aviso de robo quitado' : '🚨 Reportada: le avisamos al taller');
+      await cargar();
+    } catch (e) { App.toast(e.message); }
+    $('bRobo').disabled = false;
+  };
+  await cargar();
+  App.pie();
+})();
+</script>
+<script src="../shared/iconos.js"></script>
+<script src="../shared/instalar.js"></script>
+<script src="../shared/barra.js"></script>
+<script src="../shared/auto.js"></script>
+<script src="../shared/fotos.js"></script>
+<script src="../shared/voz.js"></script>
+<script src="../shared/respaldo.js"></script>
+<script src="../shared/pagos.js"></script>
+<script src="../shared/verificar.js"></script>
+<script src="../shared/premium.js"></script>
+<script src="../shared/ayuda.js"></script>
+<script src="../shared/datos.js"></script>
+<script src="../shared/vitrina.js"></script>
+<script src="../shared/ui.js"></script>
+</body>
+</html>

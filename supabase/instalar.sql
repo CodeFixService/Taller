@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.33'::text $$;
+language sql immutable as $$ select '2.34'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -621,6 +621,8 @@ alter table public.reservas add column if not exists presupuesto jsonb;
 -- G59c 🔔 Aviso "bici lista": cuándo quedó lista y si ya le recordamos que la retire.
 alter table public.reservas add column if not exists lista_at timestamptz;
 alter table public.reservas add column if not exists lista_recordada boolean not null default false;
+-- G59f 🧩 🪪 Pasaporte de la bici: orden enlazada al pasaporte (su historial). Sin FK: el pasaporte se crea más abajo.
+alter table public.reservas add column if not exists pasaporte_id uuid;
 
 -- Fotos antes/después del trabajo (v1.6, taller Premium). Livianas y se borran solas después de N días.
 create table if not exists public.fotos_trabajo (
@@ -1134,7 +1136,9 @@ begin
     'fotos_visibles', public.fotos_visibles(r),
     'taller', jsonb_build_object('id', c.id, 'nombre', c.nombre, 'slug', c.slug, 'telefono', c.telefono, 'logo', c.logo,
       'color', c.color, 'icono', c.icono, 'direccion', c.direccion, 'comuna', c.comuna),
-    'minutos_devolucion', dev, 'horas_cancelacion', hrs);
+    'minutos_devolucion', dev, 'horas_cancelacion', hrs,
+    -- G59f 🪪 link del dueño a su pasaporte (con la clave para reportar robo), si el taller tiene el módulo.
+    'pasaporte', (select jsonb_build_object('token', p.token, 'clave', p.clave) from public.pasaportes p where p.id = r.pasaporte_id and public.cfx_modulo_de('pasaporte', c.owner_id)));
 end $$;
 
 -- El cliente sube la foto del comprobante del abono.
@@ -1394,7 +1398,7 @@ language sql stable security definer set search_path = '' as $$
     select r.id, r.fecha, to_char(r.hora, 'HH24:MI') as hora, to_char(r.hora_fin, 'HH24:MI') as hora_fin, r.nombre, r.telefono,
       r.email, r.bici, r.nota, r.servicio_id, r.servicio_nombre, r.precio, r.estado, r.abono_monto, r.abono_estado, r.expira_at,
       r.origen, r.cliente_id, r.mecanico_id, r.items, r.total, r.diagnostico, r.notas_internas, r.proxima_mantencion,
-      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta, r.entrega_estimada, r.checklist, r.presupuesto, r.lista_at,
+      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta, r.entrega_estimada, r.checklist, r.presupuesto, r.lista_at, r.pasaporte_id,
       (select p.nombre from public.perfiles p where p.id = r.mecanico_id) as mecanico,
       exists (select 1 from public.comprobantes k where k.reserva_id = r.id) as tiene_comprobante,
       public.nota_cliente(r.telefono) as nota_cliente,
@@ -2857,7 +2861,7 @@ language sql stable security definer set search_path = '' as $$
   select coalesce((select public.taller_es_premium(t.id) from public.talleres t where t.owner_id = n), false)
 $$;
 create or replace function public.cfx_modulos_app() returns text[]
-language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock', 'certificadas', 'tradein'] $$;
+language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock', 'certificadas', 'tradein', 'pasaporte'] $$;
 revoke all on function public.cfx_negocio_de_cuenta(uuid), public.cfx_es_premium(uuid), public.cfx_modulos_app() from public, anon, authenticated;
 create or replace function public.taller_tiene(p_modulo text) returns boolean
 language plpgsql stable security definer set search_path = '' as $$ begin return public.cfx_modulo_de(p_modulo, public.cfx_negocio_de_cuenta(auth.uid())); end $$;
@@ -3202,6 +3206,155 @@ revoke all on function public.usada_revisados(jsonb), public.usada_json(public.b
   public.taller_usada_guardar(jsonb), public.taller_usada_borrar(uuid), public.usadas_publicas(text), public.usada_ver(text) from public, anon, authenticated;
 grant execute on function public.taller_usadas(), public.taller_usada(uuid), public.taller_usada_guardar(jsonb), public.taller_usada_borrar(uuid) to authenticated;
 grant execute on function public.usadas_publicas(text), public.usada_ver(text) to anon, authenticated;
+
+-- ---------- G59f 🧩 🪪 Pasaporte de la bici (sticker QR en el cuadro: historial, dueño, robo reportado → ficha /p/) ----------
+-- token = el QR (público: lo escanea cualquiera) · clave = del dueño (va en su link /p/?t=..&c=..): con ella reporta 🚨 robo o ✅ recuperada.
+-- Historial = órdenes del taller enlazadas (reservas.pasaporte_id): al crear el pasaporte se enlazan las de ese teléfono + bici, y las nuevas solas (trigger).
+create table if not exists public.pasaportes (
+  id          uuid primary key default gen_random_uuid(),
+  taller_id   uuid not null references public.talleres (id) on delete cascade,
+  bici        text not null check (length(trim(bici)) between 1 and 120),
+  serie       text not null default '' check (length(serie) <= 60),
+  color       text not null default '' check (length(color) <= 40),
+  dueno       text not null default '' check (length(dueno) <= 80),
+  telefono    text not null default '' check (length(telefono) <= 30),
+  tel_norm    text not null default '',
+  robada      boolean not null default false,
+  robada_at   timestamptz,
+  robada_nota text not null default '' check (length(robada_nota) <= 300),
+  token       text not null unique default replace(gen_random_uuid()::text, '-', ''),
+  clave       text not null default replace(gen_random_uuid()::text, '-', ''),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists pasaportes_t_idx on public.pasaportes (taller_id, tel_norm);
+create unique index if not exists pasaportes_serie_idx on public.pasaportes (taller_id, lower(serie)) where serie <> '';
+alter table public.pasaportes enable row level security;
+
+-- Órdenes nuevas del mismo teléfono y la misma bici quedan en su historial solas.
+create or replace function public.pasaporte_enlazar() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if new.pasaporte_id is null and trim(new.bici) <> '' and public.tel_norm(new.telefono) <> '' then
+    select p.id into new.pasaporte_id from public.pasaportes p
+    where p.taller_id = new.taller_id and p.tel_norm = public.tel_norm(new.telefono) and lower(trim(p.bici)) = lower(trim(new.bici)) limit 1;
+  end if;
+  return new;
+end $$;
+drop trigger if exists zz_pasaporte_enlazar on public.reservas;
+create trigger zz_pasaporte_enlazar before insert on public.reservas for each row execute function public.pasaporte_enlazar();
+
+create or replace function public.pasaporte_historial(p_id uuid) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select coalesce(jsonb_agg(jsonb_build_object('fecha', r.fecha, 'servicio', r.servicio_nombre,
+    'trabajos', (select coalesce(jsonb_agg(i ->> 'nombre'), '[]') from jsonb_array_elements(r.items) i where coalesce(i ->> 'aprob', '') <> 'no')) order by r.fecha desc), '[]')
+  from public.reservas r where r.pasaporte_id = p_id and r.estado in ('lista', 'completada')
+$$;
+create or replace function public.pasaporte_json(p public.pasaportes) returns jsonb
+language sql stable set search_path = '' as $$
+  select jsonb_build_object('id', p.id, 'bici', p.bici, 'serie', p.serie, 'color', p.color, 'dueno', p.dueno, 'telefono', p.telefono,
+    'robada', p.robada, 'robada_at', p.robada_at, 'robada_nota', p.robada_nota, 'token', p.token, 'clave', p.clave, 'created_at', p.created_at,
+    'servicios', (select count(*) from public.reservas r where r.pasaporte_id = p.id and r.estado in ('lista', 'completada')))
+$$;
+
+create or replace function public.taller_pasaportes() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('pasaporte') then return jsonb_build_object('bloqueado', true); end if;
+  return jsonb_build_object('pasaportes', (select coalesce(jsonb_agg(public.pasaporte_json(p) order by p.robada desc, p.updated_at desc), '[]')
+    from public.pasaportes p where p.taller_id = tid));
+end $$;
+
+create or replace function public.taller_pasaporte(p_id uuid) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); p public.pasaportes;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  select * into p from public.pasaportes where id = p_id and taller_id = tid;
+  if p.id is null then raise exception 'Pasaporte no encontrado'; end if;
+  return public.pasaporte_json(p) || jsonb_build_object('historial', public.pasaporte_historial(p.id));
+end $$;
+
+-- Todo el equipo crea, edita y reporta robo. p.reserva = orden desde la que se crea (se enlaza con las de ese teléfono y bici).
+create or replace function public.taller_pasaporte_guardar(p jsonb) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); pid uuid := nullif(p ->> 'id', '')::uuid; b text := trim(coalesce(p ->> 'bici', ''));
+  s text := trim(coalesce(p ->> 'serie', '')); tel text := left(trim(coalesce(p ->> 'telefono', '')), 30); rid uuid := nullif(p ->> 'reserva', '')::uuid;
+  rob boolean := coalesce((p ->> 'robada')::boolean, false); tn text;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('pasaporte') then raise exception 'Necesitas el módulo 🪪 Pasaporte de la bici'; end if;
+  if b = '' then raise exception 'Escribe la marca y el modelo de la bici'; end if;
+  tn := public.tel_norm(tel);
+  if s <> '' and exists (select 1 from public.pasaportes where taller_id = tid and lower(serie) = lower(s) and id is distinct from pid) then
+    raise exception 'Ya hay un pasaporte con el nº de serie %', s; end if;
+  if pid is null then
+    if (select count(*) from public.pasaportes where taller_id = tid) >= 5000 then raise exception 'Llegaste al máximo de 5.000 pasaportes'; end if;
+    insert into public.pasaportes (taller_id, bici, serie, color, dueno, telefono, tel_norm, robada, robada_at, robada_nota)
+    values (tid, left(b, 120), left(s, 60), left(trim(coalesce(p ->> 'color', '')), 40), left(trim(coalesce(p ->> 'dueno', '')), 80), tel, tn,
+            rob, case when rob then now() end, left(coalesce(p ->> 'robada_nota', ''), 300)) returning id into pid;
+    update public.reservas r set pasaporte_id = pid where r.taller_id = tid and r.pasaporte_id is null
+      and (r.id = rid or (tn <> '' and r.tel_norm = tn and lower(trim(r.bici)) = lower(b)));
+  else
+    update public.pasaportes set bici = left(b, 120), serie = left(s, 60), color = left(trim(coalesce(p ->> 'color', '')), 40),
+      dueno = left(trim(coalesce(p ->> 'dueno', '')), 80), telefono = tel, tel_norm = tn, robada = rob,
+      robada_at = case when rob then coalesce(robada_at, now()) end, robada_nota = case when rob then left(coalesce(p ->> 'robada_nota', ''), 300) else '' end, updated_at = now()
+    where id = pid and taller_id = tid;
+    if not found then raise exception 'Pasaporte no encontrado'; end if;
+  end if;
+  return pid;
+end $$;
+
+create or replace function public.taller_pasaporte_borrar(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller puede borrar'; end if;
+  update public.reservas set pasaporte_id = null where pasaporte_id = p_id and taller_id = tid;
+  delete from public.pasaportes where id = p_id and taller_id = tid;
+  if not found then raise exception 'Pasaporte no encontrado'; end if;
+end $$;
+
+-- Público: lo que ve quien escanea el QR (nº de serie tapado salvo los 4 últimos; dueño solo el nombre). Con la clave: el dueño.
+create or replace function public.pasaporte_ver(p_token text, p_clave text default '') returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare p public.pasaportes; t public.talleres; du boolean;
+begin
+  select * into p from public.pasaportes where token = p_token and length(p_token) >= 20;
+  if p.id is null then return null; end if;
+  select * into t from public.talleres where id = p.taller_id;
+  if not public.cfx_modulo_de('pasaporte', t.owner_id) then return null; end if;
+  du := length(coalesce(p_clave, '')) >= 20 and p_clave = p.clave;
+  return jsonb_build_object('bici', p.bici, 'color', p.color, 'dueno', split_part(p.dueno, ' ', 1), 'robada', p.robada, 'robada_at', p.robada_at,
+    'robada_nota', case when p.robada then p.robada_nota else '' end, 'creado', p.created_at, 'es_dueno', du,
+    'serie', case when du or length(p.serie) <= 4 then p.serie else repeat('•', least(length(p.serie) - 4, 8)) || right(p.serie, 4) end,
+    'historial', public.pasaporte_historial(p.id),
+    'taller', jsonb_build_object('nombre', t.nombre, 'slug', t.slug, 'telefono', t.telefono, 'logo', t.logo, 'color', t.color, 'icono', t.icono,
+      'comuna', t.comuna, 'direccion', t.direccion));
+end $$;
+
+-- El dueño (con su clave) reporta 🚨 robo o ✅ recuperada; le avisamos al taller.
+create or replace function public.pasaporte_reportar(p_token text, p_clave text, p_robada boolean, p_nota text default '') returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare p public.pasaportes; t public.talleres;
+begin
+  select * into p from public.pasaportes where token = p_token and length(p_token) >= 20 and clave = p_clave and length(coalesce(p_clave, '')) >= 20 for update;
+  if p.id is null then return jsonb_build_object('ok', false, 'error', 'Este link no es del dueño de la bici'); end if;
+  select * into t from public.talleres where id = p.taller_id;
+  if not public.cfx_modulo_de('pasaporte', t.owner_id) then return jsonb_build_object('ok', false, 'error', 'El taller ya no tiene el pasaporte activo'); end if;
+  if p.robada = coalesce(p_robada, false) then return jsonb_build_object('ok', true); end if;
+  update public.pasaportes set robada = coalesce(p_robada, false), robada_at = case when p_robada then now() end,
+    robada_nota = case when p_robada then left(coalesce(p_nota, ''), 300) else '' end, updated_at = now() where id = p.id;
+  perform public.avisar(t.owner_id, case when p_robada then '🚨 Bici robada' else '✅ Bici recuperada' end,
+    split_part(p.dueno, ' ', 1) || case when p_robada then ' reportó robada su ' else ' recuperó su ' end || p.bici || coalesce(nullif(' · ' || p.serie, ' · '), ''), '/taller/#mas/pasaporte');
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function public.pasaporte_enlazar(), public.pasaporte_historial(uuid), public.pasaporte_json(public.pasaportes), public.taller_pasaportes(), public.taller_pasaporte(uuid),
+  public.taller_pasaporte_guardar(jsonb), public.taller_pasaporte_borrar(uuid), public.pasaporte_ver(text, text), public.pasaporte_reportar(text, text, boolean, text) from public, anon, authenticated;
+grant execute on function public.taller_pasaportes(), public.taller_pasaporte(uuid), public.taller_pasaporte_guardar(jsonb), public.taller_pasaporte_borrar(uuid) to authenticated;
+grant execute on function public.pasaporte_ver(text, text), public.pasaporte_reportar(text, text, boolean, text) to anon, authenticated;
 
 -- >>> CFX núcleo (no editar aquí: se copia de saas/nucleo/sql con sincronizar.py)
 -- ---------------------------------------------------------------------
@@ -4639,7 +4792,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bicis_usadas', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.perfiles', 'public.planes', 'public.promos', 'public.proveedores', 'public.push_subs', 'public.repuestos', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bicis_usadas', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.pasaportes', 'public.perfiles', 'public.planes', 'public.promos', 'public.proveedores', 'public.push_subs', 'public.repuestos', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
@@ -4910,7 +5063,8 @@ language sql immutable as $$
          ('mantencion', '⏰ Recordatorio de mantención', 'Cada X meses le avisamos al cliente que le toca mantención: vuelve solo.'),
          ('stock', '📦 Repuestos y stock', 'Stock de repuestos que baja solo con cada orden y pedido a tu proveedor por WhatsApp con un toque.'),
          ('certificadas', '🏷️ Bicis usadas certificadas', 'Vende bicis usadas con informe de 50 puntos, fotos y garantía: se publican en tu página y te escriben por WhatsApp.'),
-         ('tradein', '🔄 Parte de pago', 'Calculadora: cuánto ofrecer por la bici usada del cliente para que se lleve una nueva o un arreglo.')
+         ('tradein', '🔄 Parte de pago', 'Calculadora: cuánto ofrecer por la bici usada del cliente para que se lleve una nueva o un arreglo.'),
+         ('pasaporte', '🪪 Pasaporte de la bici', 'Sticker QR para el cuadro: historial de mantenciones, dueño y aviso de robo. Quien la escanea sabe si es robada.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb

@@ -4,7 +4,7 @@
 const CACHE = 'bt-v2.74';
 const BASE = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'shared/app.css', 'shared/app.js', 'shared/ui.js', 'shared/vendor/bootstrap-utilities.min.css', 'shared/seguro.js', 'shared/vitrina.js', 'shared/datos.js', 'shared/carga.js', 'shared/ayuda.js', 'shared/qr.js', 'shared/modulos.js', 'shared/premium.js', 'shared/humano.js', 'shared/verificar.js', 'shared/pagos.js', 'shared/respaldo.js', 'shared/voz.js', 'shared/fotos.js', 'shared/fabrica.js', 'shared/auto.js', 'shared/barra.js', 'shared/tema.css', 'shared/iconos.js', 'shared/instalar.js', 'shared/config.js', 'shared/vendor/supabase.js', 'shared/vendor/qrcode.js',
-  'admin/', 'admin/admin.js', 'taller/', 'taller/taller.js', 'cliente/', 't/', 'r/', 'n/', 'd/', 'u/'];
+  'admin/', 'admin/admin.js', 'taller/', 'taller/taller.js', 'cliente/', 't/', 'r/', 'n/', 'd/', 'u/', 'p/'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(BASE.map((u) => new Request(u, { cache: 'reload' })))).catch(() => {}).then(() => self.skipWaiting()));
