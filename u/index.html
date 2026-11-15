@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16a34a">
+<title>Bici usada certificada</title>
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icons/icon-192.png">
+<link rel="stylesheet" href="../shared/vendor/bootstrap-utilities.min.css">
+<link rel="stylesheet" href="../shared/app.css?v=2.2">
+<link rel="stylesheet" href="../shared/tema.css">
+<style>
+  .u-fotos { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; margin: 0 -4px 10px; padding: 0 4px; }
+  .u-fotos img { flex: 0 0 86%; max-width: 86%; aspect-ratio: 4 / 3; object-fit: contain; background: #fff; border-radius: 14px; scroll-snap-align: center; }
+  .u-fotos img:only-child { flex-basis: 100%; max-width: 100%; }
+  .u-sello { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; }
+  .u-inf li { padding: 6px 0; }
+</style>
+<script src="../shared/seguro.js"></script>
+<script src="../shared/carga.js"></script>
+<script src="../shared/humano.js"></script>
+</head>
+<body>
+<main>
+  <p class="empty" id="cargando">Cargando…</p>
+  <div class="hidden" id="todo">
+    <div class="card">
+      <div class="u-fotos" id="fotos"></div>
+      <h1 id="tit" style="margin:4px 0"></h1>
+      <div class="sub" id="datos"></div>
+      <div style="font-size:1.6em;margin:8px 0" class="precio" id="precio"></div>
+      <div class="info-linea" id="sellos" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+      <p id="nota" class="hidden" style="margin:10px 0 0;white-space:pre-line"></p>
+      <div class="btns" id="acc"></div>
+    </div>
+    <div class="card">
+      <h2>🔍 Informe de inspección</h2>
+      <p class="sub" style="margin-top:0" id="infSub"></p>
+      <div id="inf"></div>
+    </div>
+    <div class="card">
+      <div class="hero"><div class="logo" id="logo"></div><div class="grow"><b id="tNom"></b><div class="sub" id="tDir"></div></div></div>
+      <div class="btns"><a class="btn ghost" id="tVer" href="#">🚲 Ver el taller</a></div>
+    </div>
+  </div>
+</main>
+<script src="../shared/config.js?v=2.2"></script>
+<script src="../shared/vendor/supabase.js"></script>
+<script src="../shared/app.js?v=2.2"></script>
+<script src="../shared/fabrica.js"></script>
+<script>
+(async function () {
+  'use strict';
+  // G59e 🏷️ Ficha pública de la bici usada certificada: fotos, precio, garantía e informe de 50 puntos. Comprar u ofertar por WhatsApp.
+  const { $, esc, plata } = App;
+  App.registrarSW();
+  const token = new URLSearchParams(location.search).get('t') || '';
+  if (token.length < 20) { $('cargando').textContent = 'Enlace no válido. Pídele al taller el link de la bici.'; return; }
+  await App.cargarPublica();
+  let b;
+  try { b = await App.rpc('usada_ver', { p_token: token }); } catch (e) { $('cargando').textContent = '⚠️ ' + e.message; return; }
+  if (!b) { $('cargando').textContent = 'Esta bici ya no está publicada.'; return; }
+  const t = b.taller, E = CFX_FABRICA.INF_EST, vendida = b.estado === 'vendida';
+  document.title = b.titulo + ' · ' + t.nombre;
+  App.tema(t.color);
+  $('fotos').innerHTML = (b.fotos || []).map((f, i) => '<img alt="Foto ' + (i + 1) + ' de ' + esc(b.titulo) + '" src="' + esc(f) + '">').join('');
+  $('tit').textContent = b.titulo;
+  $('datos').textContent = [b.talla && 'Talla ' + b.talla, b.anio && 'Año ' + b.anio].filter(Boolean).join(' · ');
+  $('precio').innerHTML = vendida ? '<span class="pill warn">✅ Vendida</span>' : plata(b.precio);
+  $('sellos').innerHTML = '<span class="pill ok u-sello">🔍 Certificada ' + b.revisados + '/50</span>' + (b.garantia ? '<span class="pill">🛡️ Garantía ' + b.garantia + (b.garantia === 1 ? ' mes' : ' meses') + '</span>' : '');
+  if (b.nota) { $('nota').textContent = b.nota; $('nota').classList.remove('hidden'); }
+  const link = location.href.split('#')[0];
+  if (!vendida && t.telefono) {
+    $('acc').innerHTML = '<a class="btn" target="_blank" rel="noopener" href="' + App.wa(t.telefono, 'Hola ' + t.nombre + ' 👋 Me interesa la ' + b.titulo + ' (' + plata(b.precio) + '): ' + link) + '">📲 Me interesa</a>' +
+      '<button class="alt" type="button" id="bOf">💬 Hacer una oferta</button>';
+    $('bOf').onclick = () => {
+      const d = App.modal('<h2>💬 Tu oferta</h2><p class="muted" style="margin-top:0">El taller la recibe por WhatsApp y te responde.</p><label for="oM">¿Cuánto ofreces?</label><input id="oM" inputmode="numeric" placeholder="' + esc(String(Math.round(b.precio * 0.9))) + '">' +
+        '<div class="btns"><button class="ghost" data-cerrar>Cancelar</button><button type="button" id="oE">📲 Enviar oferta</button></div>');
+      d.querySelector('#oE').onclick = () => {
+        const m = App.numero(d.querySelector('#oM').value); if (!m) { App.toast('Escribe tu oferta'); return; }
+        window.open(App.wa(t.telefono, 'Hola ' + t.nombre + ' 👋 Por la ' + b.titulo + ' (' + plata(b.precio) + ') te ofrezco ' + plata(m) + '. ¿Te parece? ' + link), '_blank', 'noopener');
+        d.close();
+      };
+    };
+  }
+  const malos = Object.values(b.informe || {}).filter((v) => v !== 'ok').length;
+  $('infSub').textContent = 'El taller revisó ' + b.revisados + ' de 50 puntos.' + (malos ? ' ' + malos + ' se ajustaron o cambiaron: ya quedaron bien.' : ' Todo en buen estado.');
+  $('inf').innerHTML = CFX_FABRICA.INFORME.map(([g, ps]) => '<details><summary class="clic" style="font-weight:700;margin:6px 0">' + esc(g) + ' <span class="sub">' +
+    ps.filter(([k]) => E[b.informe[k]]).length + '/5</span></summary><ul class="list u-inf">' +
+    ps.map(([k, x]) => '<li><span style="width:26px;flex:none">' + (E[b.informe[k]] ? E[b.informe[k]][0] : '⬜') + '</span><span class="grow">' + esc(x) + '</span><span class="sub">' + (E[b.informe[k]] ? E[b.informe[k]][1] : 'Sin revisar') + '</span></li>').join('') + '</ul></details>').join('') +
+    '<p class="sub">✅ Bien · 🔧 Ajustado · 🔁 Cambiado</p>';
+  App.pintarLogo($('logo'), t);
+  $('tNom').textContent = t.nombre;
+  $('tDir').textContent = [t.direccion, t.comuna].filter(Boolean).join(', ');
+  $('tVer').href = '../t/?s=' + encodeURIComponent(t.slug);
+  $('cargando').classList.add('hidden'); $('todo').classList.remove('hidden');
+  App.pie();
+})();
+</script>
+<script src="../shared/iconos.js"></script>
+<script src="../shared/instalar.js"></script>
+<script src="../shared/barra.js"></script>
+<script src="../shared/auto.js"></script>
+<script src="../shared/fotos.js"></script>
+<script src="../shared/voz.js"></script>
+<script src="../shared/respaldo.js"></script>
+<script src="../shared/pagos.js"></script>
+<script src="../shared/verificar.js"></script>
+<script src="../shared/premium.js"></script>
+<script src="../shared/ayuda.js"></script>
+<script src="../shared/datos.js"></script>
+<script src="../shared/vitrina.js"></script>
+<script src="../shared/ui.js"></script>
+</body>
+</html>

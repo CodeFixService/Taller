@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.32'::text $$;
+language sql immutable as $$ select '2.33'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -2857,7 +2857,7 @@ language sql stable security definer set search_path = '' as $$
   select coalesce((select public.taller_es_premium(t.id) from public.talleres t where t.owner_id = n), false)
 $$;
 create or replace function public.cfx_modulos_app() returns text[]
-language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock'] $$;
+language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock', 'certificadas', 'tradein'] $$;
 revoke all on function public.cfx_negocio_de_cuenta(uuid), public.cfx_es_premium(uuid), public.cfx_modulos_app() from public, anon, authenticated;
 create or replace function public.taller_tiene(p_modulo text) returns boolean
 language plpgsql stable security definer set search_path = '' as $$ begin return public.cfx_modulo_de(p_modulo, public.cfx_negocio_de_cuenta(auth.uid())); end $$;
@@ -3074,6 +3074,134 @@ revoke all on function public.taller_stock(), public.taller_repuesto_guardar(jso
   public.taller_proveedor_guardar(jsonb), public.taller_proveedor_borrar(uuid), public.taller_repuestos_fabrica(jsonb) from public, anon;
 grant execute on function public.taller_stock(), public.taller_repuesto_guardar(jsonb), public.taller_repuesto_borrar(uuid), public.taller_stock_sumar(jsonb),
   public.taller_proveedor_guardar(jsonb), public.taller_proveedor_borrar(uuid), public.taller_repuestos_fabrica(jsonb) to authenticated;
+
+-- ---------- G59e 🧩 🏷️ Bicis usadas certificadas (informe de 50 puntos + fotos + garantía → vitrina /t/ y ficha /u/) ----------
+-- informe = { punto: ok|ajuste|cambio } (los 50 puntos están en taller.js y u/). Publicar exige los 50 revisados y 1 foto.
+-- 🔄 Parte de pago (tradein) es una calculadora en la pantalla: no guarda nada aquí (puede crear un borrador de usada).
+create table if not exists public.bicis_usadas (
+  id          uuid primary key default gen_random_uuid(),
+  taller_id   uuid not null references public.talleres (id) on delete cascade,
+  titulo      text not null check (length(trim(titulo)) between 1 and 100),
+  talla       text not null default '' check (length(talla) <= 20),
+  anio        int check (anio between 1980 and 2100),
+  precio      int not null default 0 check (precio >= 0),
+  garantia    int not null default 3 check (garantia between 0 and 24),
+  nota        text not null default '' check (length(nota) <= 600),
+  informe     jsonb not null default '{}',
+  fotos       jsonb not null default '[]',
+  mini        text not null default '',
+  estado      text not null default 'borrador' check (estado in ('borrador', 'publicada', 'vendida')),
+  token       text not null unique default replace(gen_random_uuid()::text, '-', ''),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  vendida_at  timestamptz
+);
+create index if not exists bicis_usadas_t_idx on public.bicis_usadas (taller_id, estado);
+alter table public.bicis_usadas enable row level security;
+
+create or replace function public.usada_revisados(i jsonb) returns int
+language sql immutable set search_path = '' as $$
+  select count(*)::int from jsonb_each_text(coalesce(i, '{}')) e where e.value in ('ok', 'ajuste', 'cambio')
+$$;
+create or replace function public.usada_json(b public.bicis_usadas, p_fotos boolean) returns jsonb
+language sql stable set search_path = '' as $$
+  select jsonb_build_object('id', b.id, 'titulo', b.titulo, 'talla', b.talla, 'anio', b.anio, 'precio', b.precio, 'garantia', b.garantia,
+    'nota', b.nota, 'informe', b.informe, 'revisados', public.usada_revisados(b.informe), 'mini', b.mini, 'nfotos', jsonb_array_length(b.fotos),
+    'estado', b.estado, 'token', b.token, 'vendida_at', b.vendida_at, 'created_at', b.created_at)
+    || case when p_fotos then jsonb_build_object('fotos', b.fotos) else '{}'::jsonb end
+$$;
+
+create or replace function public.taller_usadas() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('certificadas') then return jsonb_build_object('bloqueado', true); end if;
+  return jsonb_build_object('bicis', (select coalesce(jsonb_agg(public.usada_json(b, false)
+    order by case b.estado when 'publicada' then 0 when 'borrador' then 1 else 2 end, b.updated_at desc), '[]') from public.bicis_usadas b where b.taller_id = tid));
+end $$;
+
+create or replace function public.taller_usada(p_id uuid) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); b public.bicis_usadas;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  select * into b from public.bicis_usadas where id = p_id and taller_id = tid;
+  if b.id is null then raise exception 'Bici no encontrada'; end if;
+  return public.usada_json(b, true);
+end $$;
+
+-- Todo el equipo puede inspeccionar y guardar; publicar/vender también (lo ve el dueño). Borrar: solo el dueño.
+create or replace function public.taller_usada_guardar(p jsonb) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); bid uuid := nullif(p ->> 'id', '')::uuid; n text := trim(coalesce(p ->> 'titulo', ''));
+  est text := coalesce(nullif(p ->> 'estado', ''), 'borrador'); inf jsonb := coalesce(p -> 'informe', '{}'); fs jsonb := p -> 'fotos'; mi text := p ->> 'mini'; f text;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('certificadas') then raise exception 'Necesitas el módulo 🏷️ Bicis usadas certificadas'; end if;
+  if n = '' then raise exception 'Escribe la marca y el modelo'; end if;
+  if est not in ('borrador', 'publicada', 'vendida') then raise exception 'Estado no válido'; end if;
+  if jsonb_typeof(inf) <> 'object' or (select count(*) from jsonb_object_keys(inf)) > 60 then raise exception 'Informe no válido'; end if;
+  if fs is not null then
+    if jsonb_typeof(fs) <> 'array' or jsonb_array_length(fs) > 4 then raise exception 'Máximo 4 fotos'; end if;
+    for f in select jsonb_array_elements_text(fs) loop
+      if f !~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' or length(f) > 160000 then raise exception 'Foto no válida o muy pesada'; end if;
+    end loop;
+  end if;
+  if mi is not null and mi <> '' and (mi !~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' or length(mi) > 60000) then raise exception 'Foto no válida'; end if;
+  if est = 'publicada' then
+    if public.usada_revisados(inf) < 50 then raise exception 'Para publicarla como certificada revisa los 50 puntos (van %)', public.usada_revisados(inf); end if;
+    if jsonb_array_length(coalesce(fs, (select fotos from public.bicis_usadas where id = bid and taller_id = tid), '[]')) = 0 then raise exception 'Sube al menos 1 foto para publicarla'; end if;
+    if coalesce((p ->> 'precio')::int, 0) <= 0 then raise exception 'Pon el precio para publicarla'; end if;
+  end if;
+  if bid is null then
+    if (select count(*) from public.bicis_usadas where taller_id = tid and estado <> 'vendida') >= 100 then raise exception 'Llegaste al máximo de 100 bicis a la venta'; end if;
+    insert into public.bicis_usadas (taller_id, titulo, talla, anio, precio, garantia, nota, informe, fotos, mini, estado, vendida_at)
+    values (tid, left(n, 100), left(trim(coalesce(p ->> 'talla', '')), 20), nullif(p ->> 'anio', '')::int, greatest(coalesce((p ->> 'precio')::int, 0), 0),
+            least(greatest(coalesce((p ->> 'garantia')::int, 3), 0), 24), left(coalesce(p ->> 'nota', ''), 600), inf, coalesce(fs, '[]'), coalesce(mi, ''), est,
+            case when est = 'vendida' then now() end) returning id into bid;
+  else
+    update public.bicis_usadas set titulo = left(n, 100), talla = left(trim(coalesce(p ->> 'talla', '')), 20), anio = nullif(p ->> 'anio', '')::int,
+      precio = greatest(coalesce((p ->> 'precio')::int, 0), 0), garantia = least(greatest(coalesce((p ->> 'garantia')::int, 3), 0), 24),
+      nota = left(coalesce(p ->> 'nota', ''), 600), informe = inf, fotos = coalesce(fs, fotos), mini = coalesce(mi, mini), estado = est,
+      vendida_at = case when est = 'vendida' then coalesce(vendida_at, now()) end, updated_at = now()
+    where id = bid and taller_id = tid;
+    if not found then raise exception 'Bici no encontrada'; end if;
+  end if;
+  return bid;
+end $$;
+
+create or replace function public.taller_usada_borrar(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller puede borrar'; end if;
+  delete from public.bicis_usadas where id = p_id and taller_id = tid;
+  if not found then raise exception 'Bici no encontrada'; end if;
+end $$;
+
+-- Público: vitrina del taller (/t/) y ficha con el informe (/u/). Solo si el taller tiene el módulo.
+-- plpgsql (no sql): cfx_modulo_de viene más abajo, en el bloque del núcleo.
+create or replace function public.usadas_publicas(p_slug text) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  return coalesce((select jsonb_agg(jsonb_build_object('titulo', b.titulo, 'talla', b.talla, 'anio', b.anio, 'precio', b.precio, 'garantia', b.garantia,
+           'revisados', public.usada_revisados(b.informe), 'mini', b.mini, 'token', b.token) order by b.updated_at desc)
+    from public.talleres t join public.bicis_usadas b on b.taller_id = t.id and b.estado = 'publicada'
+    where t.slug = p_slug and public.cfx_modulo_de('certificadas', t.owner_id)), '[]');
+end $$;
+create or replace function public.usada_ver(p_token text) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  return (select public.usada_json(b, true) - 'id' - 'mini' || jsonb_build_object('taller', jsonb_build_object('nombre', t.nombre, 'slug', t.slug, 'telefono', t.telefono,
+           'logo', t.logo, 'color', t.color, 'icono', t.icono, 'comuna', t.comuna, 'direccion', t.direccion))
+  from public.bicis_usadas b join public.talleres t on t.id = b.taller_id
+  where b.token = p_token and length(p_token) >= 20 and b.estado in ('publicada', 'vendida') and public.cfx_modulo_de('certificadas', t.owner_id));
+end $$;
+revoke all on function public.usada_revisados(jsonb), public.usada_json(public.bicis_usadas, boolean), public.taller_usadas(), public.taller_usada(uuid),
+  public.taller_usada_guardar(jsonb), public.taller_usada_borrar(uuid), public.usadas_publicas(text), public.usada_ver(text) from public, anon, authenticated;
+grant execute on function public.taller_usadas(), public.taller_usada(uuid), public.taller_usada_guardar(jsonb), public.taller_usada_borrar(uuid) to authenticated;
+grant execute on function public.usadas_publicas(text), public.usada_ver(text) to anon, authenticated;
 
 -- >>> CFX núcleo (no editar aquí: se copia de saas/nucleo/sql con sincronizar.py)
 -- ---------------------------------------------------------------------
@@ -4511,7 +4639,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.perfiles', 'public.planes', 'public.promos', 'public.proveedores', 'public.push_subs', 'public.repuestos', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bicis_usadas', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.perfiles', 'public.planes', 'public.promos', 'public.proveedores', 'public.push_subs', 'public.repuestos', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
@@ -4780,7 +4908,9 @@ language sql immutable as $$
          ('presupuesto', '✅ Presupuesto por link', 'El cliente aprueba o rechaza cada arreglo desde su celular: sin llamadas ni reclamos.'),
          ('aviso_lista', '🔔 Aviso "bici lista"', 'Al dejarla lista, el cliente recibe el aviso por WhatsApp con el total y el link; si no la retira, se lo recordamos.'),
          ('mantencion', '⏰ Recordatorio de mantención', 'Cada X meses le avisamos al cliente que le toca mantención: vuelve solo.'),
-         ('stock', '📦 Repuestos y stock', 'Stock de repuestos que baja solo con cada orden y pedido a tu proveedor por WhatsApp con un toque.')
+         ('stock', '📦 Repuestos y stock', 'Stock de repuestos que baja solo con cada orden y pedido a tu proveedor por WhatsApp con un toque.'),
+         ('certificadas', '🏷️ Bicis usadas certificadas', 'Vende bicis usadas con informe de 50 puntos, fotos y garantía: se publican en tu página y te escriben por WhatsApp.'),
+         ('tradein', '🔄 Parte de pago', 'Calculadora: cuánto ofrecer por la bici usada del cliente para que se lleve una nueva o un arreglo.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb

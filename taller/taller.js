@@ -41,6 +41,7 @@
     document.querySelectorAll('#mSeg .dueno').forEach((b) => b.classList.toggle('hidden', !P.dueno));
     $('mSeg').querySelector('[data-m=modulos]').classList.toggle('hidden', !P.dueno || !P.venta);  // 🧩 solo con la venta prendida (CM → Apps → 🚲 → 🧩)
     $('mSeg').querySelector('[data-m=stock]').classList.toggle('hidden', !P.dueno && !tiene('stock'));  // G59d 📦: el equipo solo si el taller lo tiene
+    ['usadas', 'tradein'].forEach((m) => $('mSeg').querySelector('[data-m=' + m + ']').classList.toggle('hidden', !P.dueno && !tiene(m === 'usadas' ? 'certificadas' : m)));  // G59e
   }
   // G59 🧩 ¿El taller puede usar este módulo? (venta apagada = todos lo tienen)
   const tiene = (k) => !!(P && P.modulos && P.modulos[k]);
@@ -69,7 +70,7 @@
 
   /* ---------- Navegación ---------- */
   // #plan y #mas/<sección> (perfil, horario, servicios, abono…): abren esa parte de Más (la guía para partir los usa).
-  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
+  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock|usadas|tradein)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
   const show = App.pestanas((v) => {
     vista = v;
     if (v === 'hoy') pintarHoy();
@@ -606,15 +607,15 @@
   let subMas = null;
   $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); } };
   // Más = menú común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (body() dibuja dentro de ella).
-  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller',
+  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes',
     stats: 'Ventas y clientes', recordar: 'Ventas y clientes', plan: 'Tu plan', modulos: 'Tu plan', cuenta: 'Configuración' };
   const K2 = { plan: 'premium', cuenta: 'micuenta', chat: 'mensajes' };
-  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', cuenta: '👤' };
+  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', usadas: '🏷️', tradein: '🔄', cuenta: '👤' };
   let hojaMas = null;
   function abrirSec(m) {
     if (m === 'chat') { $('chatBtn').click(); return; }
     const b = $('mSeg').querySelector('[data-m="' + m + '"]'); if (!b || b.classList.contains('hidden')) return;
-    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock };
+    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, usadas: verUsadas, tradein: verTradein };
     if (!hojaMas || hojaMas.m !== m || !hojaMas.h.d.isConnected) {
       const h = window.CFX_MENU.hoja((ICO[m] || '') + ' ' + esc(b.textContent.replace(/\d+$/, '').replace(/^[^\p{L}]+/u, '').trim()), () => { if (hojaMas && hojaMas.h === h) { hojaMas = null; subMas = null; } });
       hojaMas = { m, h };
@@ -977,6 +978,143 @@
       const l = grupos[ll.dataset.llego], p = {}; l.forEach((x) => { p[x.id] = cantPedir(x); });
       try { await rpc('taller_stock_sumar', { p }); toast('📥 Stock sumado'); d.close(); await cargarPanel(); verStock(); } catch (err) { toast(err.message); }
     };
+  }
+  // ---- G59e 🧩 🏷️ Bicis usadas certificadas (informe 50 puntos + fotos + garantía → tu página) + 🔄 Parte de pago
+  const INF = () => (window.CFX_FABRICA ? CFX_FABRICA.INFORME : []);
+  const INF_SIG = { '': 'ok', ok: 'ajuste', ajuste: 'cambio', cambio: '' };
+  const EST_U = { borrador: ['📝 Borrador', ''], publicada: ['🏷️ Publicada', 'ok'], vendida: ['✅ Vendida', 'warn'] };
+  const linkUsada = (tk) => App.ROOT + 'u/?t=' + tk;
+  const modOfrecer = (k, tit, txt) => '<div class="card"><h2>' + tit + ' <span class="pill pro">🧩 MÓDULO</span></h2><p class="muted">' + txt + '</p>' +
+    '<div class="btns"><button type="button" data-sin-atras data-ofrecer="' + k + '">🧩 Ver el módulo</button></div></div>';
+  async function verUsadas() {
+    body().innerHTML = '<p class="empty">Cargando…</p>';
+    let s;
+    try { s = await rpc('taller_usadas'); } catch (e) { body().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    if (s.bloqueado) { body().innerHTML = modOfrecer('certificadas', '🏷️ Bicis usadas certificadas', 'Revisa la bici en 50 puntos, súbele fotos y garantía, y publícala en tu página. Te escriben por WhatsApp para comprarla u ofertar.'); return; }
+    const pub = s.bicis.filter((b) => b.estado === 'publicada').length;
+    body().innerHTML = '<div class="card"><h2>🏷️ Bicis usadas <span class="pill">' + s.bicis.length + '</span></h2><p class="sub" style="margin-top:0">Revisa los 50 puntos, sube fotos y publícala: sale en tu página con su informe y garantía.</p>' +
+      '<ul class="list" id="uLista">' + (s.bicis.length ? s.bicis.map((b) => '<li class="clic" data-u="' + b.id + '">' +
+        (b.mini ? '<img alt="" src="' + esc(b.mini) + '" style="width:48px;height:48px;object-fit:cover;border-radius:10px;flex:none">' : '<span style="font-size:28px;flex:none">🚲</span>') +
+        '<div class="grow"><b>' + esc(b.titulo) + '</b><div class="sub">' + (b.precio ? plata(b.precio) + ' · ' : '') + '🔍 ' + b.revisados + '/50</div></div>' +
+        '<span class="pill ' + EST_U[b.estado][1] + '">' + EST_U[b.estado][0] + '</span></li>').join('') : '<li class="muted">Toca ＋ para inspeccionar tu primera bici usada.</li>') + '</ul>' +
+      '<div class="btns"><button id="uNueva" type="button">＋ Nueva bici usada</button>' + (pub ? '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(linkReservas()) + '">👀 Ver en mi página</a>' : '') + '</div></div>';
+    body().onclick = (e) => {
+      const u = e.target.closest('[data-u]'); if (u) { editarUsada(u.dataset.u); return; }
+      if (e.target.closest('#uNueva')) editarUsada(null);
+    };
+  }
+  async function editarUsada(id, base) {
+    let x;
+    try { x = id ? await rpc('taller_usada', { p_id: id }) : Object.assign({ titulo: '', talla: '', anio: null, precio: 0, garantia: 3, nota: '', informe: {}, fotos: [], estado: 'borrador' }, base || {}); }
+    catch (e) { toast(e.message); return; }
+    const inf = Object.assign({}, x.informe || {}); let fotos = (x.fotos || []).slice(), fotosCambio = false;
+    const cuenta = () => Object.values(inf).filter((v) => INF_EST()[v]).length;
+    const INF_EST = () => (window.CFX_FABRICA ? CFX_FABRICA.INF_EST : {});
+    const d = modal('<h2>' + (id ? '🏷️ ' + esc(x.titulo) : '＋ Nueva bici usada') + '</h2>' +
+      '<label for="uT">Marca y modelo</label><input id="uT" maxlength="100" value="' + esc(x.titulo) + '" placeholder="Ej: Trek Marlin 7">' +
+      '<div class="row"><div><label for="uTa">Talla</label><input id="uTa" maxlength="20" value="' + esc(x.talla) + '" placeholder="M · 54 · aro 29"></div><div><label for="uA">Año</label><input id="uA" inputmode="numeric" maxlength="4" value="' + (x.anio || '') + '"></div></div>' +
+      '<div class="row"><div><label for="uP">Precio de venta</label><input id="uP" inputmode="numeric" value="' + (x.precio || '') + '"></div><div><label for="uG">🛡️ Garantía</label><select id="uG">' +
+        [0, 1, 3, 6, 12].map((m) => '<option value="' + m + '"' + (+x.garantia === m ? ' selected' : '') + '>' + (m ? m + (m === 1 ? ' mes' : ' meses') : 'Sin garantía') + '</option>').join('') + '</select></div></div>' +
+      '<label for="uN">Detalle (opcional)</label><textarea id="uN" maxlength="600" rows="2" placeholder="Ej: grupo Deore 1x12, frenos hidráulicos">' + esc(x.nota) + '</textarea>' +
+      '<h3>📸 Fotos <span class="sub">(hasta 4)</span></h3><p class="sub" style="margin-top:0">De lado completo, con fondo blanco o pared lisa.</p><div id="uFotos" style="display:flex;gap:8px;flex-wrap:wrap"></div><input type="file" accept="image/*" id="uF" class="hidden">' +
+      '<h3>🔍 Informe de 50 puntos <span class="pill" id="uCont"></span></h3><p class="sub" style="margin-top:0">Toca cada punto: ⬜ → ✅ Bien → 🔧 Ajustado → 🔁 Cambiado.</p>' +
+      '<div id="uInf"></div><div class="btns"><button class="small ghost" id="uTodo" type="button" data-sin-atras>✅ Todo bien en lo que falta</button></div>' +
+      '<div class="btns">' + (id && P.dueno ? '<button class="danger" id="uB" type="button">🗑️ Borrar</button>' : '') +
+        (x.estado !== 'borrador' && x.token ? '<button class="ghost" id="uC" type="button">📲 Compartir</button>' : '') +
+        '<button class="ghost" id="uG2" type="button">💾 Guardar</button>' +
+        (x.estado === 'publicada' ? '<button class="okb" id="uV" type="button">✅ Se vendió</button>' : '<button id="uPub" type="button">📣 Publicar</button>') + '</div>');
+    const q1 = (s) => d.querySelector(s);
+    const pintarFotos = () => {
+      q1('#uFotos').innerHTML = fotos.map((f, i) => '<div style="position:relative"><img alt="Foto ' + (i + 1) + '" src="' + esc(f) + '" style="width:72px;height:72px;object-fit:cover;border-radius:10px">' +
+        '<button class="small ghost" type="button" data-sin-atras data-fb="' + i + '" aria-label="Borrar foto" style="position:absolute;top:-6px;right:-6px;min-height:0;padding:2px 6px">✕</button></div>').join('') +
+        (fotos.length < 4 ? '<button class="ghost" type="button" data-sin-atras id="uFm" style="width:72px;height:72px;min-height:0;font-size:24px" aria-label="Agregar foto">📷</button>' : '');
+    };
+    const pintarInf = () => {
+      const E = INF_EST();
+      q1('#uInf').innerHTML = INF().map(([g, ps]) => {
+        const n = ps.filter(([k]) => E[inf[k]]).length;
+        return '<details data-g="' + esc(g) + '"><summary class="clic" style="font-weight:700;margin:6px 0">' + esc(g) + ' <span class="pill ' + (n === 5 ? 'ok' : '') + '">' + n + '/5</span></summary><ul class="list">' +
+          ps.map(([k, t]) => '<li class="clic" data-p="' + k + '"><span style="width:26px;flex:none">' + (E[inf[k]] ? E[inf[k]][0] : '⬜') + '</span><span class="grow">' + esc(t) + '</span><span class="sub">' + (E[inf[k]] ? E[inf[k]][1] : '') + '</span></li>').join('') + '</ul></details>';
+      }).join('');
+      const c = cuenta(); q1('#uCont').textContent = c + '/50'; q1('#uCont').className = 'pill ' + (c >= 50 ? 'ok' : 'warn');
+    };
+    pintarFotos(); pintarInf();
+    if (window.CFX_FABRICA) CFX_FABRICA.bici(q1('#uT'));
+    q1('#uInf').onclick = (e) => {
+      const li = e.target.closest('[data-p]'); if (!li) return;
+      const k = li.dataset.p, v = INF_SIG[inf[k] || ''];
+      if (v) inf[k] = v; else delete inf[k];
+      const E = INF_EST(); li.firstChild.textContent = E[v] ? E[v][0] : '⬜'; li.lastChild.textContent = E[v] ? E[v][1] : '';
+      const det = li.closest('details'), n = [...det.querySelectorAll('[data-p]')].filter((l) => E[inf[l.dataset.p]]).length;
+      det.querySelector('summary .pill').textContent = n + '/5'; det.querySelector('summary .pill').className = 'pill ' + (n === 5 ? 'ok' : '');
+      const c = cuenta(); q1('#uCont').textContent = c + '/50'; q1('#uCont').className = 'pill ' + (c >= 50 ? 'ok' : 'warn');
+    };
+    q1('#uTodo').onclick = () => { INF().forEach(([, ps]) => ps.forEach(([k]) => { if (!INF_EST()[inf[k]]) inf[k] = 'ok'; })); pintarInf(); };
+    q1('#uFotos').onclick = (e) => {
+      const b = e.target.closest('[data-fb]'); if (b) { fotos.splice(+b.dataset.fb, 1); fotosCambio = true; pintarFotos(); return; }
+      if (e.target.closest('#uFm')) q1('#uF').click();
+    };
+    q1('#uF').onchange = async (e) => {
+      const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      try { fotos.push(await App.comprimirFoto(f)); fotosCambio = true; pintarFotos(); } catch (err) { toast(err.message); }
+    };
+    const guardar = async (estado) => {
+      const p = { id: id || null, titulo: q1('#uT').value, talla: q1('#uTa').value, anio: App.numero(q1('#uA').value) || null, precio: App.numero(q1('#uP').value),
+        garantia: +q1('#uG').value, nota: q1('#uN').value, informe: inf, estado };
+      if (fotosCambio || !id) {
+        p.fotos = fotos;
+        p.mini = '';
+        if (fotos.length && window.CFX_ACHICAR) { try { p.mini = await window.CFX_ACHICAR(fotos[0], 'logo'); } catch (e) { p.mini = ''; } }
+      }
+      try {
+        const nid = await rpc('taller_usada_guardar', { p });
+        d.close(); toast(estado === 'publicada' ? '📣 Publicada en tu página' : estado === 'vendida' ? '✅ Marcada como vendida' : '💾 Guardado'); verUsadas();
+        return nid;
+      } catch (err) { toast(err.message); return null; }
+    };
+    q1('#uG2').onclick = () => guardar(x.estado || 'borrador');
+    const pb = q1('#uPub'); if (pb) pb.onclick = () => guardar('publicada');
+    const vb = q1('#uV'); if (vb) vb.onclick = async () => { if (await confirmar('¿Se vendió "' + x.titulo + '"? Sale de tu página.')) guardar('vendida'); };
+    const cb = q1('#uC'); if (cb) cb.onclick = () => App.compartir(linkUsada(x.token), '🏷️ ' + x.titulo + ' certificada en ' + P.taller.nombre, x.titulo);
+    const bb = q1('#uB'); if (bb) bb.onclick = async () => { if (!await confirmar('¿Borrar "' + x.titulo + '"?')) return; try { await rpc('taller_usada_borrar', { p_id: id }); d.close(); verUsadas(); } catch (e) { toast(e.message); } };
+  }
+
+  // 🔄 Parte de pago (trade-in): cuánto ofrecer por la bici usada del cliente. No guarda nada; puede pasarla a 🏷️ Usadas.
+  const ESTADO_TI = [['1', '✨ Como nueva'], ['0.85', '👍 Buena'], ['0.7', '🙂 Con uso'], ['0.5', '🔧 Para arreglar']];
+  const r5 = (v) => Math.max(Math.round(v / 5000) * 5000, 0);
+  function tasar(nuevo, anio, estado, arreglos, margen) {
+    const edad = Math.max(new Date().getFullYear() - (anio || new Date().getFullYear()), 0);
+    const venta = r5(nuevo * Math.max(0.75 * Math.pow(0.88, edad), 0.2) * estado);
+    const oferta = r5(venta * (1 - margen / 100) - arreglos);
+    return { venta, oferta, gana: venta - oferta - arreglos };
+  }
+  function verTradein() {
+    if (!tiene('tradein')) { body().innerHTML = modOfrecer('tradein', '🔄 Parte de pago', 'El cliente trae su bici usada: la calculadora te dice cuánto ofrecerle para que se lleve una nueva o un arreglo, y cuánto ganas al revenderla.'); return; }
+    let mg = 25; try { mg = +localStorage.getItem('cfx_ti_margen') || 25; } catch (e) { /* sin almacenamiento */ }
+    const ano = new Date().getFullYear();
+    body().innerHTML = '<div class="card"><h2>🔄 Parte de pago</h2><p class="sub" style="margin-top:0">Llena los datos de la bici que trae el cliente y te digo cuánto ofrecerle.</p>' +
+      '<label for="tiT">Marca y modelo</label><input id="tiT" maxlength="100" placeholder="Ej: Oxford Mercury">' +
+      '<div class="row"><div><label for="tiA">Año</label><input id="tiA" inputmode="numeric" maxlength="4" value="' + (ano - 2) + '"></div><div><label for="tiE">Estado</label><select id="tiE">' +
+        ESTADO_TI.map(([v, t]) => '<option value="' + v + '"' + (v === '0.85' ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div></div>' +
+      '<label for="tiN">Precio de una igual nueva hoy</label><input id="tiN" inputmode="numeric" placeholder="Ej: 450000">' +
+      '<div class="row"><div><label for="tiR">Arreglos que necesita</label><input id="tiR" inputmode="numeric" placeholder="0"></div><div><label for="tiM">Tu ganancia %</label><input id="tiM" inputmode="numeric" value="' + mg + '"></div></div>' +
+      '<div id="tiRes" style="margin-top:12px"></div></div>';
+    const b = body(), v = (s) => b.querySelector(s);
+    const calc = () => {
+      const nuevo = App.numero(v('#tiN').value), m = Math.min(Math.max(App.numero(v('#tiM').value), 0), 90);
+      try { localStorage.setItem('cfx_ti_margen', String(m)); } catch (e) { /* sin almacenamiento */ }
+      if (!nuevo) { v('#tiRes').innerHTML = '<p class="muted">Pon el precio de una nueva para calcular.</p>'; return; }
+      const r = tasar(nuevo, App.numero(v('#tiA').value), +v('#tiE').value, App.numero(v('#tiR').value), m);
+      const txt = 'Hola 👋 Por tu ' + (v('#tiT').value.trim() || 'bici') + ' te ofrecemos ' + plata(r.oferta) + ' en parte de pago en ' + P.taller.nombre + ' 🚲';
+      v('#tiRes').innerHTML = '<div class="aviso ok"><div class="grow"><div>🏷️ Se vende en <b>' + plata(r.venta) + '</b></div><div style="font-size:1.25em;margin:4px 0">🔄 Ofrécele <b id="tiOf">' + plata(r.oferta) + '</b></div>' +
+        '<div class="sub">Ganas ~' + plata(r.gana) + ' al revenderla (ya restados los arreglos).</div></div></div>' +
+        '<div class="btns"><button class="ghost" type="button" id="tiCop">📋 Copiar oferta</button>' + (tiene('certificadas') ? '<button type="button" id="tiUs">🏷️ Pasar a usadas</button>' : '') + '</div>';
+      v('#tiCop').onclick = () => navigator.clipboard.writeText(txt).then(() => toast('📋 Oferta copiada'));
+      const u = v('#tiUs'); if (u) u.onclick = () => editarUsada(null, { titulo: v('#tiT').value.trim(), anio: App.numero(v('#tiA').value) || null, precio: r.venta, nota: 'Recibida en parte de pago.' });
+    };
+    b.querySelectorAll('input').forEach((i) => { i.oninput = calc; }); v('#tiE').onchange = calc;  // sin onchange en inputs: al salir del campo repintaba y se perdía el toque
+    if (window.CFX_FABRICA) CFX_FABRICA.bici(v('#tiT'));
+    calc();
   }
   async function verPlan() {
     const planes = pub.planes || {};

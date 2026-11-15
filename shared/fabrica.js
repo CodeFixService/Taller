@@ -49,8 +49,22 @@
     d.innerHTML = valores.map((v) => '<option value="' + String(v).replace(/[&"<>]/g, (c) => ({ '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;' })[c]) + '">').join('');
     document.body.appendChild(d); return id;
   };
+  // G59e 🏷️ Informe de inspección de 50 puntos de la bici usada certificada (10 grupos × 5). Las claves no se cambian: quedan guardadas.
+  const INFORME = [
+    ['🚲 Cuadro y horquilla', [['cu1', 'Cuadro sin fisuras ni golpes'], ['cu2', 'Horquilla derecha'], ['cu3', 'Uniones y soldaduras'], ['cu4', 'Pintura'], ['cu5', 'Nº de serie visible']]],
+    ['🧭 Dirección', [['di1', 'Juego de dirección'], ['di2', 'Manubrio'], ['di3', 'Potencia'], ['di4', 'Puños'], ['di5', 'Alineación']]],
+    ['🛑 Frenos', [['fr1', 'Manillas'], ['fr2', 'Pastillas o zapatas'], ['fr3', 'Discos o llantas de freno'], ['fr4', 'Cables o hidráulico'], ['fr5', 'Frenado parejo']]],
+    ['⛓️ Transmisión', [['tr1', 'Desgaste de la cadena'], ['tr2', 'Cassette o piñones'], ['tr3', 'Platos'], ['tr4', 'Desviador trasero'], ['tr5', 'Desviador delantero']]],
+    ['🔀 Cambios', [['ca1', 'Mandos de cambio'], ['ca2', 'Cables y fundas'], ['ca3', 'Ajuste de cambios'], ['ca4', 'Pata de cambio derecha'], ['ca5', 'Entran todas las marchas']]],
+    ['🛞 Ruedas', [['ru1', 'Rueda delantera centrada'], ['ru2', 'Rueda trasera centrada'], ['ru3', 'Rayos tensos'], ['ru4', 'Mazas sin juego'], ['ru5', 'Ejes y cierres']]],
+    ['⚫ Neumáticos', [['ne1', 'Neumático delantero'], ['ne2', 'Neumático trasero'], ['ne3', 'Válvulas'], ['ne4', 'Cámaras o tubeless'], ['ne5', 'Presión']]],
+    ['⚙️ Pedalier y bielas', [['pe1', 'Pedalier sin juego'], ['pe2', 'Bielas'], ['pe3', 'Pedales'], ['pe4', 'Rodamientos'], ['pe5', 'Sin ruidos al pedalear']]],
+    ['🪑 Suspensión y asiento', [['su1', 'Suspensión delantera'], ['su2', 'Suspensión trasera'], ['su3', 'Tija'], ['su4', 'Sillín'], ['su5', 'Abrazadera']]],
+    ['🏁 Prueba final', [['pf1', 'Prueba en ruta'], ['pf2', 'Sin ruidos'], ['pf3', 'Luces, timbre y reflectantes'], ['pf4', 'Limpieza'], ['pf5', 'Pernos al torque']]]
+  ];
+  const INF_EST = { ok: ['✅', 'Bien'], ajuste: ['🔧', 'Ajustado'], cambio: ['🔁', 'Cambiado'] };
   window.CFX_FABRICA = {
-    BICIS, REPUESTOS, NOTAS,
+    BICIS, REPUESTOS, NOTAS, INFORME, INF_EST,
     // 🚲 Campo de bici: marca y modelo para elegir (o escribir otra).
     bici(inp) { if (inp) { inp.setAttribute('list', lista('fabBicis', BICIS)); inp.setAttribute('autocomplete', 'off'); } },
     // 📦 Nombre de repuesto: lista para elegir.

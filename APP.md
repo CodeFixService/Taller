@@ -18,7 +18,7 @@
 - Ganchos del núcleo (schema.sql, después de taller_checklist): cfx_negocio_de_cuenta(u) = owner_id del taller · cfx_es_premium(n) = taller_es_premium · cfx_modulos_app() = ['presupuesto'] (sumar aquí los próximos; catálogo + demo en SaaS/nucleo: sql/modulos_venta.sql y modulos.js). NO vienen en Premium (G39). Packs del núcleo se vacían (al final de schema.sql, solo si siguen los de fábrica).
 - taller_tiene(clave) en la base · taller_panel trae modulos (cfx_modulos()) y venta → JS tiene(k) / ofrecer(k) (demo ▶️ + Comprar; equipo: "pídele al dueño"). Más → 🧩 Módulos (data-m=modulos, solo dueño y con la venta prendida) = CFX_MODULOS_TIENDA.montar.
 - ✅ Presupuesto por link: reservas.presupuesto {estado enviado|respondido, enviado_at, respondido_at} + items[i].aprob pend|si|no. taller_presupuesto(id) (marca ⏳ lo no respondido, avisa al cliente) · reserva_presupuesto(token, {"0":"si","1":"no"}) (anon, responde todos, avisa al taller). Total sin lo rechazado (taller_trabajo y JS). Editar un ítem le borra aprob. Taller: #dPres en la orden (✅ Pedir aprobación + 📲 WhatsApp); cliente: #cPres en /r/.
-- Siguiente: aviso lista → recordatorio km/meses → repuestos+stock → certificadas+trade-in → pasaporte QR → domicilio. (Fotos del daño por ítem: pendiente, hoy usa 📸 Llegada.)
+- Siguiente: pasaporte QR → domicilio (✅ aviso lista, recordatorio, stock, certificadas+trade-in). (Fotos del daño por ítem: pendiente, hoy usa 📸 Llegada.)
 
 ## 🏭 G65 · De fábrica (2.87, bd 2.30) — prueba SaaS/pruebas/g65_fabrica.js
 - SQL (final de schema.sql): taller_fabrica_agregar(tid) (lista de 23; agrega lo que falta por nombre hasta el límite) · trigger talleres_fabrica (taller nuevo) · RPC taller_servicios_fabrica() (solo dueño; botón ✨ en Más → Servicios) · FREE servicios 40.
@@ -35,3 +35,12 @@
 - Al entregar (taller_estado → completada) taller_stock_descontar: baja por NOMBRE igual al ítem (sin los rechazados), una sola vez; si cruza el mínimo → push al taller "📦 Se está acabando" (/taller/#mas/stock).
 - Pantalla: Más → 📦 Repuestos (verStock; equipo solo si el taller lo tiene) · 🛒 Armar pedido (stock ≤ mínimo, agrupado por proveedor, pide mínimo×2 − stock; 📲 WhatsApp / ✉️ correo / 📋 copiar; 📥 Llegó suma) · Hoy #hStock "N repuestos por pedir" (panel.stock_bajo) · Orden: datalist stRep (mis repuestos + fábrica), precio del stock y "📦 Quedan N en stock".
 - Ojo: dentro de las hojas de Más usar body().querySelector (puede quedar otra hoja con el mismo id).
+
+## 🏷️🔄 G59e · Módulos Bicis usadas certificadas + Parte de pago (2.90, bd 2.33 · núcleo 2.86) — prueba SaaS/pruebas/g59e_usadas.js
+- cfx_modulos_app() suma 'certificadas', 'tradein'. Catálogo + demo en el núcleo.
+- Tabla bicis_usadas (titulo, talla, anio, precio, garantia meses, nota, informe {clave: ok|ajuste|cambio}, fotos jsonb ≤4 dataURL ≤160000, mini ≤60000, estado borrador|publicada|vendida, token).
+- Los 50 puntos: CFX_FABRICA.INFORME en shared/fabrica.js (10 grupos × 5; las claves NO se cambian) + INF_EST (✅🔧🔁).
+- RPC: taller_usadas() ({bloqueado} sin módulo) · taller_usada(id) con fotos · taller_usada_guardar(p) = todo el equipo (publicar exige 50 revisados + 1 foto + precio) · taller_usada_borrar = solo dueño · públicas (anon): usadas_publicas(slug) y usada_ver(token) (solo si el taller tiene el módulo; plpgsql porque cfx_modulo_de está más abajo).
+- Pantalla: Más → 🏷️ Bicis usadas (verUsadas/editarUsada: fotos, informe tocando ⬜→✅→🔧→🔁, ✅ Todo bien en lo que falta, 📣 Publicar, ✅ Se vendió, 📲 Compartir). /t/ muestra #usadas; ficha pública nueva u/?t=token (📲 Me interesa / 💬 Hacer una oferta por WhatsApp al taller). u/ en FILES de sw.js.
+- 🔄 Más → Parte de pago (verTradein, solo pantalla): venta = nueva × máx(0,75·0,88^años; 0,2) × estado (1/0,85/0,7/0,5), oferta = venta × (1 − ganancia%) − arreglos, redondeo a $5.000; margen en localStorage. 🏷️ Pasar a usadas = borrador con modelo/año/precio.
+- Error visto: inputs con onchange repintaban el resultado al salir del campo y se perdía el toque del botón → solo oninput (categoría UI).
