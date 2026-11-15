@@ -25,6 +25,13 @@
 - shared/fabrica.js (propio, en FILES de sw.js; lo cargan taller/ y t/): CFX_FABRICA.bici(input) → datalist fabBicis · repuestos(input) → fabRep + precio(nombre) (la orden pone el precio si estaba en 0) · notas(campo) → fila .fab-notas (botones data-sin-atras). Para sumar marcas/repuestos/notas: editar ese archivo.
 
 ## 🔔⏰ G59c · Módulos aviso lista y mantención (2.88, bd 2.31 · núcleo 2.85) — prueba SaaS/pruebas/g59c_modulos.js
-- cfx_modulos_app() = ['presupuesto', 'aviso_lista', 'mantencion'] (📦 'stock' ya está en el catálogo del núcleo; sumarlo aquí cuando se haga).
+- cfx_modulos_app() = ['presupuesto', 'aviso_lista', 'mantencion', 'stock'].
 - 🔔 aviso_lista: reservas.lista_at + lista_recordada (taller_estado los arma al pasar a Lista). JS avisoLista(r): al pasar a Lista (tablero › o botón de la orden) ventana con 📲 WhatsApp (total + link /r/). Tablero: "⏳ Lista hace N días". Sin módulo: aviso en la orden con data-ofrecer (listener global → ofrecer). tareas_periodicas 3b: a los 2 días avisa al cliente (con cuenta) y al taller, 1 vez. El push de cada estado al cliente sigue GRATIS.
 - ⏰ mantencion: taller_recordatorios = Premium (como antes) O módulo; tareas_periodicas 3: cliente Premium O taller con módulo (cfx_modulo_de('mantencion', owner_id)). bloqueadoPremium(t, d, mod) muestra "🧩 O activa solo esta función". Km: NO (no hay de dónde sacar los km; va por meses de Configuración).
+
+## 📦🛒 G59d · Módulo Repuestos y stock + pedido a proveedor (2.89, bd 2.32) — prueba SaaS/pruebas/g59d_stock.js
+- Tablas repuestos (nombre único por taller, precio, stock, minimo, proveedor_id) y proveedores (nombre, telefono, email, nota). reservas.stock_at = ya descontó.
+- RPC: taller_stock() ({bloqueado} sin módulo) · taller_repuesto_guardar/borrar, taller_proveedor_guardar/borrar, taller_repuestos_fabrica(lista de fabrica.js) = solo dueño · taller_stock_sumar({id: n}) = todo el equipo (➖➕ y 📥 Llegó).
+- Al entregar (taller_estado → completada) taller_stock_descontar: baja por NOMBRE igual al ítem (sin los rechazados), una sola vez; si cruza el mínimo → push al taller "📦 Se está acabando" (/taller/#mas/stock).
+- Pantalla: Más → 📦 Repuestos (verStock; equipo solo si el taller lo tiene) · 🛒 Armar pedido (stock ≤ mínimo, agrupado por proveedor, pide mínimo×2 − stock; 📲 WhatsApp / ✉️ correo / 📋 copiar; 📥 Llegó suma) · Hoy #hStock "N repuestos por pedir" (panel.stock_bajo) · Orden: datalist stRep (mis repuestos + fábrica), precio del stock y "📦 Quedan N en stock".
+- Ojo: dentro de las hojas de Más usar body().querySelector (puede quedar otra hoja con el mismo id).

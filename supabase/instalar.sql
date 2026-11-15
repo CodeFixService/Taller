@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.31'::text $$;
+language sql immutable as $$ select '2.32'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -1302,6 +1302,7 @@ begin
                        where taller_id = tid and tipo = 'premium_taller' and estado = 'en_revision' order by created_at desc limit 1),
     'modulos', public.cfx_modulos(), 'venta', public.cfx_venta_on(),  -- G59 🧩 qué módulos puede usar y si se venden
     'por_revisar', (select count(*) from public.reservas where taller_id = tid and estado = 'en_revision'),
+    'stock_bajo', (select count(*) from public.repuestos where taller_id = tid and stock <= minimo and minimo > 0),  -- G59d 📦
     'por_devolver', (select count(*) from public.reservas where taller_id = tid and abono_estado = 'devolver'));
 end $$;
 
@@ -1460,6 +1461,7 @@ begin
     lista_recordada = case when p_estado = 'lista' and r.estado <> 'lista' then false else lista_recordada end,
     historial = public.historial_mas(historial, p_estado), updated_at = now()
   where id = r.id;
+  if p_estado = 'completada' then perform public.taller_stock_descontar(r.id); end if;  -- G59d 📦 (si tiene el módulo)
   perform public.avisar(r.cliente_id,
     case p_estado when 'recibida' then '🚲 Recibimos tu bici' when 'en_reparacion' then '🔧 Tu bici está en reparación'
       when 'esperando_repuesto' then '📦 Esperando un repuesto' when 'lista' then '🔧 Tu bici está lista para retiro'
@@ -2855,7 +2857,7 @@ language sql stable security definer set search_path = '' as $$
   select coalesce((select public.taller_es_premium(t.id) from public.talleres t where t.owner_id = n), false)
 $$;
 create or replace function public.cfx_modulos_app() returns text[]
-language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion'] $$;
+language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock'] $$;
 revoke all on function public.cfx_negocio_de_cuenta(uuid), public.cfx_es_premium(uuid), public.cfx_modulos_app() from public, anon, authenticated;
 create or replace function public.taller_tiene(p_modulo text) returns boolean
 language plpgsql stable security definer set search_path = '' as $$ begin return public.cfx_modulo_de(p_modulo, public.cfx_negocio_de_cuenta(auth.uid())); end $$;
@@ -2912,6 +2914,166 @@ begin
 end $$;
 revoke all on function public.reserva_presupuesto(text, jsonb) from public;
 grant execute on function public.reserva_presupuesto(text, jsonb) to anon, authenticated;
+
+-- ---------- G59d 🧩 📦 Repuestos y stock + 🛒 pedido a proveedor (G68: genérico, los proveedores del taller) ----------
+-- El stock baja solo al entregar la orden (por nombre del ítem, una vez: reservas.stock_at). Stock ≤ mínimo → se pide.
+create table if not exists public.proveedores (
+  id         uuid primary key default gen_random_uuid(),
+  taller_id  uuid not null references public.talleres (id) on delete cascade,
+  nombre     text not null check (length(trim(nombre)) between 1 and 80),
+  telefono   text not null default '' check (length(telefono) <= 30),
+  email      text not null default '' check (length(email) <= 120),
+  nota       text not null default '' check (length(nota) <= 300),
+  created_at timestamptz not null default now()
+);
+create index if not exists proveedores_t_idx on public.proveedores (taller_id);
+alter table public.proveedores enable row level security;
+create table if not exists public.repuestos (
+  id           uuid primary key default gen_random_uuid(),
+  taller_id    uuid not null references public.talleres (id) on delete cascade,
+  nombre       text not null check (length(trim(nombre)) between 1 and 100),
+  precio       int not null default 0 check (precio >= 0),
+  stock        int not null default 0 check (stock >= 0),
+  minimo       int not null default 0 check (minimo >= 0),
+  proveedor_id uuid references public.proveedores (id) on delete set null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+create unique index if not exists repuestos_nombre_idx on public.repuestos (taller_id, lower(trim(nombre)));
+alter table public.repuestos enable row level security;
+alter table public.reservas add column if not exists stock_at timestamptz;
+
+create or replace function public.taller_stock() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('stock') then return jsonb_build_object('bloqueado', true); end if;
+  return jsonb_build_object(
+    'repuestos', (select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'nombre', r.nombre, 'precio', r.precio, 'stock', r.stock, 'minimo', r.minimo,
+                   'proveedor_id', r.proveedor_id) order by lower(r.nombre)), '[]') from public.repuestos r where r.taller_id = tid),
+    'proveedores', (select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'nombre', p.nombre, 'telefono', p.telefono, 'email', p.email, 'nota', p.nota)
+                   order by lower(p.nombre)), '[]') from public.proveedores p where p.taller_id = tid));
+end $$;
+
+create or replace function public.taller_repuesto_guardar(p jsonb) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); rid uuid := nullif(p ->> 'id', '')::uuid; pv uuid := nullif(p ->> 'proveedor_id', '')::uuid; n text := trim(coalesce(p ->> 'nombre', ''));
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller puede cambiar esto'; end if;
+  if not public.taller_tiene('stock') then raise exception 'Necesitas el módulo 📦 Repuestos y stock'; end if;
+  if n = '' then raise exception 'Escribe el nombre del repuesto'; end if;
+  if pv is not null and not exists (select 1 from public.proveedores where id = pv and taller_id = tid) then raise exception 'Proveedor no válido'; end if;
+  if exists (select 1 from public.repuestos where taller_id = tid and lower(trim(nombre)) = lower(n) and id is distinct from rid) then raise exception 'Ya tienes un repuesto con ese nombre'; end if;
+  if rid is null then
+    if (select count(*) from public.repuestos where taller_id = tid) >= 500 then raise exception 'Llegaste al máximo de 500 repuestos'; end if;
+    insert into public.repuestos (taller_id, nombre, precio, stock, minimo, proveedor_id)
+    values (tid, left(n, 100), greatest(coalesce((p ->> 'precio')::int, 0), 0), greatest(coalesce((p ->> 'stock')::int, 0), 0),
+            greatest(coalesce((p ->> 'minimo')::int, 0), 0), pv) returning id into rid;
+  else
+    update public.repuestos set nombre = left(n, 100), precio = greatest(coalesce((p ->> 'precio')::int, precio), 0), stock = greatest(coalesce((p ->> 'stock')::int, stock), 0),
+      minimo = greatest(coalesce((p ->> 'minimo')::int, minimo), 0), proveedor_id = pv, updated_at = now()
+    where id = rid and taller_id = tid;
+    if not found then raise exception 'Repuesto no encontrado'; end if;
+  end if;
+  return rid;
+end $$;
+
+create or replace function public.taller_repuesto_borrar(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller puede cambiar esto'; end if;
+  delete from public.repuestos where id = p_id and taller_id = tid;
+end $$;
+
+-- Todo el equipo: ➖➕ al stock y 📥 "llegó el pedido" (p = {"<id>": cantidad, ...}, puede ser negativo para ➖).
+create or replace function public.taller_stock_sumar(p jsonb) returns int
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); n int;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('stock') then raise exception 'Necesitas el módulo 📦 Repuestos y stock'; end if;
+  if jsonb_typeof(coalesce(p, 'null')) <> 'object' then raise exception 'Datos no válidos'; end if;
+  update public.repuestos r set stock = greatest(r.stock + (x.value)::int, 0), updated_at = now()
+  from jsonb_each_text(p) x where x.key ~ '^[0-9a-f-]{36}$' and r.id = x.key::uuid and r.taller_id = tid and x.value ~ '^-?[0-9]{1,5}$';
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+create or replace function public.taller_proveedor_guardar(p jsonb) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); pid uuid := nullif(p ->> 'id', '')::uuid; n text := trim(coalesce(p ->> 'nombre', ''));
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller puede cambiar esto'; end if;
+  if not public.taller_tiene('stock') then raise exception 'Necesitas el módulo 📦 Repuestos y stock'; end if;
+  if n = '' then raise exception 'Escribe el nombre del proveedor'; end if;
+  if pid is null then
+    if (select count(*) from public.proveedores where taller_id = tid) >= 50 then raise exception 'Llegaste al máximo de 50 proveedores'; end if;
+    insert into public.proveedores (taller_id, nombre, telefono, email, nota)
+    values (tid, left(n, 80), left(trim(coalesce(p ->> 'telefono', '')), 30), left(lower(trim(coalesce(p ->> 'email', ''))), 120), left(coalesce(p ->> 'nota', ''), 300)) returning id into pid;
+  else
+    update public.proveedores set nombre = left(n, 80), telefono = left(trim(coalesce(p ->> 'telefono', '')), 30),
+      email = left(lower(trim(coalesce(p ->> 'email', ''))), 120), nota = left(coalesce(p ->> 'nota', ''), 300)
+    where id = pid and taller_id = tid;
+    if not found then raise exception 'Proveedor no encontrado'; end if;
+  end if;
+  return pid;
+end $$;
+
+create or replace function public.taller_proveedor_borrar(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller puede cambiar esto'; end if;
+  delete from public.proveedores where id = p_id and taller_id = tid;
+end $$;
+
+-- ✨ Repuestos de fábrica (la lista viene de shared/fabrica.js: [[nombre, precio], ...]); agrega los que faltan, stock 0.
+create or replace function public.taller_repuestos_fabrica(p_lista jsonb) returns int
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); n int := 0; x jsonb; hay int;
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller puede cambiar esto'; end if;
+  if not public.taller_tiene('stock') then raise exception 'Necesitas el módulo 📦 Repuestos y stock'; end if;
+  if jsonb_typeof(coalesce(p_lista, 'null')) <> 'array' then raise exception 'Lista no válida'; end if;
+  select count(*) into hay from public.repuestos where taller_id = tid;
+  for x in select * from jsonb_array_elements(p_lista) limit 100 loop
+    exit when hay + n >= 500;
+    continue when jsonb_typeof(x) <> 'array' or length(trim(coalesce(x ->> 0, ''))) not between 1 and 100;
+    insert into public.repuestos (taller_id, nombre, precio)
+    values (tid, trim(x ->> 0), greatest(coalesce(case when (x ->> 1) ~ '^[0-9]{1,7}$' then (x ->> 1)::int end, 0), 0))
+    on conflict (taller_id, lower(trim(nombre))) do nothing;
+    if found then n := n + 1; end if;
+  end loop;
+  return n;
+end $$;
+
+-- Al entregar: descuenta lo que se usó (ítems con el mismo nombre que un repuesto; lo rechazado no). Avisa lo que quedó bajo el mínimo.
+create or replace function public.taller_stock_descontar(p_reserva uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas; bajos text;
+begin
+  select * into r from public.reservas where id = p_reserva for update;
+  if r.id is null or r.stock_at is not null or not public.taller_tiene('stock') then return; end if;
+  with uso as (
+    select lower(trim(i ->> 'nombre')) n, sum(greatest(coalesce((i ->> 'cant')::numeric, 1), 0))::int c
+    from jsonb_array_elements(r.items) i where coalesce(i ->> 'aprob', '') <> 'no' group by 1),
+  bajo as (
+    update public.repuestos p set stock = greatest(p.stock - u.c, 0), updated_at = now()
+    from uso u where p.taller_id = r.taller_id and lower(trim(p.nombre)) = u.n and u.c > 0
+    returning p.nombre, p.stock, p.minimo, p.stock + u.c antes)
+  select string_agg(nombre, ', ') into bajos from bajo where minimo > 0 and stock <= minimo and antes > minimo;
+  update public.reservas set stock_at = now() where id = r.id;
+  if bajos is not null then
+    perform public.avisar_taller(r.taller_id, '📦 Se está acabando: ' || left(bajos, 80), 'Toca para armar el pedido a tu proveedor', '/taller/#mas/stock');
+  end if;
+end $$;
+revoke all on function public.taller_stock_descontar(uuid) from public, anon, authenticated;
+revoke all on function public.taller_stock(), public.taller_repuesto_guardar(jsonb), public.taller_repuesto_borrar(uuid), public.taller_stock_sumar(jsonb),
+  public.taller_proveedor_guardar(jsonb), public.taller_proveedor_borrar(uuid), public.taller_repuestos_fabrica(jsonb) from public, anon;
+grant execute on function public.taller_stock(), public.taller_repuesto_guardar(jsonb), public.taller_repuesto_borrar(uuid), public.taller_stock_sumar(jsonb),
+  public.taller_proveedor_guardar(jsonb), public.taller_proveedor_borrar(uuid), public.taller_repuestos_fabrica(jsonb) to authenticated;
 
 -- >>> CFX núcleo (no editar aquí: se copia de saas/nucleo/sql con sincronizar.py)
 -- ---------------------------------------------------------------------
@@ -4349,7 +4511,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.perfiles', 'public.planes', 'public.promos', 'public.push_subs', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.perfiles', 'public.planes', 'public.promos', 'public.proveedores', 'public.push_subs', 'public.repuestos', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;

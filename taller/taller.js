@@ -40,6 +40,7 @@
     $('tabRev').textContent = P.por_revisar; $('tabRev').classList.toggle('hidden', !P.por_revisar);
     document.querySelectorAll('#mSeg .dueno').forEach((b) => b.classList.toggle('hidden', !P.dueno));
     $('mSeg').querySelector('[data-m=modulos]').classList.toggle('hidden', !P.dueno || !P.venta);  // 🧩 solo con la venta prendida (CM → Apps → 🚲 → 🧩)
+    $('mSeg').querySelector('[data-m=stock]').classList.toggle('hidden', !P.dueno && !tiene('stock'));  // G59d 📦: el equipo solo si el taller lo tiene
   }
   // G59 🧩 ¿El taller puede usar este módulo? (venta apagada = todos lo tienen)
   const tiene = (k) => !!(P && P.modulos && P.modulos[k]);
@@ -68,7 +69,7 @@
 
   /* ---------- Navegación ---------- */
   // #plan y #mas/<sección> (perfil, horario, servicios, abono…): abren esa parte de Más (la guía para partir los usa).
-  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
+  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
   const show = App.pestanas((v) => {
     vista = v;
     if (v === 'hoy') pintarHoy();
@@ -118,6 +119,7 @@
     }
     $('bienvenida').innerHTML = falta.length ? '<div class="card"><h2>👋 ' + esc(App.txt('bienvenida_taller') ? 'Para empezar' : '') + '</h2><p class="muted" style="margin-top:0">' +
       esc(App.txt('bienvenida_taller')) + '</p><ul class="list">' + falta.map((f) => '<li class="clic" data-m="' + f[0] + '" style="display:flex;align-items:center;gap:12px"><span aria-hidden="true" style="flex:none;width:22px;height:22px;border-radius:50%;border:2px solid color-mix(in srgb,var(--brand,#0ea5e9) 55%,transparent)"></span><span class="grow">' + esc(f[1]) + '</span><span>›</span></li>').join('') + '</ul></div>' : '';
+    $('hStock').innerHTML = tiene('stock') && P.stock_bajo ? '<div class="aviso warn"><div class="grow">📦 ' + P.stock_bajo + ' repuesto' + (P.stock_bajo === 1 ? '' : 's') + ' por pedir a tu proveedor.</div><button class="small" type="button" data-m="stock">🛒 Ver</button></div>' : '';
     $('hLink').textContent = linkReservas(); $('hAbrir').href = linkReservas();
     $('kRev').textContent = P.por_revisar; $('kDev').textContent = P.por_devolver;
     // Plan
@@ -467,11 +469,13 @@
       pintarItems();
       // Si cambias un ítem que el cliente ya respondió, vuelve a quedar sin aprobar (se le pide de nuevo).
       if (window.CFX_FABRICA) CFX_FABRICA.repuestos(document.createElement('input'));
+      if (tiene('stock')) cargarStock().then(() => { if (ST && detalle && detalle.id === r.id) { listaStock(); pintarItems(); } }).catch(() => {});  // G59d 📦
       $('dItems').oninput = (ev) => {
         const i = ev.target.dataset.i; if (i === undefined) return;
         items[i][ev.target.dataset.k] = ev.target.dataset.k === 'nombre' ? ev.target.value : App.numero(ev.target.value); delete items[i].aprob;
         // 📦 Repuesto de fábrica elegido y sin precio → pone el precio sugerido (se puede cambiar).
-        const pf = ev.target.dataset.k === 'nombre' && window.CFX_FABRICA && CFX_FABRICA.precio(ev.target.value);
+        const rs = ev.target.dataset.k === 'nombre' && repDe(ev.target.value);
+        const pf = rs ? rs.precio : ev.target.dataset.k === 'nombre' && window.CFX_FABRICA && CFX_FABRICA.precio(ev.target.value);
         if (pf && !items[i].precio) { items[i].precio = pf; const ip = $('dItems').querySelector('[data-i="' + i + '"][data-k=precio]'); if (ip) ip.value = pf; }
         totalItems();
       };
@@ -539,11 +543,13 @@
     $('dCheck').innerHTML = CHECK.map(([k, n]) => '<button type="button" class="' + (c[k] || '') + '" data-ck="' + k + '" aria-pressed="' + !!c[k] + '">' + (CHECK_V[c[k]] || '⬜') + ' ' + n + '</button>').join('');
   }
   function pintarItems() {
-    $('dItems').innerHTML = items.length ? items.map((it, i) => '<div class="it"><input data-i="' + i + '" data-k="nombre" value="' + esc(it.nombre) + '" placeholder="Elige o escribe" aria-label="Descripción" list="fabRep">' +
+    $('dItems').innerHTML = items.length ? items.map((it, i) => '<div class="it"><input data-i="' + i + '" data-k="nombre" value="' + esc(it.nombre) + '" placeholder="Elige o escribe" aria-label="Descripción" list="' + (ST ? 'stRep' : 'fabRep') + '">' +
       '<input data-i="' + i + '" data-k="cant" value="' + it.cant + '" inputmode="numeric" aria-label="Cantidad"><input data-i="' + i + '" data-k="precio" value="' + it.precio + '" inputmode="numeric" aria-label="Precio">' +
-      '<button class="danger" data-x="' + i + '" aria-label="Quitar">✕</button>' + (APROB[it.aprob] ? '<div class="ap ' + it.aprob + '">' + APROB[it.aprob] + '</div>' : '') + '</div>').join('') : '<p class="sub" style="margin:0">Agrega lo que se hizo y los repuestos.</p>';
+      '<button class="danger" data-x="' + i + '" aria-label="Quitar">✕</button>' + (APROB[it.aprob] ? '<div class="ap ' + it.aprob + '">' + APROB[it.aprob] + '</div>' : '') + stockDe(it) + '</div>').join('') : '<p class="sub" style="margin:0">Agrega lo que se hizo y los repuestos.</p>';
     totalItems();
   }
+  // G59d 📦 Debajo del ítem: cuántos quedan (baja al entregar).
+  const stockDe = (it) => { const x = repDe(it.nombre); return x ? '<div class="ap ' + (x.stock < (+it.cant || 1) ? 'no' : x.minimo > 0 && x.stock <= x.minimo ? 'pend' : 'si') + '">📦 ' + (x.stock ? 'Quedan ' + x.stock + ' en stock' : 'Sin stock: pídelo') + '</div>' : ''; };
   const APROB = { pend: '⏳ Esperando al cliente', si: '✅ Aprobado por el cliente', no: '❌ Rechazado: no se cobra' };
   // ✅ Presupuesto por link (módulo): pedir aprobación + qué respondió el cliente.
   function pintarPres(nuevos) {
@@ -600,15 +606,15 @@
   let subMas = null;
   $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); } };
   // Más = menú común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (body() dibuja dentro de ella).
-  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller',
+  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller',
     stats: 'Ventas y clientes', recordar: 'Ventas y clientes', plan: 'Tu plan', modulos: 'Tu plan', cuenta: 'Configuración' };
   const K2 = { plan: 'premium', cuenta: 'micuenta', chat: 'mensajes' };
-  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', cuenta: '👤' };
+  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', cuenta: '👤' };
   let hojaMas = null;
   function abrirSec(m) {
     if (m === 'chat') { $('chatBtn').click(); return; }
     const b = $('mSeg').querySelector('[data-m="' + m + '"]'); if (!b || b.classList.contains('hidden')) return;
-    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos };
+    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock };
     if (!hojaMas || hojaMas.m !== m || !hojaMas.h.d.isConnected) {
       const h = window.CFX_MENU.hoja((ICO[m] || '') + ' ' + esc(b.textContent.replace(/\d+$/, '').replace(/^[^\p{L}]+/u, '').trim()), () => { if (hojaMas && hojaMas.h === h) { hojaMas = null; subMas = null; } });
       hojaMas = { m, h };
@@ -845,6 +851,132 @@
   function verModulos() {
     body().innerHTML = '<div class="card"><p class="sub" style="margin-top:0">Suma solo lo que tu taller necesita. Toca ▶️ Probar para ver cómo funciona.</p><div id="modZona"></div></div>';
     window.CFX_MODULOS_TIENDA.montar($('modZona'), { rpc, alCambiar: recargar }).cargar();
+  }
+
+  // ---- G59d 🧩 📦 Repuestos y stock + 🛒 pedido a proveedor (G68: genérico, los proveedores del taller)
+  let ST = null;  // { repuestos, proveedores } (taller_stock)
+  async function cargarStock() { ST = await rpc('taller_stock'); if (ST.bloqueado) ST = null; return ST; }
+  const repDe = (nombre) => ST && ST.repuestos.find((x) => x.nombre.trim().toLowerCase() === String(nombre || '').trim().toLowerCase());
+  const porPedir = () => (ST ? ST.repuestos.filter((x) => x.minimo > 0 && x.stock <= x.minimo) : []);
+  const cantPedir = (x) => Math.max(x.minimo * 2 - x.stock, 1);
+  function listaStock() {  // datalist de la orden: mis repuestos + los de fábrica
+    let d = document.getElementById('stRep');
+    if (!d) { d = document.createElement('datalist'); d.id = 'stRep'; document.body.appendChild(d); }
+    const nombres = ST.repuestos.map((x) => x.nombre), fab = window.CFX_FABRICA ? CFX_FABRICA.REPUESTOS.map((r) => r[0]) : [];
+    d.innerHTML = nombres.concat(fab.filter((n) => !nombres.some((m) => m.toLowerCase() === n.toLowerCase()))).map((n) => '<option value="' + esc(n) + '">').join('');
+  }
+  async function verStock() {
+    body().innerHTML = '<p class="empty">Cargando…</p>';
+    let s;
+    try { s = await rpc('taller_stock'); } catch (e) { body().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    if (s.bloqueado) {
+      body().innerHTML = '<div class="card"><h2>📦 Repuestos y stock <span class="pill pro">🧩 MÓDULO</span></h2><p class="muted">El stock baja solo al entregar cada bici. Cuando algo se acaba, armas el pedido a tu proveedor por WhatsApp con un toque.</p>' +
+        '<div class="btns"><button type="button" data-sin-atras data-ofrecer="stock">🧩 Ver el módulo</button></div></div>';
+      return;
+    }
+    ST = s;
+    const bajos = porPedir(), f = (body().querySelector('#rBuscar') || {}).value || '';
+    body().innerHTML = (bajos.length ? '<div class="aviso warn"><div class="grow">⚠️ ' + bajos.length + ' repuesto' + (bajos.length === 1 ? '' : 's') + ' por pedir.</div><button class="small" id="rPedido" type="button">🛒 Armar pedido</button></div>' : '') +
+      '<div class="card"><h2>📦 Repuestos <span class="pill">' + s.repuestos.length + '</span></h2><p class="sub" style="margin-top:0">Baja solo al entregar la orden (si el nombre es igual). Usa ➖ ➕ para corregir.</p>' +
+      (s.repuestos.length > 8 ? '<input id="rBuscar" placeholder="🔎 Buscar repuesto" value="' + esc(f) + '">' : '') + '<ul class="list" id="rLista"></ul>' +
+      '<div class="btns">' + (P.dueno ? '<button id="rNuevo" type="button">＋ Nuevo repuesto</button><button class="alt" id="rFab" type="button">✨ Repuestos de fábrica</button>' : '') +
+      '<button class="ghost" id="rProv" type="button">🚚 Proveedores (' + s.proveedores.length + ')</button></div></div>';
+    const pintar = () => {
+      const t = ((body().querySelector('#rBuscar') || {}).value || '').trim().toLowerCase();
+      const l = s.repuestos.filter((x) => !t || x.nombre.toLowerCase().includes(t));
+      body().querySelector('#rLista').innerHTML = l.length ? l.map((x) => {
+        const bajo = x.minimo > 0 && x.stock <= x.minimo, pv = s.proveedores.find((p) => p.id === x.proveedor_id);
+        return '<li><div class="grow"><b>' + esc(x.nombre) + '</b> <span class="pill ' + (x.stock === 0 ? 'bad' : bajo ? 'warn' : 'ok') + '">' + x.stock + '</span>' +
+          '<div class="sub">' + (P.dueno ? plata(x.precio) + ' · ' : '') + (x.minimo ? 'mínimo ' + x.minimo : 'sin mínimo') + (pv ? ' · 🚚 ' + esc(pv.nombre) : '') + '</div></div>' +
+          '<button class="small ghost" data-mas="' + x.id + '" data-n="-1" aria-label="Restar uno">➖</button><button class="small ghost" data-mas="' + x.id + '" data-n="1" aria-label="Sumar uno">➕</button>' +
+          (P.dueno ? '<button class="small ghost" data-ed="' + x.id + '" aria-label="Editar">✏️</button>' : '') + '</li>';
+      }).join('') : '<li class="muted">' + (t ? 'Nada con ese nombre.' : 'Agrega los repuestos que vendes, o toca ✨ para traer los típicos.') + '</li>';
+    };
+    pintar();
+    const rb = body().querySelector('#rBuscar'); if (rb) rb.oninput = pintar;
+    body().onclick = async (e) => {
+      const m = e.target.closest('[data-mas]');
+      if (m) {
+        try { await rpc('taller_stock_sumar', { p: { [m.dataset.mas]: +m.dataset.n } }); const x = s.repuestos.find((r) => r.id === m.dataset.mas); x.stock = Math.max(x.stock + +m.dataset.n, 0); pintar(); }
+        catch (err) { toast(err.message); }
+        return;
+      }
+      const ed = e.target.closest('[data-ed]'); if (ed) { editarRepuesto(s.repuestos.find((r) => r.id === ed.dataset.ed)); return; }
+      if (e.target.closest('#rNuevo')) editarRepuesto(null);
+      else if (e.target.closest('#rProv')) verProveedores();
+      else if (e.target.closest('#rPedido')) verPedido();
+      else if (e.target.closest('#rFab')) {
+        try { const n = await rpc('taller_repuestos_fabrica', { p_lista: window.CFX_FABRICA ? CFX_FABRICA.REPUESTOS : [] }); toast(n ? '✨ Se agregaron ' + n + ': pon tu stock y mínimo' : '✨ Ya tienes todos los de fábrica'); verStock(); }
+        catch (err) { toast(err.message); }
+      }
+    };
+  }
+  function editarRepuesto(x) {
+    const pv = ST.proveedores;
+    const d = modal('<h2>' + (x ? '✏️ Editar repuesto' : '＋ Nuevo repuesto') + '</h2><label for="rN">Nombre (igual que en la orden)</label><input id="rN" maxlength="100" value="' + esc(x ? x.nombre : '') + '" list="fabRep" autocomplete="off">' +
+      '<div class="row"><div><label for="rP">Precio de venta</label><input id="rP" inputmode="numeric" value="' + (x ? x.precio : '') + '"></div><div><label for="rS">Stock hoy</label><input id="rS" inputmode="numeric" value="' + (x ? x.stock : 0) + '"></div></div>' +
+      '<div class="row"><div><label for="rM">Pedir cuando queden</label><input id="rM" inputmode="numeric" value="' + (x ? x.minimo : 2) + '"></div><div><label for="rV">Proveedor</label><select id="rV"><option value="">Sin proveedor</option>' +
+        pv.map((p) => '<option value="' + p.id + '"' + (x && x.proveedor_id === p.id ? ' selected' : '') + '>' + esc(p.nombre) + '</option>').join('') + '</select></div></div>' +
+      '<div class="btns">' + (x ? '<button class="danger" id="rB" type="button">🗑️ Borrar</button>' : '') + '<button class="ghost" data-cerrar>Cancelar</button><button id="rG" type="button">💾 Guardar</button></div>');
+    if (window.CFX_FABRICA) CFX_FABRICA.repuestos(d.querySelector('#rN'));
+    d.querySelector('#rN').oninput = () => { const pf = window.CFX_FABRICA && CFX_FABRICA.precio(d.querySelector('#rN').value); if (pf && !+d.querySelector('#rP').value) d.querySelector('#rP').value = pf; };
+    d.querySelector('#rG').onclick = async () => {
+      try {
+        await rpc('taller_repuesto_guardar', { p: { id: x ? x.id : null, nombre: d.querySelector('#rN').value, precio: App.numero(d.querySelector('#rP').value), stock: App.numero(d.querySelector('#rS').value),
+          minimo: App.numero(d.querySelector('#rM').value), proveedor_id: d.querySelector('#rV').value || null } });
+        d.close(); toast('💾 Guardado'); verStock();
+      } catch (e) { toast(e.message); }
+    };
+    const b = d.querySelector('#rB');
+    if (b) b.onclick = async () => { if (!await confirmar('¿Borrar "' + x.nombre + '"?')) return; try { await rpc('taller_repuesto_borrar', { p_id: x.id }); d.close(); verStock(); } catch (e) { toast(e.message); } };
+  }
+  function verProveedores() {
+    const pv = ST.proveedores;
+    const d = modal('<h2>🚚 Tus proveedores</h2><p class="muted" style="margin-top:0">A quién le pides los repuestos. El pedido sale por WhatsApp o correo.</p><ul class="list">' +
+      (pv.map((p) => '<li><div class="grow"><b>' + esc(p.nombre) + '</b><div class="sub">' + esc([p.telefono, p.email].filter(Boolean).join(' · ') || 'Sin contacto') + '</div></div>' +
+        (P.dueno ? '<button class="small ghost" data-pv="' + p.id + '" aria-label="Editar">✏️</button>' : '') + '</li>').join('') || '<li class="muted">Aún no tienes proveedores.</li>') + '</ul>' +
+      '<div class="btns"><button class="ghost" data-cerrar>Cerrar</button>' + (P.dueno ? '<button id="pvN" type="button">＋ Nuevo proveedor</button>' : '') + '</div>');
+    d.onclick = (e) => {
+      const b = e.target.closest('[data-pv]'); if (b) { d.close(); editarProveedor(pv.find((p) => p.id === b.dataset.pv)); }
+      if (e.target.closest('#pvN')) { d.close(); editarProveedor(null); }
+    };
+  }
+  function editarProveedor(p) {
+    const d = modal('<h2>' + (p ? '✏️ Editar proveedor' : '＋ Nuevo proveedor') + '</h2><label for="pN">Nombre</label><input id="pN" maxlength="80" value="' + esc(p ? p.nombre : '') + '" placeholder="Ej: Distribuidora Andes">' +
+      '<label for="pT">WhatsApp</label><input id="pT" inputmode="tel" maxlength="30" value="' + esc(p ? p.telefono : '') + '" placeholder="+56 9 1234 5678">' +
+      '<label for="pE">Correo</label><input id="pE" type="email" maxlength="120" value="' + esc(p ? p.email : '') + '">' +
+      '<label for="pO">Nota (vendedor, día de despacho…)</label><input id="pO" maxlength="300" value="' + esc(p ? p.nota : '') + '">' +
+      '<div class="btns">' + (p ? '<button class="danger" id="pB" type="button">🗑️ Borrar</button>' : '') + '<button class="ghost" data-cerrar>Cancelar</button><button id="pG" type="button">💾 Guardar</button></div>');
+    d.querySelector('#pG').onclick = async () => {
+      try {
+        await rpc('taller_proveedor_guardar', { p: { id: p ? p.id : null, nombre: d.querySelector('#pN').value, telefono: d.querySelector('#pT').value, email: d.querySelector('#pE').value, nota: d.querySelector('#pO').value } });
+        d.close(); toast('💾 Guardado'); await cargarStock(); verStock();
+      } catch (e) { toast(e.message); }
+    };
+    const b = d.querySelector('#pB');
+    if (b) b.onclick = async () => { if (!await confirmar('¿Borrar a ' + p.nombre + '? Sus repuestos quedan sin proveedor.')) return; try { await rpc('taller_proveedor_borrar', { p_id: p.id }); d.close(); verStock(); } catch (e) { toast(e.message); } };
+  }
+  // 🛒 Pedido: lo que está en el mínimo o menos, agrupado por proveedor → 📲 WhatsApp / ✉️ correo → 📥 Llegó (suma al stock).
+  function verPedido() {
+    const bajos = porPedir(), grupos = {};
+    bajos.forEach((x) => { (grupos[x.proveedor_id || ''] = grupos[x.proveedor_id || ''] || []).push(x); });
+    const texto = (l) => 'Hola 👋 Te escribimos de ' + P.taller.nombre + '. Queremos pedir:\n' + l.map((x) => '• ' + cantPedir(x) + ' × ' + x.nombre).join('\n') + '\n¿Nos confirmas precio y cuándo llega? Gracias 🙌';
+    const d = modal('<h2>🛒 Pedido a proveedores</h2><p class="muted" style="margin-top:0">Lo que está en el mínimo o menos. Cuando llegue, toca 📥 y se suma al stock.</p>' +
+      Object.keys(grupos).map((k) => {
+        const p = ST.proveedores.find((v) => v.id === k), l = grupos[k], t = texto(l);
+        return '<div class="card" style="margin:10px 0"><h3 style="margin-top:0">🚚 ' + (p ? esc(p.nombre) : 'Sin proveedor') + '</h3><ul class="list">' + l.map((x) => '<li><span class="grow">' + esc(x.nombre) + ' <span class="sub">(quedan ' + x.stock + ')</span></span><b>' + cantPedir(x) + '</b></li>').join('') + '</ul><div class="btns">' +
+          (p && p.telefono ? '<a class="btn small" target="_blank" rel="noopener" href="' + App.wa(p.telefono, t) + '">📲 WhatsApp</a>' : '') +
+          (p && p.email ? '<a class="btn small alt" href="mailto:' + encodeURIComponent(p.email) + '?subject=' + encodeURIComponent('Pedido de ' + P.taller.nombre) + '&body=' + encodeURIComponent(t) + '">✉️ Correo</a>' : '') +
+          (!p || (!p.telefono && !p.email) ? '<button class="small alt" type="button" data-copiar="' + esc(k) + '">📋 Copiar pedido</button>' : '') +
+          '<button class="small okb" type="button" data-llego="' + esc(k) + '">📥 Llegó</button></div></div>';
+      }).join('') + '<div class="btns"><button class="ghost" data-cerrar>Cerrar</button></div>');
+    d.onclick = async (e) => {
+      const c = e.target.closest('[data-copiar]');
+      if (c) { navigator.clipboard.writeText(texto(grupos[c.dataset.copiar])).then(() => toast('📋 Pedido copiado')); return; }
+      const ll = e.target.closest('[data-llego]'); if (!ll) return;
+      const l = grupos[ll.dataset.llego], p = {}; l.forEach((x) => { p[x.id] = cantPedir(x); });
+      try { await rpc('taller_stock_sumar', { p }); toast('📥 Stock sumado'); d.close(); await cargarPanel(); verStock(); } catch (err) { toast(err.message); }
+    };
   }
   async function verPlan() {
     const planes = pub.planes || {};
