@@ -19,6 +19,10 @@
     devolver: '💸 Devolver abono', devuelto: 'Abono devuelto', saldo: 'Saldo a favor', perdido: 'Abono perdido', aplicado: 'Abono aplicado',
     sin_abono: 'Sin abono', no_pagado: 'No pagó' };
   const EN_TALLER = ['recibida', 'en_reparacion', 'esperando_repuesto', 'lista'];
+  // G59 🧾 Checklist de revisión (FREE): cada toque cambia sin revisar → ✅ bien → 🔧 ajustado → 🔁 cambiar.
+  const CHECK = [['frenos', 'Frenos'], ['cambios', 'Cambios'], ['ruedas', 'Ruedas'], ['neumaticos', 'Neumáticos'], ['cadena', 'Cadena'],
+    ['pedalier', 'Pedalier'], ['direccion', 'Dirección'], ['suspension', 'Suspensión'], ['cuadro', 'Cuadro'], ['luces', 'Luces']];
+  const CHECK_V = { ok: '✅', ajuste: '🔧', cambio: '🔁' }, CHECK_SIG = { '': 'ok', ok: 'ajuste', ajuste: 'cambio', cambio: '' };
   const COLORES = ['#16a34a', '#059669', '#0891b2', '#2563eb', '#4f46e5', '#7c3aed', '#db2777', '#dc2626', '#ea580c', '#d97706', '#334155', '#111827'];
   const ICONOS = ['🚲', '🚴', '🔧', '🛠️', '⚙️', '🏔️', '🏁', '⚡', '🛞', '🔩'];
 
@@ -116,6 +120,7 @@
     pintarReferidos();
     const hoyAct = lista.filter((r) => !['cancelada', 'rechazada', 'expirada', 'por_pagar'].includes(r.estado));
     $('kHoy').textContent = hoyAct.length; $('kTaller').textContent = taller.length;
+    pintarTablero(taller);
     $('cRevisar').classList.toggle('hidden', !rev.length);
     $('hRevisar').innerHTML = rev.map((r) => tarjeta(r, botonesRevisar(r))).join('');
     $('hHoy').innerHTML = hoyAct.length ? hoyAct.map((r) => tarjeta(r)).join('') : '<p class="muted" style="margin:0">Sin reservas para hoy.</p>';
@@ -127,6 +132,33 @@
     $('hPagando').innerHTML = pag.map((r) => '<li><span class="grow"><b>' + esc(r.nombre) + '</b><div class="sub">' + App.fCorta(r.fecha) + ' ' + r.hora +
       ' · vence ' + new Date(r.expira_at).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) + '</div></span></li>').join('');
   }
+  // G59 🚦 Tablero del taller (FREE): una columna por paso; ‹ › mueve la bici y le avisa al cliente.
+  function pintarTablero(lista) {
+    $('hTablero').innerHTML = EN_TALLER.map((est, i) => {
+      const l = lista.filter((r) => r.estado === est);
+      return '<div class="col" data-col="' + est + '"><h3>' + ESTADOS[est][0] + '<b>' + l.length + '</b></h3>' + (l.length ? l.map((r) =>
+        '<div class="tj" data-tj="' + r.id + '"><b>' + esc(r.nombre) + '</b>' + (r.bici ? '<div class="sub">🚲 ' + esc(r.bici) + '</div>' : '') +
+        (r.mecanico ? '<div class="sub">🧑‍🔧 ' + esc(r.mecanico) + '</div>' : '') + '<div class="btns">' +
+        (i > 0 ? '<button class="small ghost" type="button" data-sin-atras data-mover="' + r.id + '" data-a="' + EN_TALLER[i - 1] + '" aria-label="Mover a ' + ESTADOS[EN_TALLER[i - 1]][0] + '">‹</button>' : '') +
+        '<span class="grow"></span>' + (i < EN_TALLER.length - 1
+          ? '<button class="small" type="button" data-mover="' + r.id + '" data-a="' + EN_TALLER[i + 1] + '" aria-label="Pasar a ' + ESTADOS[EN_TALLER[i + 1]][0] + '">›</button>'
+          : '<button class="small okb" type="button" data-mover="' + r.id + '" data-a="completada">🎉 Entregar</button>') + '</div></div>').join('')
+        : '<p class="sub" style="margin:0">Vacío</p>') + '</div>';
+    }).join('');
+    $('cTablero').classList.toggle('hidden', !lista.length);
+  }
+  $('hTablero').addEventListener('click', async (e) => {
+    const m = e.target.closest('[data-mover]');
+    if (m) {
+      e.stopPropagation();
+      if (m.dataset.a === 'completada' && !await confirmar('¿Entregar la bici al cliente? La orden queda terminada.')) return;
+      m.disabled = true;
+      try { await rpc('taller_estado', { p_id: m.dataset.mover, p_estado: m.dataset.a }); sb.functions.invoke('servidor').catch(() => {}); toast((ESTADOS[m.dataset.a] || [''])[0]); pintarHoy(); }
+      catch (err) { m.disabled = false; toast(err.message); }
+      return;
+    }
+    const tj = e.target.closest('[data-tj]'); if (tj) { volverA = 'hoy'; abrirDetalle(tj.dataset.tj); }
+  });
   $('v-hoy').addEventListener('click', async (e) => {
     const ir = e.target.closest('[data-ir]');
     if (ir) { const [v, f] = ir.dataset.ir.split(':'); if (f) filtroR = f; show(v); return; }
@@ -382,7 +414,8 @@
         '<div class="row"><div><label for="dMec">Mecánico</label><select id="dMec"><option value="">Sin asignar</option>' + equipo.map((p) => '<option value="' + p.id + '"' + (p.id === r.mecanico_id ? ' selected' : '') + '>' + esc(p.nombre) + '</option>').join('') + '</select></div>' +
         '<div><label for="dProx">Próxima mantención</label><input type="date" id="dProx" value="' + (r.proxima_mantencion || '') + '"></div></div>' +
         '<div class="btns"><button id="dGuardar">💾 Guardar</button><button class="ghost" onclick="window.print()">🖨️ Imprimir</button></div></div>' +
-        '<div class="card"><h2>📷 Fotos antes / después</h2><div id="dFotos"></div></div>' : '') +
+        '<div class="card"><h2>🧾 Revisión de la bici</h2><p class="sub" style="margin-top:0">Toca cada punto: ✅ bien · 🔧 ajustado · 🔁 hay que cambiar. El cliente lo ve en su enlace.</p><div class="check" id="dCheck"></div></div>' +
+        '<div class="card"><h2>📸 Fotos de llegada y entrega</h2><div id="dFotos"></div></div>' : '') +
       (['completada', 'lista', 'no_asistio'].includes(r.estado) ? '<div class="card"><h2>⭐ Califica al cliente</h2><p class="sub" style="margin-top:0">Los otros talleres y clientes solo ven el promedio de estrellas.</p>' +
         (r.calificado ? '<p class="muted">✅ Ya lo calificaste.</p>' : '<div class="row"><select id="dEst"><option value="5">★★★★★ Excelente</option><option value="4">★★★★ Bueno</option><option value="3">★★★ Regular</option>' +
           '<option value="2">★★ Llegó tarde / mal trato</option><option value="1">★ No llegó / problemas</option></select><button id="dCal" style="flex:0 0 auto">Calificar</button></div>' +
@@ -410,6 +443,15 @@
       $('dAddR').onclick = () => { items.push({ nombre: '', cant: 1, precio: 0 }); pintarItems(); const ins = $('dItems').querySelectorAll('[data-k=nombre]'); ins[ins.length - 1].focus(); };
       $('dGuardar').onclick = () => guardarTrabajo(false);
       pintarFotos(r.id);
+      pintarCheck();
+      $('dCheck').onclick = async (ev) => {
+        const b = ev.target.closest('[data-ck]'); if (!b) return;
+        const k = b.dataset.ck, antes = Object.assign({}, detalle.checklist || {}), v = CHECK_SIG[antes[k] || ''];
+        const nuevo = Object.assign({}, antes); if (v) nuevo[k] = v; else delete nuevo[k];
+        detalle.checklist = nuevo; pintarCheck();
+        try { detalle.checklist = await rpc('taller_checklist', { p_id: detalle.id, p_check: nuevo }); }
+        catch (err) { detalle.checklist = antes; pintarCheck(); toast(err.message); }
+      };
     }
     const bc = $('dCal');
     if (bc) bc.onclick = async () => {
@@ -418,22 +460,16 @@
     };
   }
   let volverA = 'reservas';
-  // Fotos antes/después (Premium): el cliente las ve en el enlace de su reserva y, si es Premium, siempre en su historial.
+  // G59 📸 Fotos de llegada y entrega (GRATIS): el cliente las ve en el enlace de su reserva y, si es Premium, siempre en su historial.
   async function pintarFotos(id) {
     const el = $('dFotos');
-    if (!P.plan.limites.fotos) {
-      el.innerHTML = '<p class="muted" style="margin-top:0">Muestra el antes y el después: tu taller se ve más profesional y el cliente confía más. Es una función ⭐ Premium.</p>' +
-        (P.dueno ? '<div class="btns"><button class="gold" type="button" data-plan>⭐ Activar Premium</button></div>' : '');
-      const bp = el.querySelector('[data-plan]'); if (bp) bp.onclick = () => { subMas = 'plan'; show('mas'); };
-      return;
-    }
     let fotos = [];
     try { fotos = await rpc('taller_fotos', { p_reserva: id }); } catch (e) { el.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
     const n = (t) => fotos.filter((f) => f.tipo === t).length;
-    el.innerHTML = '<p class="sub" style="margin-top:0">Hasta 2 de cada una. El cliente las ve en el enlace de su reserva.</p>' +
-      (fotos.length ? '<div class="fotos">' + fotos.map((f) => '<figure><img alt="Foto ' + f.tipo + '" src="' + f.imagen + '"><figcaption>' + (f.tipo === 'antes' ? 'Antes' : 'Después') + '</figcaption>' +
+    el.innerHTML = '<p class="sub" style="margin-top:0">Hasta 2 al llegar y 2 al entregar. Te cuidan si hay reclamos y el cliente las ve en su enlace.</p>' +
+      (fotos.length ? '<div class="fotos">' + fotos.map((f) => '<figure><img alt="Foto ' + f.tipo + '" src="' + f.imagen + '"><figcaption>' + (f.tipo === 'antes' ? 'Llegada' : 'Entrega') + '</figcaption>' +
         '<button class="small danger" type="button" data-fx="' + f.id + '" aria-label="Borrar foto">✕</button></figure>').join('') + '</div>' : '') +
-      '<div class="btns">' + ['antes', 'despues'].map((t) => n(t) < 2 ? '<label class="btn alt" style="margin:0;color:var(--brand)">📷 ' + (t === 'antes' ? 'Antes' : 'Después') +
+      '<div class="btns">' + ['antes', 'despues'].map((t) => n(t) < 2 ? '<label class="btn alt" style="margin:0;color:var(--brand)">📷 ' + (t === 'antes' ? 'Llegada' : 'Entrega') +
         '<input type="file" accept="image/*" capture="environment" data-ft="' + t + '" hidden></label>' : '').join('') + '</div>';
     el.onchange = async (e) => {
       const i = e.target.closest('[data-ft]'); if (!i || !i.files[0]) return;
@@ -446,6 +482,10 @@
       if (x) { e.stopPropagation(); if (!await confirmar('¿Borrar esta foto?')) return; try { await rpc('taller_foto_borrar', { p_id: x.dataset.fx }); pintarFotos(id); } catch (err) { toast(err.message); } return; }
       const im = e.target.closest('img'); if (im) App.verImagen(im.src, im.alt, 'foto.jpg');
     };
+  }
+  function pintarCheck() {
+    const c = detalle.checklist || {};
+    $('dCheck').innerHTML = CHECK.map(([k, n]) => '<button type="button" class="' + (c[k] || '') + '" data-ck="' + k + '" aria-pressed="' + !!c[k] + '">' + (CHECK_V[c[k]] || '⬜') + ' ' + n + '</button>').join('');
   }
   function pintarItems() {
     $('dItems').innerHTML = items.length ? items.map((it, i) => '<div class="it"><input data-i="' + i + '" data-k="nombre" value="' + esc(it.nombre) + '" placeholder="Descripción" aria-label="Descripción">' +

@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.27'::text $$;
+language sql immutable as $$ select '2.28'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -614,6 +614,8 @@ create index if not exists reservas_tel_idx on public.reservas (tel_norm);
 create index if not exists reservas_cli_idx on public.reservas (cliente_id);
 alter table public.reservas enable row level security;
 alter table public.reservas add column if not exists entrega_estimada date;
+-- v2.28 (G59): 🧾 checklist de revisión de la bici { frenos: 'ok' | 'ajuste' | 'cambio', ... } (lo ve el cliente en su enlace).
+alter table public.reservas add column if not exists checklist jsonb not null default '{}'::jsonb;
 
 -- Fotos antes/después del trabajo (v1.6, taller Premium). Livianas y se borran solas después de N días.
 create table if not exists public.fotos_trabajo (
@@ -1114,7 +1116,7 @@ begin
     'token', r.token, 'estado', r.estado, 'abono_estado', r.abono_estado, 'abono_monto', r.abono_monto,
     'expira_at', r.expira_at, 'fecha', r.fecha, 'hora', to_char(r.hora, 'HH24:MI'), 'servicio', r.servicio_nombre,
     'servicio_id', r.servicio_id, 'minutos', (extract(epoch from (r.hora_fin - r.hora)) / 60)::int, 'precio', r.precio, 'nombre', r.nombre, 'telefono', r.telefono, 'bici', r.bici,
-    'motivo', r.motivo, 'items', r.items, 'total', r.total, 'diagnostico', r.diagnostico,
+    'motivo', r.motivo, 'items', r.items, 'total', r.total, 'diagnostico', r.diagnostico, 'checklist', r.checklist,
     'proxima_mantencion', r.proxima_mantencion, 'saldo_hasta', r.saldo_hasta, 'created_at', r.created_at, 'entrega_estimada', r.entrega_estimada,
     'historial', (select coalesce(jsonb_agg(jsonb_build_object('estado', h ->> 'estado', 'at', h ->> 'at')), '[]') from jsonb_array_elements(r.historial) h),
     'cita', cita, 'cancelar', tipo,
@@ -1385,7 +1387,8 @@ language sql stable security definer set search_path = '' as $$
     select r.id, r.fecha, to_char(r.hora, 'HH24:MI') as hora, to_char(r.hora_fin, 'HH24:MI') as hora_fin, r.nombre, r.telefono,
       r.email, r.bici, r.nota, r.servicio_id, r.servicio_nombre, r.precio, r.estado, r.abono_monto, r.abono_estado, r.expira_at,
       r.origen, r.cliente_id, r.mecanico_id, r.items, r.total, r.diagnostico, r.notas_internas, r.proxima_mantencion,
-      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta, r.entrega_estimada,
+      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta, r.entrega_estimada, r.checklist,
+      (select p.nombre from public.perfiles p where p.id = r.mecanico_id) as mecanico,
       exists (select 1 from public.comprobantes k where k.reserva_id = r.id) as tiene_comprobante,
       public.nota_cliente(r.telefono) as nota_cliente,
       exists (select 1 from public.calificaciones q where q.reserva_id = r.id and q.autor = 'taller') as calificado,
@@ -2498,7 +2501,7 @@ begin
   if tid is null then raise exception 'Sin acceso'; end if;
   select * into r from public.reservas where id = p_reserva and taller_id = tid;
   if r.id is null then raise exception 'Reserva no encontrada'; end if;
-  if not coalesce((public.limite_taller(tid, 'fotos'))::boolean, false) then raise exception 'Las fotos antes/después son una función Premium'; end if;
+  -- G59: las fotos de llegada y entrega son GRATIS (antes eran Premium).
   if p_tipo not in ('antes', 'despues') then raise exception 'Tipo no válido'; end if;
   if p_imagen !~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' or length(p_imagen) > 160000 then raise exception 'Imagen no válida o muy pesada'; end if;
   if (select count(*) from public.fotos_trabajo where reserva_id = r.id and tipo = p_tipo) >= 2 then
@@ -2790,6 +2793,34 @@ language sql stable security definer set search_path = '' as $$
       'ok', exists (select 1 from public.links_pago l where l.taller_id = t.id and l.tipo = 'abono' and l.activo and l.url <> '')))
   from public.talleres t where t.owner_id = auth.uid()), '[]'::jsonb)
 $$;
+
+-- =====================================================================
+-- v2.28 · G59 🚲 Taller FREE: 🚦 tablero, 📸 fotos de llegada/entrega gratis, 🧾 checklist de revisión
+-- =====================================================================
+-- Las fotos ya no son Premium: se saca de la lista de beneficios Premium (si el administrador no la cambió, queda igual).
+update public.planes set beneficios = beneficios - 'Fotos antes/después en tus órdenes de trabajo'
+where codigo = 'taller_premium' and beneficios ? 'Fotos antes/después en tus órdenes de trabajo';
+
+-- Checklist de revisión: cada punto queda en ok (✅ bien), ajuste (🔧 ajustado) o cambio (🔁 hay que cambiar). Vacío = sin revisar.
+create or replace function public.taller_checklist(p_id uuid, p_check jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); limpio jsonb := '{}'::jsonb; k text; v text;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if jsonb_typeof(coalesce(p_check, '{}'::jsonb)) <> 'object' then raise exception 'Checklist no válido'; end if;
+  for k, v in select key, value #>> '{}' from jsonb_each(coalesce(p_check, '{}'::jsonb)) loop
+    if k not in ('frenos', 'cambios', 'ruedas', 'neumaticos', 'cadena', 'pedalier', 'direccion', 'suspension', 'cuadro', 'luces') then
+      raise exception 'Punto de revisión no válido: %', k;
+    end if;
+    if v not in ('ok', 'ajuste', 'cambio') then raise exception 'Valor no válido en %', k; end if;
+    limpio := limpio || jsonb_build_object(k, v);
+  end loop;
+  update public.reservas set checklist = limpio, updated_at = now() where id = p_id and taller_id = tid;
+  if not found then raise exception 'Reserva no encontrada'; end if;
+  return limpio;
+end $$;
+revoke all on function public.taller_checklist(uuid, jsonb) from public, anon;
+grant execute on function public.taller_checklist(uuid, jsonb) to authenticated;
 
 -- >>> CFX núcleo (no editar aquí: se copia de saas/nucleo/sql con sincronizar.py)
 -- ---------------------------------------------------------------------

@@ -31,6 +31,14 @@
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chips label { margin: 0; display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px;
     background: var(--field); color: var(--text); font-size: 14px; font-weight: 500; }
+  .tablero { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
+  .tablero .col { flex: 0 0 min(78%, 240px); scroll-snap-align: start; background: var(--field); border: 1px solid var(--line); border-radius: 12px; padding: 8px; min-height: 90px; }
+  .tablero .col h3 { margin: 0 0 6px; font-size: 13px; display: flex; gap: 6px; align-items: center; } .tablero .col h3 b { margin-left: auto; color: var(--muted); }
+  .tablero .tj { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px; margin-bottom: 6px; cursor: pointer; }
+  .tablero .tj .btns { margin-top: 6px; gap: 6px; } .tablero .tj .btns button { padding: 4px 10px; min-height: 32px; }
+  .check { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+  .check button { justify-content: flex-start; text-align: left; background: var(--field); color: var(--text); border: 1px solid var(--line); font-weight: 500; min-height: 40px; }
+  .check button.ok { border-color: var(--ok, #16a34a); } .check button.ajuste { border-color: var(--warn, #d97706); } .check button.cambio { border-color: var(--bad, #dc2626); }
   .bar-mes { display: flex; align-items: flex-end; gap: 8px; height: 140px; margin-top: 10px; }
   .bar-mes div { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
   .bar-mes span { width: 100%; background: var(--brand); border-radius: 6px 6px 0 0; min-height: 2px; }
@@ -62,6 +70,7 @@
       <div class="card clic" data-ir="reservas:taller"><span>🔧 En el taller</span><b id="kTaller">0</b></div>
       <div class="card clic" data-ir="reservas:devolver"><span>💸 Por devolver</span><b id="kDev">0</b></div>
     </div>
+    <div class="card" id="cTablero"><h2>🚦 Tablero del taller</h2><p class="sub" style="margin-top:0">Cada bici en su paso. Toca ‹ › para moverla; tócala para ver la orden.</p><div class="tablero" id="hTablero"></div></div>
     <div class="card" id="cRevisar"><h2>🧾 Comprobantes por revisar</h2><div class="grid" id="hRevisar"></div></div>
     <div class="card"><h2>📅 Hoy</h2><div class="grid" id="hHoy"></div></div>
     <div class="card hidden" id="cDevolver"><h2>💸 Abonos por devolver</h2><div class="grid" id="hDevolver"></div></div>
