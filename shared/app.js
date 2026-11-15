@@ -41,6 +41,7 @@
 
   let toastT;
   function toast(msg) {
+    if (window.CFX_AVISO) { window.CFX_AVISO(msg); return; }  // G58 aviso moderno del núcleo
     let el = $('toast');
     if (!el) { el = document.createElement('div'); el.id = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
     el.textContent = msg; el.classList.add('show');
