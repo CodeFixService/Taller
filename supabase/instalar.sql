@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.28'::text $$;
+language sql immutable as $$ select '2.29'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -616,6 +616,8 @@ alter table public.reservas enable row level security;
 alter table public.reservas add column if not exists entrega_estimada date;
 -- v2.28 (G59): 🧾 checklist de revisión de la bici { frenos: 'ok' | 'ajuste' | 'cambio', ... } (lo ve el cliente en su enlace).
 alter table public.reservas add column if not exists checklist jsonb not null default '{}'::jsonb;
+-- G59 🧩 ✅ Presupuesto por link: { estado: enviado|respondido, enviado_at, respondido_at }. Cada ítem lleva aprob: pend|si|no.
+alter table public.reservas add column if not exists presupuesto jsonb;
 
 -- Fotos antes/después del trabajo (v1.6, taller Premium). Livianas y se borran solas después de N días.
 create table if not exists public.fotos_trabajo (
@@ -1116,7 +1118,7 @@ begin
     'token', r.token, 'estado', r.estado, 'abono_estado', r.abono_estado, 'abono_monto', r.abono_monto,
     'expira_at', r.expira_at, 'fecha', r.fecha, 'hora', to_char(r.hora, 'HH24:MI'), 'servicio', r.servicio_nombre,
     'servicio_id', r.servicio_id, 'minutos', (extract(epoch from (r.hora_fin - r.hora)) / 60)::int, 'precio', r.precio, 'nombre', r.nombre, 'telefono', r.telefono, 'bici', r.bici,
-    'motivo', r.motivo, 'items', r.items, 'total', r.total, 'diagnostico', r.diagnostico, 'checklist', r.checklist,
+    'motivo', r.motivo, 'items', r.items, 'total', r.total, 'diagnostico', r.diagnostico, 'checklist', r.checklist, 'presupuesto', r.presupuesto,
     'proxima_mantencion', r.proxima_mantencion, 'saldo_hasta', r.saldo_hasta, 'created_at', r.created_at, 'entrega_estimada', r.entrega_estimada,
     'historial', (select coalesce(jsonb_agg(jsonb_build_object('estado', h ->> 'estado', 'at', h ->> 'at')), '[]') from jsonb_array_elements(r.historial) h),
     'cita', cita, 'cancelar', tipo,
@@ -1295,6 +1297,7 @@ begin
                  'texto', l.texto, 'activo', l.activo) order by l.slot), '[]') from public.links_pago l where l.taller_id = tid and l.tipo = 'abono') end,
     'pago_pendiente', (select jsonb_build_object('id', id, 'monto', monto, 'created_at', created_at) from public.pagos
                        where taller_id = tid and tipo = 'premium_taller' and estado = 'en_revision' order by created_at desc limit 1),
+    'modulos', public.cfx_modulos(), 'venta', public.cfx_venta_on(),  -- G59 🧩 qué módulos puede usar y si se venden
     'por_revisar', (select count(*) from public.reservas where taller_id = tid and estado = 'en_revision'),
     'por_devolver', (select count(*) from public.reservas where taller_id = tid and abono_estado = 'devolver'));
 end $$;
@@ -1387,7 +1390,7 @@ language sql stable security definer set search_path = '' as $$
     select r.id, r.fecha, to_char(r.hora, 'HH24:MI') as hora, to_char(r.hora_fin, 'HH24:MI') as hora_fin, r.nombre, r.telefono,
       r.email, r.bici, r.nota, r.servicio_id, r.servicio_nombre, r.precio, r.estado, r.abono_monto, r.abono_estado, r.expira_at,
       r.origen, r.cliente_id, r.mecanico_id, r.items, r.total, r.diagnostico, r.notas_internas, r.proxima_mantencion,
-      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta, r.entrega_estimada, r.checklist,
+      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta, r.entrega_estimada, r.checklist, r.presupuesto,
       (select p.nombre from public.perfiles p where p.id = r.mecanico_id) as mecanico,
       exists (select 1 from public.comprobantes k where k.reserva_id = r.id) as tiene_comprobante,
       public.nota_cliente(r.telefono) as nota_cliente,
@@ -1473,7 +1476,7 @@ begin
     raise exception 'Mecánico no válido';
   end if;
   select coalesce(sum(greatest(coalesce((i ->> 'cant')::numeric, 1), 0) * greatest(coalesce((i ->> 'precio')::numeric, 0), 0)), 0)::int
-    into tot from jsonb_array_elements(p_items) i;
+    into tot from jsonb_array_elements(p_items) i where coalesce(i ->> 'aprob', '') <> 'no';  -- G59: lo que el cliente rechazó no se cobra
   update public.reservas set items = p_items, total = tot, diagnostico = left(coalesce(p_diagnostico, ''), 1000),
     notas_internas = left(coalesce(p_notas, ''), 1000), mecanico_id = p_mecanico, proxima_mantencion = p_proxima, updated_at = now()
   where id = p_id and taller_id = tid
@@ -2821,6 +2824,75 @@ begin
 end $$;
 revoke all on function public.taller_checklist(uuid, jsonb) from public, anon;
 grant execute on function public.taller_checklist(uuid, jsonb) to authenticated;
+
+-- ---------- G59 🧩 Módulos de BiciTaller (catálogo del núcleo: modulos_venta.sql) ----------
+-- Negocio = cuenta del dueño del taller (así el núcleo sabe quién compra y prueba). Los módulos NO vienen en Premium (G39): Premium paga -20 %.
+create or replace function public.cfx_negocio_de_cuenta(u uuid) returns uuid
+language sql stable security definer set search_path = '' as $$
+  select t.owner_id from public.talleres t where t.id = public.taller_de(u)
+$$;
+create or replace function public.cfx_es_premium(n uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select coalesce((select public.taller_es_premium(t.id) from public.talleres t where t.owner_id = n), false)
+$$;
+create or replace function public.cfx_modulos_app() returns text[]
+language sql immutable as $$ select array['presupuesto'] $$;
+revoke all on function public.cfx_negocio_de_cuenta(uuid), public.cfx_es_premium(uuid), public.cfx_modulos_app() from public, anon, authenticated;
+create or replace function public.taller_tiene(p_modulo text) returns boolean
+language plpgsql stable security definer set search_path = '' as $$ begin return public.cfx_modulo_de(p_modulo, public.cfx_negocio_de_cuenta(auth.uid())); end $$;
+revoke all on function public.taller_tiene(text) from public, anon, authenticated;
+
+-- ✅ Presupuesto por link: el taller pide aprobación de lo que no está aprobado; el cliente responde ítem por ítem en /r/.
+create or replace function public.taller_presupuesto(p_id uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); r public.reservas; nuevos jsonb; n int; c public.talleres;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('presupuesto') then raise exception 'Necesitas el módulo ✅ Presupuesto por link'; end if;
+  select * into r from public.reservas where id = p_id and taller_id = tid for update;
+  if r.id is null then raise exception 'Reserva no encontrada'; end if;
+  if r.estado in ('completada', 'cancelada', 'no_asistio', 'rechazada', 'expirada') then raise exception 'Esta reserva ya cerró'; end if;
+  select coalesce(jsonb_agg(case when coalesce(i ->> 'aprob', '') in ('si', 'no') then i else i || '{"aprob":"pend"}' end order by o), '[]'),
+         count(*) filter (where coalesce(i ->> 'aprob', '') not in ('si', 'no'))
+    into nuevos, n from jsonb_array_elements(r.items) with ordinality x(i, o);
+  if n = 0 then raise exception 'No hay nada nuevo para aprobar: agrega servicios o repuestos'; end if;
+  update public.reservas set items = nuevos, updated_at = now(),
+    presupuesto = jsonb_build_object('estado', 'enviado', 'enviado_at', now())
+  where id = r.id;
+  select * into c from public.talleres where id = tid;
+  perform public.avisar(r.cliente_id, '🧾 Presupuesto para aprobar', c.nombre || ': aprueba o rechaza cada arreglo', '/r/?t=' || r.token);
+  return jsonb_build_object('pendientes', n, 'token', r.token);
+end $$;
+revoke all on function public.taller_presupuesto(uuid) from public, anon;
+grant execute on function public.taller_presupuesto(uuid) to authenticated;
+
+-- El cliente responde: p_resp = {"0": "si", "2": "no"} (posición del ítem). Tiene que responder todos los pendientes.
+create or replace function public.reserva_presupuesto(p_token text, p_resp jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas; nuevos jsonb; tot int; nsi int; nno int; falta int;
+begin
+  select * into r from public.reservas where token = p_token and length(p_token) >= 20 for update;
+  if r.id is null then return jsonb_build_object('ok', false, 'error', 'Reserva no encontrada'); end if;
+  if coalesce(r.presupuesto ->> 'estado', '') <> 'enviado' then return jsonb_build_object('ok', false, 'error', 'No hay presupuesto por responder'); end if;
+  if jsonb_typeof(coalesce(p_resp, 'null')) <> 'object' then return jsonb_build_object('ok', false, 'error', 'Respuesta no válida'); end if;
+  select count(*) into falta from jsonb_array_elements(r.items) with ordinality x(i, o)
+  where i ->> 'aprob' = 'pend' and coalesce(p_resp ->> (o - 1)::text, '') not in ('si', 'no');
+  if falta > 0 then return jsonb_build_object('ok', false, 'error', 'Responde Sí o No en cada arreglo'); end if;
+  select coalesce(jsonb_agg(case when i ->> 'aprob' = 'pend' then i || jsonb_build_object('aprob', p_resp ->> (o - 1)::text) else i end order by o), '[]')
+    into nuevos from jsonb_array_elements(r.items) with ordinality x(i, o);
+  select coalesce(sum(greatest(coalesce((i ->> 'cant')::numeric, 1), 0) * greatest(coalesce((i ->> 'precio')::numeric, 0), 0))
+           filter (where coalesce(i ->> 'aprob', '') <> 'no'), 0)::int,
+         count(*) filter (where i ->> 'aprob' = 'si'), count(*) filter (where i ->> 'aprob' = 'no')
+    into tot, nsi, nno from jsonb_array_elements(nuevos) i;
+  update public.reservas set items = nuevos, total = tot, updated_at = now(),
+    presupuesto = r.presupuesto || jsonb_build_object('estado', 'respondido', 'respondido_at', now())
+  where id = r.id;
+  perform public.avisar_taller(r.taller_id, '🧾 ' || left(r.nombre, 40) || ' respondió el presupuesto',
+    nsi || ' aprobado' || case when nsi = 1 then '' else 's' end || ' · ' || nno || ' rechazado' || case when nno = 1 then '' else 's' end, '/taller/#reservas');
+  return jsonb_build_object('ok', true, 'total', tot);
+end $$;
+revoke all on function public.reserva_presupuesto(text, jsonb) from public;
+grant execute on function public.reserva_presupuesto(text, jsonb) to anon, authenticated;
 
 -- >>> CFX núcleo (no editar aquí: se copia de saas/nucleo/sql con sincronizar.py)
 -- ---------------------------------------------------------------------
@@ -4522,7 +4594,9 @@ language sql immutable as $$
          ('giftcards', '🎁 Gift cards', 'Vende tarjetas de regalo con código para canjear en tu negocio.'),
          ('membresia', '🔁 Membresía', 'Plan mensual para tus clientes (ej. 4 cortes al mes): plata segura cada mes.'),
          ('productos', '🛍️ Productos y stock', 'Vende productos en la caja y lleva su stock.'),
-         ('agenda_redes', '🤖 Reservas por WhatsApp e Instagram', 'Link y respuestas listas para que reserven desde tus redes.')
+         ('agenda_redes', '🤖 Reservas por WhatsApp e Instagram', 'Link y respuestas listas para que reserven desde tus redes.'),
+         -- G59: módulos de taller (BiciTaller primero; sirven para cualquier app con órdenes de trabajo).
+         ('presupuesto', '✅ Presupuesto por link', 'El cliente aprueba o rechaza cada arreglo desde su celular: sin llamadas ni reclamos.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb
@@ -5858,6 +5932,10 @@ grant execute on function public.cfx_push_muerto(text) to service_role;
 
 -- <<< CFX núcleo
 
+-- G59 🧩 Packs de BiciTaller: los de fábrica del núcleo son de tienda (aquí saldrían más caros que sueltos) → sin packs por ahora.
+-- Solo si siguen los de fábrica: si Josué ya los cambió en el Centro de Mando, no se tocan.
+update public.cfx_config set valor = jsonb_set(valor, '{packs}', '{}'::jsonb)
+where clave = 'modulos_venta' and valor #>> '{packs,crecer,modulos,4}' = 'carrito';
 -- =====================================================================
 --  BiciTaller · Tareas automáticas (pégalo en Supabase → SQL Editor → Run,
 --  DESPUÉS de schema.sql y de crear la función "servidor").

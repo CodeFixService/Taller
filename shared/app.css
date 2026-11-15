@@ -217,6 +217,8 @@ footer.pie button { background: none; color: var(--brand); padding: 2px 4px; fon
 .items .it input[data-k=nombre] { grid-column: 1 / -1; }
 .items .it input { padding: 9px 10px; }
 .items .it button { padding: 6px; }
+.items .it .ap { grid-column: 1 / -1; font-size: 13px; font-weight: 700; margin-top: -2px; }
+.items .it .ap.si { color: var(--ok); } .items .it .ap.no { color: var(--bad); } .items .it .ap.pend { color: var(--warn); }
 .tl { list-style: none; padding: 0; margin: 10px 0 0; }
 .tl li { position: relative; padding: 0 0 14px 26px; color: var(--muted); font-size: 14px; }
 .tl li::before { content: ''; position: absolute; left: 5px; top: 6px; width: 11px; height: 11px; border-radius: 50%; background: var(--line); }

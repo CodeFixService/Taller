@@ -23,6 +23,11 @@
   .check { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; }
   .check .ck { background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 14px; display: flex; justify-content: space-between; gap: 6px; }
   .check .ck.cambio { border-color: var(--bad); } .check .ck.ajuste { border-color: var(--warn); }
+  .pres .pi { border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin-bottom: 8px; }
+  .pres .pi .fila { display: flex; justify-content: space-between; gap: 8px; }
+  .pres .pi .sn { display: flex; gap: 6px; margin-top: 8px; } .pres .pi .sn button { flex: 1; min-height: 42px; }
+  .pres .pi .sn button.on { outline: 3px solid var(--brand); }
+  tr.no td { text-decoration: line-through; opacity: .6; }
   .fotos { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
   .fotos figure { margin: 0; } .fotos figcaption { font-size: 12px; color: var(--muted); margin-top: 2px; }
   .fotos img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); cursor: pointer; }
@@ -45,6 +50,8 @@
       </div>
       <div id="bloque" style="margin-top:12px"></div>
     </div>
+    <div class="card hidden pres" id="cPres"><h2>🧾 Aprueba tu presupuesto</h2><p class="sub" style="margin-top:0">Elige Sí o No en cada arreglo. Solo se cobra lo que apruebes.</p>
+      <div id="presItems"></div><p style="margin:10px 0">Total aprobado: <b id="presTot"></b></p><button type="button" id="presEnviar" style="width:100%">Enviar respuesta</button></div>
     <div class="card hidden" id="cTrabajo"><h2>🔧 Tu bici</h2><ul class="tl" id="tl"></ul><div id="detalle"></div></div>
     <div class="card hidden" id="cCheck"><h2>🧾 Revisión de tu bici</h2><div class="check" id="check"></div></div>
     <div class="card hidden" id="cFotos"><h2>📸 Fotos de tu bici</h2><div id="fotos"></div></div>
@@ -77,6 +84,7 @@
   const ORDEN = { confirmada: 0, recibida: 1, en_reparacion: 2, esperando_repuesto: 2, lista: 3, completada: 4 };
   let r = null, reloj = null, sondeo = null, imagen = null, fotosN = -1;
 
+  let resp = {};  // G59 respuestas del presupuesto (posición del ítem → si/no)
   async function cargar() {
     try { r = await App.rpc('reserva_ver', { p_token: token }); } catch (e) { $('cargando').textContent = '⚠️ ' + e.message; return; }
     if (!r) { $('cargando').textContent = 'No encontramos esta reserva.'; return; }
@@ -163,13 +171,35 @@
       const items = r.items || [];
       const abonoAplica = ['pagado', 'aplicado'].includes(r.abono_estado) ? r.abono_monto : 0;
       $('detalle').innerHTML = (r.diagnostico ? '<p style="margin:6px 0">🔍 ' + esc(r.diagnostico) + '</p>' : '') + (items.length ? '<table>' +
-        items.map((it) => '<tr><td>' + esc(it.nombre) + (Number(it.cant) !== 1 ? ' × ' + it.cant : '') + '</td><td class="r">' + plata(it.cant * it.precio) + '</td></tr>').join('') +
+        items.map((it) => '<tr' + (it.aprob === 'no' ? ' class="no"' : '') + '><td>' + (it.aprob === 'pend' ? '⏳ ' : it.aprob === 'si' ? '✅ ' : it.aprob === 'no' ? '❌ ' : '') + esc(it.nombre) + (Number(it.cant) !== 1 ? ' × ' + it.cant : '') + '</td><td class="r">' + plata(it.cant * it.precio) + '</td></tr>').join('') +
         '<tr class="tot"><td>Total</td><td class="r">' + plata(r.total) + '</td></tr>' +
         (abonoAplica ? '<tr class="sub2"><td>Abono pagado</td><td class="r">−' + plata(abonoAplica) + '</td></tr><tr class="sub2"><td><b>Saldo a pagar</b></td><td class="r"><b>' +
           plata(Math.max(r.total - abonoAplica, 0)) + '</b></td></tr>' : '') + '</table>' : '') +
         (r.proxima_mantencion && r.estado === 'completada' ? '<p class="sub">🔔 Próxima mantención recomendada: ' + App.fLarga(r.proxima_mantencion) + '</p>' : '');
     }
 
+    // G59 🧩 ✅ Presupuesto por link: el cliente responde cada ítem pendiente.
+    const pend = (r.items || []).map((it, i) => [it, i]).filter(([it]) => it.aprob === 'pend');
+    const verPres = !!(r.presupuesto && r.presupuesto.estado === 'enviado' && pend.length);
+    $('cPres').classList.toggle('hidden', !verPres);
+    if (verPres) {
+      const totPres = () => { $('presTot').textContent = plata((r.items || []).reduce((s, it, i) => s + ((it.aprob === 'si' || (it.aprob === 'pend' && resp[i] === 'si')) ? it.cant * it.precio : 0), 0)); };
+      const pintarPres = () => {
+        $('presItems').innerHTML = pend.map(([it, i]) => '<div class="pi"><div class="fila"><b>' + esc(it.nombre) + (Number(it.cant) !== 1 ? ' × ' + esc(it.cant) : '') + '</b><b>' + plata(it.cant * it.precio) + '</b></div>' +
+          '<div class="sn"><button type="button" class="' + (resp[i] === 'si' ? 'on' : 'alt') + '" data-r="si" data-i="' + i + '">✅ Sí</button>' +
+          '<button type="button" class="' + (resp[i] === 'no' ? 'on danger' : 'ghost') + '" data-r="no" data-i="' + i + '">❌ No</button></div></div>').join('');
+        totPres();
+      };
+      pintarPres();
+      $('presItems').onclick = (ev) => { const b = ev.target.closest('[data-r]'); if (!b) return; resp[b.dataset.i] = b.dataset.r; pintarPres(); };
+      $('presEnviar').onclick = async () => {
+        if (pend.some(([, i]) => !resp[i])) { App.toast('Elige Sí o No en cada arreglo'); return; }
+        $('presEnviar').disabled = true;
+        try { const x = await App.rpc('reserva_presupuesto', { p_token: token, p_resp: resp }); if (!x.ok) throw new Error(x.error); App.toast('✅ Respuesta enviada al taller'); resp = {}; cargar(); }
+        catch (e) { App.toast(e.message); }
+        $('presEnviar').disabled = false;
+      };
+    }
     // G59 🧾 Revisión que hizo el taller
     const CK = { frenos: 'Frenos', cambios: 'Cambios', ruedas: 'Ruedas', neumaticos: 'Neumáticos', cadena: 'Cadena', pedalier: 'Pedalier', direccion: 'Dirección', suspension: 'Suspensión', cuadro: 'Cuadro', luces: 'Luces' };
     const CKV = { ok: '✅ Bien', ajuste: '🔧 Ajustado', cambio: '🔁 Cambiar' };
@@ -213,7 +243,7 @@
     if (['por_pagar', 'en_revision', 'confirmada', 'recibida', 'en_reparacion', 'esperando_repuesto', 'lista'].includes(r.estado)) {
       sondeo = setInterval(async () => {
         if (document.hidden) return;
-        try { const n = await App.rpc('reserva_ver', { p_token: token }); if (n && (n.estado !== r.estado || n.abono_estado !== r.abono_estado || n.total !== r.total || n.fotos_n !== r.fotos_n || JSON.stringify(n.checklist) !== JSON.stringify(r.checklist))) { r = n; pintar(); } } catch (e) { /* sin red */ }
+        try { const n = await App.rpc('reserva_ver', { p_token: token }); if (n && (n.estado !== r.estado || n.abono_estado !== r.abono_estado || n.total !== r.total || n.fotos_n !== r.fotos_n || JSON.stringify(n.checklist) !== JSON.stringify(r.checklist) || JSON.stringify(n.items) !== JSON.stringify(r.items))) { r = n; pintar(); } } catch (e) { /* sin red */ }
       }, 20000);
     }
   }

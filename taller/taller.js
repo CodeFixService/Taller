@@ -39,6 +39,14 @@
     $('hNombre').textContent = t.nombre;
     $('tabRev').textContent = P.por_revisar; $('tabRev').classList.toggle('hidden', !P.por_revisar);
     document.querySelectorAll('#mSeg .dueno').forEach((b) => b.classList.toggle('hidden', !P.dueno));
+    $('mSeg').querySelector('[data-m=modulos]').classList.toggle('hidden', !P.dueno || !P.venta);  // 🧩 solo con la venta prendida (CM → Apps → 🚲 → 🧩)
+  }
+  // G59 🧩 ¿El taller puede usar este módulo? (venta apagada = todos lo tienen)
+  const tiene = (k) => !!(P && P.modulos && P.modulos[k]);
+  const recargar = () => setTimeout(() => location.reload(), 1500);
+  function ofrecer(k) {
+    if (P.dueno && window.CFX_MODULOS_TIENDA) window.CFX_MODULOS_TIENDA.probar(k, { rpc, alCambiar: recargar });
+    else toast('Pídele al dueño del taller que active este módulo');
   }
   async function cargarCatalogo() {
     [servicios, promos] = await Promise.all([
@@ -51,7 +59,7 @@
 
   /* ---------- Navegación ---------- */
   // #plan y #mas/<sección> (perfil, horario, servicios, abono…): abren esa parte de Más (la guía para partir los usa).
-  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
+  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
   const show = App.pestanas((v) => {
     vista = v;
     if (v === 'hoy') pintarHoy();
@@ -409,6 +417,7 @@
           servicios.map((s) => '<option value="' + s.id + '">' + esc(s.nombre) + ' · ' + plata(s.precio) + '</option>').join('') + '</select>' +
           '<button class="alt" id="dAddR" type="button" style="flex:0 0 auto">＋ Repuesto</button></div>' +
         '<p style="margin:12px 0 0">Total: <b class="precio" id="dTotal"></b><span class="sub" id="dSaldo"></span></p>' +
+        '<div id="dPres"></div>' +
         '<label for="dDiag">Diagnóstico (lo ve el cliente)</label><textarea id="dDiag" maxlength="1000">' + esc(r.diagnostico) + '</textarea>' +
         '<label for="dNotas">Notas internas (solo el taller)</label><textarea id="dNotas" maxlength="1000">' + esc(r.notas_internas) + '</textarea>' +
         '<div class="row"><div><label for="dMec">Mecánico</label><select id="dMec"><option value="">Sin asignar</option>' + equipo.map((p) => '<option value="' + p.id + '"' + (p.id === r.mecanico_id ? ' selected' : '') + '>' + esc(p.nombre) + '</option>').join('') + '</select></div>' +
@@ -437,11 +446,26 @@
     };
     if (trabajando) {
       pintarItems();
-      $('dItems').oninput = (ev) => { const i = ev.target.dataset.i; if (i === undefined) return; items[i][ev.target.dataset.k] = ev.target.dataset.k === 'nombre' ? ev.target.value : App.numero(ev.target.value); totalItems(); };
+      // Si cambias un ítem que el cliente ya respondió, vuelve a quedar sin aprobar (se le pide de nuevo).
+      $('dItems').oninput = (ev) => { const i = ev.target.dataset.i; if (i === undefined) return; items[i][ev.target.dataset.k] = ev.target.dataset.k === 'nombre' ? ev.target.value : App.numero(ev.target.value); delete items[i].aprob; totalItems(); };
       $('dItems').onclick = (ev) => { const x = ev.target.closest('[data-x]'); if (x) { items.splice(+x.dataset.x, 1); pintarItems(); } };
       $('dAddS').onchange = () => { const s = servicios.find((x) => x.id === $('dAddS').value); if (s) items.push({ nombre: s.nombre, cant: 1, precio: s.precio }); $('dAddS').value = ''; pintarItems(); };
       $('dAddR').onclick = () => { items.push({ nombre: '', cant: 1, precio: 0 }); pintarItems(); const ins = $('dItems').querySelectorAll('[data-k=nombre]'); ins[ins.length - 1].focus(); };
       $('dGuardar').onclick = () => guardarTrabajo(false);
+      pintarPres();
+      $('dPres').onclick = async (ev) => {
+        if (!ev.target.closest('#dPedir')) return;
+        if (!tiene('presupuesto')) { ofrecer('presupuesto'); return; }
+        try {
+          await guardarTrabajo(true);
+          const x = await rpc('taller_presupuesto', { p_id: detalle.id });
+          sb.functions.invoke('servidor').catch(() => {});
+          detalle.presupuesto = { estado: 'enviado' };
+          items.forEach((it) => { if (it.aprob !== 'si' && it.aprob !== 'no') it.aprob = 'pend'; });
+          pintarItems(); pintarPres(x.pendientes);
+          toast('🧾 Presupuesto enviado');
+        } catch (err) { toast(err.message); }
+      };
       pintarFotos(r.id);
       pintarCheck();
       $('dCheck').onclick = async (ev) => {
@@ -490,17 +514,30 @@
   function pintarItems() {
     $('dItems').innerHTML = items.length ? items.map((it, i) => '<div class="it"><input data-i="' + i + '" data-k="nombre" value="' + esc(it.nombre) + '" placeholder="Descripción" aria-label="Descripción">' +
       '<input data-i="' + i + '" data-k="cant" value="' + it.cant + '" inputmode="numeric" aria-label="Cantidad"><input data-i="' + i + '" data-k="precio" value="' + it.precio + '" inputmode="numeric" aria-label="Precio">' +
-      '<button class="danger" data-x="' + i + '" aria-label="Quitar">✕</button></div>').join('') : '<p class="sub" style="margin:0">Agrega lo que se hizo y los repuestos.</p>';
+      '<button class="danger" data-x="' + i + '" aria-label="Quitar">✕</button>' + (APROB[it.aprob] ? '<div class="ap ' + it.aprob + '">' + APROB[it.aprob] + '</div>' : '') + '</div>').join('') : '<p class="sub" style="margin:0">Agrega lo que se hizo y los repuestos.</p>';
     totalItems();
   }
+  const APROB = { pend: '⏳ Esperando al cliente', si: '✅ Aprobado por el cliente', no: '❌ Rechazado: no se cobra' };
+  // ✅ Presupuesto por link (módulo): pedir aprobación + qué respondió el cliente.
+  function pintarPres(nuevos) {
+    const pr = detalle.presupuesto || {}, link = App.ROOT + 'r/?t=' + detalle.token;
+    const pend = items.some((it) => it.aprob === 'pend'), sinPedir = items.some((it) => !it.aprob);
+    const nom = (detalle.nombre || '').split(' ')[0];
+    $('dPres').innerHTML = '<div class="aviso' + (pend ? ' warn' : '') + '" style="margin-top:10px;display:block"><div>' +
+      (pend ? '⏳ Esperando que ' + esc(nom) + ' apruebe en su enlace.' : pr.estado === 'respondido' ? '✅ ' + esc(nom) + ' respondió el presupuesto.' : '🧾 ¿Necesitas su OK antes de trabajar? Pídele que apruebe cada arreglo.') + '</div><div class="btns">' +
+      (sinPedir && items.length ? '<button type="button" class="small" id="dPedir">✅ Pedir aprobación</button>' : '') +
+      ((nuevos || pend) && detalle.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(detalle.telefono, 'Hola ' + nom + ' 👋 Te escribimos de ' + P.taller.nombre +
+        ': revisamos tu bici. Aprueba o rechaza cada arreglo aquí 👉 ' + link) + '">📲 Enviar por WhatsApp</a>' : '') + '</div></div>';
+  }
   function totalItems() {
-    const tot = items.reduce((s, it) => s + Math.max(+it.cant || 0, 0) * Math.max(+it.precio || 0, 0), 0);
+    const tot = items.filter((it) => it.aprob !== 'no').reduce((s, it) => s + Math.max(+it.cant || 0, 0) * Math.max(+it.precio || 0, 0), 0);
     const ab = ['pagado', 'aplicado'].includes(detalle.abono_estado) ? detalle.abono_monto : 0;
     $('dTotal').textContent = plata(tot);
     $('dSaldo').textContent = ab ? ' · menos abono ' + plata(ab) + ' = a pagar ' + plata(Math.max(tot - ab, 0)) : '';
   }
   async function guardarTrabajo(callado) {
-    const limpios = items.filter((it) => String(it.nombre || '').trim()).map((it) => ({ nombre: String(it.nombre).trim().slice(0, 100), cant: Math.max(+it.cant || 1, 0), precio: Math.max(Math.round(+it.precio || 0), 0) }));
+    const limpios = items.filter((it) => String(it.nombre || '').trim()).map((it) => Object.assign({ nombre: String(it.nombre).trim().slice(0, 100), cant: Math.max(+it.cant || 1, 0), precio: Math.max(Math.round(+it.precio || 0), 0) },
+      APROB[it.aprob] ? { aprob: it.aprob } : {}));
     try {
       await rpc('taller_trabajo', { p_id: detalle.id, p_items: limpios, p_diagnostico: $('dDiag').value, p_notas: $('dNotas').value, p_mecanico: $('dMec').value || null, p_proxima: $('dProx').value || null });
       if (!callado) toast('💾 Guardado');
@@ -537,14 +574,14 @@
   $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); } };
   // Más = menú común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (body() dibuja dentro de ella).
   const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller',
-    stats: 'Ventas y clientes', recordar: 'Ventas y clientes', plan: 'Tu plan', cuenta: 'Configuración' };
+    stats: 'Ventas y clientes', recordar: 'Ventas y clientes', plan: 'Tu plan', modulos: 'Tu plan', cuenta: 'Configuración' };
   const K2 = { plan: 'premium', cuenta: 'micuenta', chat: 'mensajes' };
-  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', cuenta: '👤' };
+  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', cuenta: '👤' };
   let hojaMas = null;
   function abrirSec(m) {
     if (m === 'chat') { $('chatBtn').click(); return; }
     const b = $('mSeg').querySelector('[data-m="' + m + '"]'); if (!b || b.classList.contains('hidden')) return;
-    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir };
+    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos };
     if (!hojaMas || hojaMas.m !== m || !hojaMas.h.d.isConnected) {
       const h = window.CFX_MENU.hoja((ICO[m] || '') + ' ' + esc(b.textContent.replace(/\d+$/, '').replace(/^[^\p{L}]+/u, '').trim()), () => { if (hojaMas && hojaMas.h === h) { hojaMas = null; subMas = null; } });
       hojaMas = { m, h };
@@ -780,6 +817,11 @@
 
   // ---- Plan Premium (pagar con link y subir comprobante)
   // Plan: precios y pago comunes a las 6 apps (núcleo: cfx_pago_estado y pagos.js; se editan en el Centro de Mando → Pagos).
+  // G59 🧩 Tienda de módulos del taller (núcleo: modulos.js). Premium paga -20 %; los módulos no vienen en Premium.
+  function verModulos() {
+    body().innerHTML = '<div class="card"><p class="sub" style="margin-top:0">Suma solo lo que tu taller necesita. Toca ▶️ Probar para ver cómo funciona.</p><div id="modZona"></div></div>';
+    window.CFX_MODULOS_TIENDA.montar($('modZona'), { rpc, alCambiar: recargar }).cargar();
+  }
   async function verPlan() {
     const planes = pub.planes || {};
     const t = P.taller, prem = P.premium;
