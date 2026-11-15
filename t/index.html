@@ -83,7 +83,7 @@
           </div>
           <label for="fEmail">Correo (opcional)</label><input id="fEmail" type="email" maxlength="120" autocomplete="email">
         </div>
-        <label for="fBici">Tu bici (marca y modelo)</label><input id="fBici" maxlength="120" placeholder="Ej.: Trek Marlin 5, aro 29">
+        <label for="fBici">Tu bici (marca y modelo)</label><input id="fBici" maxlength="120" placeholder="Elige o escribe: Trek Marlin 5…" list="fabBicis" autocomplete="off">
         <label for="fNota">¿Qué le pasa? (opcional)</label><textarea id="fNota" maxlength="500" placeholder="Ej.: frena poco y el cambio salta"></textarea>
         <div class="aviso" style="margin-top:14px"><div class="grow">
           <b>💳 Abono para confirmar: <span id="abono"></span></b> <span class="sub">(se descuenta del total)</span>
@@ -99,6 +99,8 @@
 <script src="../shared/config.js?v=2.2"></script>
 <script src="../shared/vendor/supabase.js"></script>
 <script src="../shared/app.js?v=2.2"></script>
+<script src="../shared/fabrica.js"></script>
+<script>CFX_FABRICA.bici(document.getElementById('fBici')); CFX_FABRICA.notas(document.getElementById('fNota'));</script>
 <script>
 (async function () {
   'use strict';

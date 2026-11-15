@@ -330,9 +330,10 @@
       '<label for="mS">Servicio</label><select id="mS"><option value="">Revisión general</option>' + servicios.filter((s) => s.activo && !s.adicional).map((s) => '<option value="' + s.id + '">' + esc(s.nombre) + ' · ' + s.duracion_min + ' min</option>').join('') + '</select>' +
       '<div class="row"><div><label for="mF">Fecha</label><input type="date" id="mF" value="' + fecha + '"></div><div><label for="mH">Hora</label><input type="time" id="mH" value="' + hora + '" step="300"></div></div>' +
       '<div class="row"><div><label for="mN">Nombre</label><input id="mN" maxlength="80"></div><div><label for="mT">WhatsApp</label><input id="mT" inputmode="tel" maxlength="30"></div></div>' +
-      '<label for="mB">Bici</label><input id="mB" maxlength="120"><label for="mO">Nota</label><input id="mO" maxlength="500">' +
+      '<label for="mB">Bici</label><input id="mB" maxlength="120" placeholder="Elige o escribe: Trek Marlin 5…"><label for="mO">Nota</label><input id="mO" maxlength="500">' +
       '<label class="check"><input type="checkbox" id="mSc"> Agendar aunque no haya cupo (sobrecupo)</label>' +
       '<div class="btns"><button class="ghost" data-cerrar>Cancelar</button><button id="mOk">Guardar</button></div><p class="err" id="mErr"></p>');
+    if (window.CFX_FABRICA) { CFX_FABRICA.bici(d.querySelector('#mB')); CFX_FABRICA.notas(d.querySelector('#mO')); }
     d.querySelector('#mOk').onclick = async () => {
       try {
         await rpc('taller_reserva_manual', { p_fecha: d.querySelector('#mF').value, p_hora: d.querySelector('#mH').value, p_servicio: d.querySelector('#mS').value || null,
@@ -447,7 +448,15 @@
     if (trabajando) {
       pintarItems();
       // Si cambias un ítem que el cliente ya respondió, vuelve a quedar sin aprobar (se le pide de nuevo).
-      $('dItems').oninput = (ev) => { const i = ev.target.dataset.i; if (i === undefined) return; items[i][ev.target.dataset.k] = ev.target.dataset.k === 'nombre' ? ev.target.value : App.numero(ev.target.value); delete items[i].aprob; totalItems(); };
+      if (window.CFX_FABRICA) CFX_FABRICA.repuestos(document.createElement('input'));
+      $('dItems').oninput = (ev) => {
+        const i = ev.target.dataset.i; if (i === undefined) return;
+        items[i][ev.target.dataset.k] = ev.target.dataset.k === 'nombre' ? ev.target.value : App.numero(ev.target.value); delete items[i].aprob;
+        // 📦 Repuesto de fábrica elegido y sin precio → pone el precio sugerido (se puede cambiar).
+        const pf = ev.target.dataset.k === 'nombre' && window.CFX_FABRICA && CFX_FABRICA.precio(ev.target.value);
+        if (pf && !items[i].precio) { items[i].precio = pf; const ip = $('dItems').querySelector('[data-i="' + i + '"][data-k=precio]'); if (ip) ip.value = pf; }
+        totalItems();
+      };
       $('dItems').onclick = (ev) => { const x = ev.target.closest('[data-x]'); if (x) { items.splice(+x.dataset.x, 1); pintarItems(); } };
       $('dAddS').onchange = () => { const s = servicios.find((x) => x.id === $('dAddS').value); if (s) items.push({ nombre: s.nombre, cant: 1, precio: s.precio }); $('dAddS').value = ''; pintarItems(); };
       $('dAddR').onclick = () => { items.push({ nombre: '', cant: 1, precio: 0 }); pintarItems(); const ins = $('dItems').querySelectorAll('[data-k=nombre]'); ins[ins.length - 1].focus(); };
@@ -512,7 +521,7 @@
     $('dCheck').innerHTML = CHECK.map(([k, n]) => '<button type="button" class="' + (c[k] || '') + '" data-ck="' + k + '" aria-pressed="' + !!c[k] + '">' + (CHECK_V[c[k]] || '⬜') + ' ' + n + '</button>').join('');
   }
   function pintarItems() {
-    $('dItems').innerHTML = items.length ? items.map((it, i) => '<div class="it"><input data-i="' + i + '" data-k="nombre" value="' + esc(it.nombre) + '" placeholder="Descripción" aria-label="Descripción">' +
+    $('dItems').innerHTML = items.length ? items.map((it, i) => '<div class="it"><input data-i="' + i + '" data-k="nombre" value="' + esc(it.nombre) + '" placeholder="Elige o escribe" aria-label="Descripción" list="fabRep">' +
       '<input data-i="' + i + '" data-k="cant" value="' + it.cant + '" inputmode="numeric" aria-label="Cantidad"><input data-i="' + i + '" data-k="precio" value="' + it.precio + '" inputmode="numeric" aria-label="Precio">' +
       '<button class="danger" data-x="' + i + '" aria-label="Quitar">✕</button>' + (APROB[it.aprob] ? '<div class="ap ' + it.aprob + '">' + APROB[it.aprob] + '</div>' : '') + '</div>').join('') : '<p class="sub" style="margin:0">Agrega lo que se hizo y los repuestos.</p>';
     totalItems();
@@ -723,7 +732,8 @@
   function verServicios() {
     const lim = P.plan.limites.servicios;
     body().innerHTML = '<div class="card"><h2>🛠️ Servicios <span class="pill">' + servicios.length + ' de ' + lim + '</span></h2><ul class="list" id="sLista"></ul>' +
-      '<div class="btns"><button id="sNuevo">＋ Nuevo servicio</button>' + (servicios.length ? '' : '<button class="alt" id="sTipicos">✨ Cargar servicios típicos</button>') + '</div></div>';
+      '<p class="sub" style="margin:8px 0 0">Vienen los trabajos más pedidos: toca ✏️ para cambiar el precio o pausar.</p>' +
+      '<div class="btns"><button id="sNuevo">＋ Nuevo servicio</button><button class="alt" id="sTipicos">✨ Servicios de fábrica</button></div></div>';
     $('sLista').innerHTML = servicios.length ? servicios.map((s) => '<li' + (s.activo ? '' : ' style="opacity:.55"') + '><div class="grow"><b>' + esc(s.nombre) + '</b> <span class="precio">' + plata(s.precio) + '</span>' +
       (s.adicional ? ' <span class="pill info">Adicional</span>' : '') + '<div class="sub">' + (s.adicional ? '' : '⏱️ ' + s.duracion_min + ' min') + (s.descripcion ? ' · ' + esc(s.descripcion) : '') + (s.activo ? '' : ' · pausado') + '</div></div>' +
       '<button class="small ghost" data-e="' + s.id + '">✏️</button></li>').join('') : '<li class="muted">Agrega lo que ofreces: mantención, pinchazo, ajuste de frenos…</li>';
@@ -731,11 +741,7 @@
     $('sLista').onclick = (e) => { const b = e.target.closest('[data-e]'); if (b) editarServicio(servicios.find((s) => s.id === b.dataset.e)); };
     const st = $('sTipicos');
     if (st) st.onclick = async () => {
-      const tip = [['Mantención básica', 20000, 60, 'Ajuste de frenos y cambios, lubricación y revisión general.'],
-        ['Mantención completa', 40000, 120, 'Lavado, engrase de rodamientos, ajuste completo de frenos y cambios.'],
-        ['Reparación de pinchazo', 5000, 30, 'Parche o cambio de cámara (cámara aparte).'], ['Ajuste de frenos', 8000, 30, ''], ['Ajuste de cambios', 8000, 30, '']]
-        .slice(0, lim);
-      try { await q(sb.from('servicios').insert(tip.map((x, i) => ({ taller_id: T, nombre: x[0], precio: x[1], duracion_min: x[2], descripcion: x[3], orden: i })))); await cargarCatalogo(); toast('✨ Listo: ajusta tus precios'); verServicios(); }
+      try { const n = await rpc('taller_servicios_fabrica', {}); await cargarCatalogo(); toast(n ? '✨ Se agregaron ' + n + ': ajusta tus precios' : '✨ Ya tienes todos los de fábrica (o llegaste al máximo)'); verServicios(); }
       catch (e) { toast(e.message); }
     };
   }

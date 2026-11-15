@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.29'::text $$;
+language sql immutable as $$ select '2.30'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -5932,3 +5932,78 @@ grant execute on function public.cfx_push_muerto(text) to service_role;
 -- Solo si siguen los de fábrica: si Josué ya los cambió en el Centro de Mando, no se tocan.
 update public.cfx_config set valor = jsonb_set(valor, '{packs}', '{}'::jsonb)
 where clave = 'modulos_venta' and valor #>> '{packs,crecer,modulos,4}' = 'carrito';
+
+-- G65 🏭 Servicios de fábrica: todo taller parte con los trabajos más pedidos (solo ajusta precios). FREE opera completo (G39) → 40 servicios.
+update public.planes set limites = jsonb_set(limites, '{servicios}', '40') where codigo = 'taller_free' and (limites ->> 'servicios')::int = 5;
+update public.planes set beneficios = '["Página de reservas con tu logo y colores", "Hasta 30 reservas online al mes", "40 servicios y 1 promoción", "Abono con comprobante y agenda con bloqueos", "Órdenes de trabajo y calificaciones"]'::jsonb
+where codigo = 'taller_free' and beneficios = '["Página de reservas con tu logo y colores", "Hasta 30 reservas online al mes", "5 servicios y 1 promoción", "Abono con comprobante y agenda con bloqueos", "Órdenes de trabajo y calificaciones"]'::jsonb;
+
+-- Lista de fábrica (nombre, precio, minutos, descripción, adicional). Agrega solo los que faltan (por nombre) y hasta el límite del plan.
+create or replace function public.taller_fabrica_agregar(tid uuid) returns int
+language plpgsql security definer set search_path = '' as $$
+declare lim int := coalesce((public.limite_taller(tid, 'servicios'))::int, 40); n int; agregados int := 0; x record;
+begin
+  select count(*) into n from public.servicios where taller_id = tid;
+  for x in select * from (values
+    (1, 'Mantención básica', 25000, 60, 'Ajuste de frenos y cambios, lubricación de cadena y revisión general.', false),
+    (2, 'Mantención completa', 45000, 120, 'Lavado, engrase de rodamientos, ajuste completo de frenos y cambios.', false),
+    (3, 'Mantención full (desarme total)', 70000, 240, 'Se desarma toda la bici: limpieza, engrase y armado completo.', false),
+    (4, 'Revisión y diagnóstico', 5000, 20, 'Te decimos qué tiene tu bici y cuánto sale arreglarla.', false),
+    (5, 'Lavado y lubricado', 12000, 45, 'Lavado completo de la bici y lubricación de la transmisión.', false),
+    (6, 'Reparación de pinchazo', 5000, 20, 'Parche o cambio de cámara (cámara aparte).', false),
+    (7, 'Ajuste de frenos', 8000, 30, 'Frenos V-brake, mecánicos o hidráulicos.', false),
+    (8, 'Purga de frenos hidráulicos', 15000, 45, 'Por freno. Cambio de líquido y sangrado.', false),
+    (9, 'Ajuste de cambios', 8000, 30, 'Cambio delantero y trasero.', false),
+    (10, 'Cambio de cables y fundas', 12000, 45, 'Mano de obra (cables y fundas aparte).', false),
+    (11, 'Centrado de rueda', 10000, 40, 'Rueda descentrada o con rayos sueltos.', false),
+    (12, 'Armado de rueda', 30000, 120, 'Rayado completo de una rueda (rayos aparte).', false),
+    (13, 'Instalación tubeless', 12000, 40, 'Por rueda. Cinta, válvula y líquido aparte.', false),
+    (14, 'Mantención de horquilla', 30000, 90, 'Cambio de aceite y retenes de la suspensión delantera.', false),
+    (15, 'Mantención de amortiguador', 30000, 90, 'Suspensión trasera.', false),
+    (16, 'Ajuste de dirección', 8000, 30, 'Juego o ruido en la dirección.', false),
+    (17, 'Ajuste de pedalier', 10000, 40, 'Juego o ruido en el eje del pedalier.', false),
+    (18, 'Armado de bici nueva', 35000, 120, 'Bici en caja: armado, ajuste y prueba.', false),
+    (19, 'Revisión bici eléctrica', 30000, 60, 'Motor, batería, cableado, frenos y cambios.', false),
+    (20, 'Cambio de cadena', 5000, 15, 'Mano de obra (cadena aparte).', true),
+    (21, 'Cambio de pastillas de freno', 6000, 20, 'Mano de obra por freno (pastillas aparte).', true),
+    (22, 'Cambio de neumático o cámara', 4000, 15, 'Mano de obra por rueda.', true),
+    (23, 'Instalación de accesorios', 5000, 20, 'Luces, portabultos, guardabarros, parrilla…', true)
+  ) as f(o, nombre, precio, minutos, descr, adic) order by o loop
+    exit when n >= lim;
+    if not exists (select 1 from public.servicios s where s.taller_id = tid and lower(s.nombre) = lower(x.nombre)) then
+      insert into public.servicios (taller_id, nombre, precio, duracion_min, descripcion, adicional, orden)
+      values (tid, x.nombre, x.precio, x.minutos, x.descr, x.adic, x.o);
+      n := n + 1; agregados := agregados + 1;
+    end if;
+  end loop;
+  return agregados;
+end $$;
+revoke all on function public.taller_fabrica_agregar(uuid) from public, anon, authenticated;
+
+-- Taller nuevo → ya viene con los servicios de fábrica.
+create or replace function public.talleres_fabrica_tg() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform public.taller_fabrica_agregar(new.id);
+  return new;
+end $$;
+drop trigger if exists talleres_fabrica on public.talleres;
+create trigger talleres_fabrica after insert on public.talleres for each row execute function public.talleres_fabrica_tg();
+
+-- El dueño puede volver a traer los que borró (Más → Servicios → ✨ Servicios de fábrica).
+create or replace function public.taller_servicios_fabrica() returns int
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.mi_taller();
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller'; end if;
+  return public.taller_fabrica_agregar(tid);
+end $$;
+revoke all on function public.taller_servicios_fabrica() from public, anon;
+grant execute on function public.taller_servicios_fabrica() to authenticated;
+
+-- Talleres que todavía no tienen ningún servicio: se les cargan una sola vez.
+do $$ declare t record; begin
+  for t in select id from public.talleres x where not exists (select 1 from public.servicios s where s.taller_id = x.id) loop
+    perform public.taller_fabrica_agregar(t.id);
+  end loop;
+end $$;
