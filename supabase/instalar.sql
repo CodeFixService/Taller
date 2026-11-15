@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.30'::text $$;
+language sql immutable as $$ select '2.31'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -618,6 +618,9 @@ alter table public.reservas add column if not exists entrega_estimada date;
 alter table public.reservas add column if not exists checklist jsonb not null default '{}'::jsonb;
 -- G59 🧩 ✅ Presupuesto por link: { estado: enviado|respondido, enviado_at, respondido_at }. Cada ítem lleva aprob: pend|si|no.
 alter table public.reservas add column if not exists presupuesto jsonb;
+-- G59c 🔔 Aviso "bici lista": cuándo quedó lista y si ya le recordamos que la retire.
+alter table public.reservas add column if not exists lista_at timestamptz;
+alter table public.reservas add column if not exists lista_recordada boolean not null default false;
 
 -- Fotos antes/después del trabajo (v1.6, taller Premium). Livianas y se borran solas después de N días.
 create table if not exists public.fotos_trabajo (
@@ -1390,7 +1393,7 @@ language sql stable security definer set search_path = '' as $$
     select r.id, r.fecha, to_char(r.hora, 'HH24:MI') as hora, to_char(r.hora_fin, 'HH24:MI') as hora_fin, r.nombre, r.telefono,
       r.email, r.bici, r.nota, r.servicio_id, r.servicio_nombre, r.precio, r.estado, r.abono_monto, r.abono_estado, r.expira_at,
       r.origen, r.cliente_id, r.mecanico_id, r.items, r.total, r.diagnostico, r.notas_internas, r.proxima_mantencion,
-      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta, r.entrega_estimada, r.checklist, r.presupuesto,
+      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta, r.entrega_estimada, r.checklist, r.presupuesto, r.lista_at,
       (select p.nombre from public.perfiles p where p.id = r.mecanico_id) as mecanico,
       exists (select 1 from public.comprobantes k where k.reserva_id = r.id) as tiene_comprobante,
       public.nota_cliente(r.telefono) as nota_cliente,
@@ -1453,6 +1456,8 @@ begin
     completada_at = case when p_estado = 'completada' then now() else completada_at end,
     proxima_mantencion = case when p_estado = 'completada' and proxima_mantencion is null
                               then (current_date + make_interval(months => c.meses_mantencion))::date else proxima_mantencion end,
+    lista_at = case when p_estado = 'lista' and r.estado <> 'lista' then now() else lista_at end,
+    lista_recordada = case when p_estado = 'lista' and r.estado <> 'lista' then false else lista_recordada end,
     historial = public.historial_mas(historial, p_estado), updated_at = now()
   where id = r.id;
   perform public.avisar(r.cliente_id,
@@ -1624,7 +1629,10 @@ language plpgsql stable security definer set search_path = '' as $$
 declare tid uuid := public.taller_de(auth.uid());
 begin
   if tid is null then raise exception 'Sin acceso'; end if;
-  if not coalesce((public.limite_taller(tid, 'recordatorios'))::boolean, false) then return jsonb_build_object('bloqueado', true); end if;
+  -- Premium lo trae (como antes) o el módulo ⏰ Recordatorio de mantención (G59c).
+  if not coalesce((public.limite_taller(tid, 'recordatorios'))::boolean, false) and not public.taller_tiene('mantencion') then
+    return jsonb_build_object('bloqueado', true);
+  end if;
   return jsonb_build_object('lista', (select coalesce(jsonb_agg(x order by x.proxima), '[]') from (
     select distinct on (r.tel_norm) r.nombre, r.telefono, r.bici, r.proxima_mantencion as proxima, r.fecha as ultima
     from public.reservas r where r.taller_id = tid and r.estado = 'completada' and r.proxima_mantencion <= current_date + 15
@@ -2068,7 +2076,8 @@ begin
   -- 3) Mantención (clientes Premium con la función activa).
   for r in select x.id, x.cliente_id, t.nombre, t.slug from public.reservas x join public.talleres t on t.id = x.taller_id
            where x.estado = 'completada' and not x.mantencion_avisada and x.cliente_id is not null and x.proxima_mantencion <= current_date
-             and coalesce((public.limite_cliente(x.cliente_id, 'recordatorios'))::boolean, false) loop
+             and (coalesce((public.limite_cliente(x.cliente_id, 'recordatorios'))::boolean, false)
+                  or public.cfx_modulo_de('mantencion', t.owner_id)) loop  -- G59c: o el taller tiene ⏰ Recordatorio de mantención
     perform public.avisar(r.cliente_id, '🔧 Le toca mantención a tu bici', 'Reserva tu hora en ' || r.nombre, '/t/?s=' || r.slug);
     update public.reservas set mantencion_avisada = true where id = r.id;
   end loop;
@@ -2095,6 +2104,16 @@ begin
            where rol = 'cliente' and premium_hasta < now() and premium_hasta > now() - interval '30 days' and aviso_vencido_para is distinct from premium_hasta loop
     perform public.avisar(r.id, 'Tu Premium venció', 'Volviste a la versión gratis.', '/cliente/#plan');
     update public.perfiles set aviso_vencido_para = premium_hasta where id = r.id;
+  end loop;
+
+  -- 3b) G59c 🔔 Bici lista hace 2 días y no la retiran (taller con el módulo Aviso "bici lista").
+  for r in select x.id, x.cliente_id, x.token, t.nombre from public.reservas x join public.talleres t on t.id = x.taller_id
+           where x.estado = 'lista' and not x.lista_recordada and x.lista_at < now() - interval '2 days'
+             and public.cfx_modulo_de('aviso_lista', t.owner_id) loop
+    perform public.avisar(r.cliente_id, '🔔 Tu bici te espera', 'Ya está lista en ' || r.nombre || ': pasa a retirarla', '/r/?t=' || r.token);
+    perform public.avisar_taller((select taller_id from public.reservas where id = r.id), '🔔 Bici lista sin retirar',
+      'Hace 2 días: escríbele al cliente', '/taller/#hoy');
+    update public.reservas set lista_recordada = true where id = r.id;
   end loop;
 
   -- 5) Limpieza automática (una vez al día, a las 4 de la mañana).
@@ -2836,7 +2855,7 @@ language sql stable security definer set search_path = '' as $$
   select coalesce((select public.taller_es_premium(t.id) from public.talleres t where t.owner_id = n), false)
 $$;
 create or replace function public.cfx_modulos_app() returns text[]
-language sql immutable as $$ select array['presupuesto'] $$;
+language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion'] $$;
 revoke all on function public.cfx_negocio_de_cuenta(uuid), public.cfx_es_premium(uuid), public.cfx_modulos_app() from public, anon, authenticated;
 create or replace function public.taller_tiene(p_modulo text) returns boolean
 language plpgsql stable security definer set search_path = '' as $$ begin return public.cfx_modulo_de(p_modulo, public.cfx_negocio_de_cuenta(auth.uid())); end $$;
@@ -4596,7 +4615,10 @@ language sql immutable as $$
          ('productos', '🛍️ Productos y stock', 'Vende productos en la caja y lleva su stock.'),
          ('agenda_redes', '🤖 Reservas por WhatsApp e Instagram', 'Link y respuestas listas para que reserven desde tus redes.'),
          -- G59: módulos de taller (BiciTaller primero; sirven para cualquier app con órdenes de trabajo).
-         ('presupuesto', '✅ Presupuesto por link', 'El cliente aprueba o rechaza cada arreglo desde su celular: sin llamadas ni reclamos.')
+         ('presupuesto', '✅ Presupuesto por link', 'El cliente aprueba o rechaza cada arreglo desde su celular: sin llamadas ni reclamos.'),
+         ('aviso_lista', '🔔 Aviso "bici lista"', 'Al dejarla lista, el cliente recibe el aviso por WhatsApp con el total y el link; si no la retira, se lo recordamos.'),
+         ('mantencion', '⏰ Recordatorio de mantención', 'Cada X meses le avisamos al cliente que le toca mantención: vuelve solo.'),
+         ('stock', '📦 Repuestos y stock', 'Stock de repuestos que baja solo con cada orden y pedido a tu proveedor por WhatsApp con un toque.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb

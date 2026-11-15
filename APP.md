@@ -23,3 +23,8 @@
 ## 🏭 G65 · De fábrica (2.87, bd 2.30) — prueba SaaS/pruebas/g65_fabrica.js
 - SQL (final de schema.sql): taller_fabrica_agregar(tid) (lista de 23; agrega lo que falta por nombre hasta el límite) · trigger talleres_fabrica (taller nuevo) · RPC taller_servicios_fabrica() (solo dueño; botón ✨ en Más → Servicios) · FREE servicios 40.
 - shared/fabrica.js (propio, en FILES de sw.js; lo cargan taller/ y t/): CFX_FABRICA.bici(input) → datalist fabBicis · repuestos(input) → fabRep + precio(nombre) (la orden pone el precio si estaba en 0) · notas(campo) → fila .fab-notas (botones data-sin-atras). Para sumar marcas/repuestos/notas: editar ese archivo.
+
+## 🔔⏰ G59c · Módulos aviso lista y mantención (2.88, bd 2.31 · núcleo 2.85) — prueba SaaS/pruebas/g59c_modulos.js
+- cfx_modulos_app() = ['presupuesto', 'aviso_lista', 'mantencion'] (📦 'stock' ya está en el catálogo del núcleo; sumarlo aquí cuando se haga).
+- 🔔 aviso_lista: reservas.lista_at + lista_recordada (taller_estado los arma al pasar a Lista). JS avisoLista(r): al pasar a Lista (tablero › o botón de la orden) ventana con 📲 WhatsApp (total + link /r/). Tablero: "⏳ Lista hace N días". Sin módulo: aviso en la orden con data-ofrecer (listener global → ofrecer). tareas_periodicas 3b: a los 2 días avisa al cliente (con cuenta) y al taller, 1 vez. El push de cada estado al cliente sigue GRATIS.
+- ⏰ mantencion: taller_recordatorios = Premium (como antes) O módulo; tareas_periodicas 3: cliente Premium O taller con módulo (cfx_modulo_de('mantencion', owner_id)). bloqueadoPremium(t, d, mod) muestra "🧩 O activa solo esta función". Km: NO (no hay de dónde sacar los km; va por meses de Configuración).

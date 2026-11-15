@@ -48,6 +48,15 @@
     if (P.dueno && window.CFX_MODULOS_TIENDA) window.CFX_MODULOS_TIENDA.probar(k, { rpc, alCambiar: recargar });
     else toast('Pídele al dueño del taller que active este módulo');
   }
+  // G59c 🔔 Aviso "bici lista": al dejarla lista, ventana con el WhatsApp listo (total + link).
+  function avisoLista(r) {
+    if (!r || !r.telefono || !tiene('aviso_lista')) return;
+    const msg = 'Hola ' + String(r.nombre || '').split(' ')[0] + ' 👋 Te escribimos de ' + P.taller.nombre + ': ¡tu bici está lista para retirar! ✅' +
+      (r.total ? '\nTotal: ' + plata(r.total) : '') + '\nDetalle y fotos: ' + App.ROOT + 'r/?t=' + r.token;
+    modal('<h2>🔔 Avísale a ' + esc(String(r.nombre || '').split(' ')[0]) + '</h2><p class="muted">Su bici está lista. Mándale el aviso con el total y el link. Si no la retira en 2 días, le recordamos solo.</p>' +
+      '<div class="btns"><button class="ghost" data-cerrar>Ahora no</button><a class="btn" id="avLista" target="_blank" rel="noopener" href="' + App.wa(r.telefono, msg) + '">📲 Avisar por WhatsApp</a></div>', (d) => { d.querySelector('#avLista').addEventListener('click', () => setTimeout(() => d.close(), 400)); });
+  }
+  document.addEventListener('click', (e) => { const o = e.target.closest('[data-ofrecer]'); if (o) { e.preventDefault(); ofrecer(o.dataset.ofrecer); } });
   async function cargarCatalogo() {
     [servicios, promos] = await Promise.all([
       q(sb.from('servicios').select('*').eq('taller_id', T).order('orden').order('nombre')),
@@ -141,12 +150,15 @@
       ' · vence ' + new Date(r.expira_at).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) + '</div></span></li>').join('');
   }
   // G59 🚦 Tablero del taller (FREE): una columna por paso; ‹ › mueve la bici y le avisa al cliente.
+  let tabLista = [];
+  const diasLista = (r) => r.estado === 'lista' && r.lista_at ? Math.floor((Date.now() - new Date(r.lista_at)) / 864e5) : 0;
   function pintarTablero(lista) {
+    tabLista = lista;
     $('hTablero').innerHTML = EN_TALLER.map((est, i) => {
       const l = lista.filter((r) => r.estado === est);
       return '<div class="col" data-col="' + est + '"><h3>' + ESTADOS[est][0] + '<b>' + l.length + '</b></h3>' + (l.length ? l.map((r) =>
         '<div class="tj" data-tj="' + r.id + '"><b>' + esc(r.nombre) + '</b>' + (r.bici ? '<div class="sub">🚲 ' + esc(r.bici) + '</div>' : '') +
-        (r.mecanico ? '<div class="sub">🧑‍🔧 ' + esc(r.mecanico) + '</div>' : '') + '<div class="btns">' +
+        (r.mecanico ? '<div class="sub">🧑‍🔧 ' + esc(r.mecanico) + '</div>' : '') + (diasLista(r) >= 1 ? '<div class="sub" style="color:var(--warn)">⏳ Lista hace ' + diasLista(r) + ' día' + (diasLista(r) > 1 ? 's' : '') + '</div>' : '') + '<div class="btns">' +
         (i > 0 ? '<button class="small ghost" type="button" data-sin-atras data-mover="' + r.id + '" data-a="' + EN_TALLER[i - 1] + '" aria-label="Mover a ' + ESTADOS[EN_TALLER[i - 1]][0] + '">‹</button>' : '') +
         '<span class="grow"></span>' + (i < EN_TALLER.length - 1
           ? '<button class="small" type="button" data-mover="' + r.id + '" data-a="' + EN_TALLER[i + 1] + '" aria-label="Pasar a ' + ESTADOS[EN_TALLER[i + 1]][0] + '">›</button>'
@@ -161,7 +173,11 @@
       e.stopPropagation();
       if (m.dataset.a === 'completada' && !await confirmar('¿Entregar la bici al cliente? La orden queda terminada.')) return;
       m.disabled = true;
-      try { await rpc('taller_estado', { p_id: m.dataset.mover, p_estado: m.dataset.a }); sb.functions.invoke('servidor').catch(() => {}); toast((ESTADOS[m.dataset.a] || [''])[0]); pintarHoy(); }
+      try {
+        await rpc('taller_estado', { p_id: m.dataset.mover, p_estado: m.dataset.a }); sb.functions.invoke('servidor').catch(() => {}); toast((ESTADOS[m.dataset.a] || [''])[0]);
+        if (m.dataset.a === 'lista') avisoLista(tabLista.find((x) => x.id === m.dataset.mover));
+        pintarHoy();
+      }
       catch (err) { m.disabled = false; toast(err.message); }
       return;
     }
@@ -408,6 +424,7 @@
         (msgCliente || '') + '\nTu reserva: ' + link) + '">📲 WhatsApp</a>' : '') +
       '<button class="small ghost" id="dLink">🔗 Enlace del cliente</button>' + (r.tiene_comprobante ? '<button class="small ghost" data-comp="' + r.id + '">👁️ Comprobante</button>' : '') + '</div>' +
       (r.estado === 'en_revision' ? botonesRevisar(r) : '') +
+      (r.estado === 'lista' && !tiene('aviso_lista') && P.venta ? '<div class="aviso" style="margin-top:12px"><div class="grow">🔔 Avísale solo con el total y el link, y recuérdale si no la retira.</div><button class="small" type="button" data-sin-atras data-ofrecer="aviso_lista">🧩 Ver</button></div>' : '') +
       (r.abono_estado === 'devolver' ? '<div class="aviso warn" style="margin-top:12px"><div class="grow">Devuelve el abono de ' + plata(r.abono_monto) + ' al cliente.</div><button class="small okb" data-devuelto="' + r.id + '">✓ Ya lo devolví</button></div>' : '') +
       '</div>' +
       (trabajando ? '<div class="card"><h2>🔧 Estado del trabajo</h2><div class="btns" style="margin-top:0">' + (sig ? '<button id="dSig" data-e="' + sig[0] + '">' + sig[1] + '</button>' : '') +
@@ -442,7 +459,8 @@
         if (est === 'completada' || est === 'lista') await guardarTrabajo(true);
         await rpc('taller_estado', { p_id: r.id, p_estado: est });
         sb.functions.invoke('servidor').catch(() => {});
-        toast((ESTADOS[est] || [est])[0]); abrirDetalle(r.id);
+        toast((ESTADOS[est] || [est])[0]); await abrirDetalle(r.id);
+        if (est === 'lista') avisoLista(Object.assign({}, r, { total: detalle && detalle.id === r.id ? detalle.total : r.total }));
       } catch (err) { toast(err.message); }
     };
     if (trabajando) {
@@ -929,9 +947,11 @@
         '<p class="sub">💡 Comparte tu QR: los clientes con cuenta vuelven más y reciben recordatorios.</p>' : '<p class="muted">Sin reservas todavía.</p>') + '</div>' +
       '<div class="card"><h2>⭐ Tus estrellas</h2>' + (eTot ? hbarras(est.map((x) => ['★'.repeat(x.e), x.n]), eTot) : '<p class="muted">Aún sin calificaciones.</p>') + '</div>';
   }
-  function bloqueadoPremium(t, d) {
+  function bloqueadoPremium(t, d, mod) {
     return '<div class="card plan premium"><h2>' + t + ' <span class="pill pro">PREMIUM</span></h2><p class="muted">' + esc(d) + '</p><div class="btns">' +
-      (P.dueno ? '<button class="gold" onclick="location.hash=\'plan\'">⭐ Activar Premium</button>' : '<p class="sub">Pídele al dueño del taller que active Premium.</p>') + '</div></div>';
+      (P.dueno ? '<button class="gold" onclick="location.hash=\'plan\'">⭐ Activar Premium</button>' +
+        (mod && P.venta ? '<button class="alt" type="button" data-sin-atras data-ofrecer="' + mod + '">🧩 O activa solo esta función</button>' : '')
+        : '<p class="sub">Pídele al dueño del taller que active Premium.</p>') + '</div></div>';
   }
 
   // ---- Recordatorios de mantención (Premium)
@@ -939,7 +959,7 @@
     body().innerHTML = '<p class="empty">Cargando…</p>';
     let s;
     try { s = await rpc('taller_recordatorios'); } catch (e) { body().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
-    if (s.bloqueado) { body().innerHTML = bloqueadoPremium('🔔 Recordatorios de mantención', 'Ve qué clientes ya deberían volver y escríbeles con un toque.'); return; }
+    if (s.bloqueado) { body().innerHTML = bloqueadoPremium('🔔 Recordatorios de mantención', 'Ve qué clientes ya deberían volver y escríbeles con un toque. Con cuenta, les avisamos solos.', 'mantencion'); return; }
     body().innerHTML = '<div class="card"><h2>🔔 Les toca mantención</h2><p class="muted" style="margin-top:0">Clientes cuya próxima mantención es en los próximos 15 días o ya pasó, y que no han vuelto a reservar.</p><ul class="list">' +
       (s.lista.map((c) => '<li><div class="grow"><b>' + esc(c.nombre) + '</b><div class="sub">' + esc(c.bici || '') + ' · le toca ' + App.fCorta(c.proxima) + ' · última visita ' + App.fCorta(c.ultima) + '</div></div>' +
         (c.telefono ? '<a class="btn small" target="_blank" rel="noopener" href="' + App.wa(c.telefono, 'Hola ' + c.nombre.split(' ')[0] + ' 👋 Te escribimos de ' + P.taller.nombre + '. A tu bici ya le toca su mantención 🔧 Reserva aquí: ' + linkReservas()) + '">📲 Recordar</a>' : '') + '</li>').join('')
