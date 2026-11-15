@@ -6,10 +6,37 @@
 //  3) sin acción (cada minuto, pg_cron): envía por push los avisos nuevos de la campanita.
 import webpush from 'npm:web-push@3.6.7';
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
+
+// ---------- G61 a · 📲 Push insistente (núcleo push.sql): cada aviso lleva su "grupo"; el celular confirma al recibirlo
+// (service worker → cfx_push_recibido). Sin confirmación se reenvía a 1, 2, 5, 10, 15, 30 min y luego cada 1 h, hasta 48 h.
+// deno-lint-ignore no-explicit-any
+type Rpc = { rpc: (f: string, a?: Record<string, unknown>) => any };
+type SubPush = { endpoint: string; p256dh: string; auth: string };
+const ACK_URL = (Deno.env.get('SUPABASE_URL') || '') + '/rest/v1/rpc/cfx_push_recibido';
+const ACK_KEY = Deno.env.get('SUPABASE_ANON_KEY') || '';
+const grupos = () => { const m = new Map<string, string>(); return (k: string) => { if (!m.has(k)) m.set(k, crypto.randomUUID()); return m.get(k)!; }; };
+function conAck(payload: string, grupo: string) {
+  try { const o = JSON.parse(payload); o.ack = grupo; o.ackUrl = ACK_URL; o.ackKey = ACK_KEY; return JSON.stringify(o); } catch { return payload; }
+}
+async function anotarPush(s: Rpc, lista: (SubPush & { grupo: string; payload: string })[]) {
+  if (!lista.length) return;
+  try { await s.rpc('cfx_push_anotar', { p_lista: lista.map((x) => ({ grupo: x.grupo, endpoint: x.endpoint, p256dh: x.p256dh, auth: x.auth, payload: x.payload })) }); } catch { /* sin push.sql todavía */ }
+}
+async function reintentarPush(s: Rpc, preparar: () => Promise<boolean>) {
+  let data: (SubPush & { payload: string })[] | null = null;
+  try { const r = await s.rpc('cfx_push_tomar'); data = r.error ? null : r.data; } catch { return 0; }
+  if (!data?.length || !(await preparar())) return 0;
+  let n = 0;
+  await Promise.allSettled(data.map(async (e) => {
+    try { await webpush.sendNotification({ endpoint: e.endpoint, keys: { p256dh: e.p256dh, auth: e.auth } }, e.payload, { TTL: 86400, urgency: 'high' }); n++; }
+    catch (err) { const c = (err as { statusCode?: number })?.statusCode; if (c === 404 || c === 410) await s.rpc('cfx_push_muerto', { p_endpoint: e.endpoint }); }
+  }));
+  return n;
+}
 import postgres from 'npm:postgres@3.4.4';
 import { INSTALAR, DB_VERSION } from './instalar.ts';
 
-const VERSION = '2.0';
+const VERSION = '2.1';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -99,15 +126,17 @@ async function enviarPush() {
   if (error) throw error;
   const envios = (data?.envios || []) as { endpoint: string; p256dh: string; auth: string; titulo: string; cuerpo: string; url: string; id: string }[];
   const claves = data?.claves || {};
-  if (!envios.length) return { enviados: 0 };
+  const reenviados = await reintentarPush(s, async () => { if (!claves.publica || !claves.privada) return false; webpush.setVapidDetails('mailto:soporte@bicitaller.app', claves.publica, claves.privada); return true; });
+  if (!envios.length) return { enviados: 0, reenviados };
   if (!claves.publica || !claves.privada) return { enviados: 0, error: 'Faltan las claves push (Admin → Ajustes → Notificaciones)' };
   webpush.setVapidDetails('mailto:soporte@bicitaller.app', claves.publica, claves.privada);
   let ok = 0, malos = 0;
+  const gr = grupos();
   for (let i = 0; i < envios.length; i += 50) {
-    const lote = envios.slice(i, i + 50);
+    const lote = envios.slice(i, i + 50).map((e) => { const g = gr(String(e.id)); return { ...e, grupo: g, payload: conAck(JSON.stringify({ title: e.titulo, body: e.cuerpo, url: e.url || '/', tag: e.id }), g) }; });
+    await anotarPush(s, lote);
     const res = await Promise.allSettled(lote.map((e) => webpush.sendNotification(
-      { endpoint: e.endpoint, keys: { p256dh: e.p256dh, auth: e.auth } },
-      JSON.stringify({ title: e.titulo, body: e.cuerpo, url: e.url || '/', tag: e.id }), { TTL: 86400 })));
+      { endpoint: e.endpoint, keys: { p256dh: e.p256dh, auth: e.auth } }, e.payload, { TTL: 86400, urgency: 'high' })));
     for (let j = 0; j < res.length; j++) {
       const r = res[j];
       if (r.status === 'fulfilled') ok++;
@@ -118,7 +147,7 @@ async function enviarPush() {
       }
     }
   }
-  return { enviados: ok, fallidos: malos };
+  return { enviados: ok, fallidos: malos, reenviados };
 }
 
 // G37 · Entrar con QR ({accion: 'qr_entrar'}): el computador entra con la sesión que aprobó el celular (núcleo qr.js + qr.sql).

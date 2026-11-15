@@ -27,9 +27,15 @@ self.addEventListener('fetch', (e) => {
     return res;
   }).catch(() => caches.match(e.request, { ignoreSearch: true }).then((r) => r || caches.match('index.html')).then(limpia)));
 });
+// G61 a 📲 Confirma al servidor que el aviso llegó (así deja de reenviarlo). Sin red: el servidor reintenta.
+function cfxAck(e, d) {
+  if (!d || !d.ack || !/^https:\/\//.test(d.ackUrl || '')) return;
+  e.waitUntil(fetch(d.ackUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: d.ackKey || '', Authorization: 'Bearer ' + (d.ackKey || '') }, body: JSON.stringify({ p_grupo: d.ack }) }).catch(() => {}));
+}
 self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch (err) { d = { title: e.data && e.data.text() }; }
+  cfxAck(e, d);
   e.waitUntil(self.registration.showNotification(d.title || 'BiciTaller', {
     body: d.body || '', icon: 'icons/icon-192.png', badge: 'icons/badge.png', tag: d.tag, data: { url: d.url || '/' }, renotify: !!d.tag, vibrate: [200, 100, 200]
   }));

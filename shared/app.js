@@ -76,9 +76,6 @@
     const l = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
     document.documentElement.style.setProperty('--brand', color);
     document.documentElement.style.setProperty('--brand-ink', l > 0.62 ? '#0f172a' : '#ffffff');
-    let m = document.querySelector('meta[name=theme-color]');
-    if (!m) { m = document.createElement('meta'); m.name = 'theme-color'; document.head.appendChild(m); }
-    m.content = color;
   }
   // Logo (o ícono) dentro de un elemento .logo
   function pintarLogo(el, t) {
