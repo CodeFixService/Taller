@@ -70,7 +70,7 @@
 
   /* ---------- Navegación ---------- */
   // #plan y #mas/<sección> (perfil, horario, servicios, abono…): abren esa parte de Más (la guía para partir los usa).
-  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock|usadas|tradein|pasaporte|domicilio|garantias|planes)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
+  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock|usadas|tradein|pasaporte|domicilio|garantias|planes|caja)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
   const show = App.pestanas((v) => {
     vista = v;
     if (v === 'hoy') pintarHoy();
@@ -197,6 +197,24 @@
     if (await accionesComunes(e)) return;
     const c = e.target.closest('[data-r]'); if (c) abrirDetalle(c.dataset.r);
   });
+  // G74a 🧾 Orden rápida y presupuesto (FREE): sin hora, el cliente está en el mesón.
+  function ordenNueva(pres) {
+    const d = modal('<h2>' + (pres ? '🧾 Presupuesto' : '＋ Nueva orden') + '</h2><p class="sub" style="margin-top:0">' + (pres ? 'Anota la bici y después agrega los arreglos con su precio para mandárselo.' : 'Para la bici que llega al taller. Queda 🚲 Recibida y se abre la orden.') + '</p>' +
+      '<div class="row"><div><label for="oN">Nombre</label><input id="oN" maxlength="80" autocomplete="off"></div><div><label for="oT">WhatsApp</label><input id="oT" inputmode="tel" maxlength="30"></div></div>' +
+      '<label for="oB">Bici</label><input id="oB" maxlength="120" placeholder="Elige o escribe: Trek Marlin 5…"><label for="oO">¿Qué trae?</label><input id="oO" maxlength="500" placeholder="Ej: frena mal, cambios saltan">' +
+      '<div class="btns"><button class="ghost" data-cerrar>Cancelar</button><button id="oOk">' + (pres ? '🧾 Armar presupuesto' : '✅ Crear orden') + '</button></div><p class="err" id="oErr"></p>');
+    if (window.CFX_FABRICA) { CFX_FABRICA.bici(d.querySelector('#oB')); CFX_FABRICA.notas(d.querySelector('#oO')); }
+    d.querySelector('#oOk').onclick = async (e) => {
+      e.target.disabled = true;
+      try {
+        const id = await rpc('taller_orden_nueva', { p_nombre: d.querySelector('#oN').value, p_telefono: d.querySelector('#oT').value, p_bici: d.querySelector('#oB').value, p_nota: d.querySelector('#oO').value, p_presupuesto: !!pres });
+        d.close(); toast(pres ? '🧾 Agrega los arreglos y envíalo' : '🚲 Orden creada'); volverA = 'hoy'; await abrirDetalle(id);
+        const it = $('dItems'); if (it) it.scrollIntoView({ block: 'center' });
+      } catch (err) { e.target.disabled = false; d.querySelector('#oErr').textContent = err.message; }
+    };
+  }
+  $('hOrden').onclick = () => ordenNueva(false);
+  $('hPres').onclick = () => ordenNueva(true);
   $('hCompartir').onclick = () => compartir(linkReservas(), '🚲 Reserva tu hora en ' + P.taller.nombre);
   $('hQR').onclick = () => App.verQR({ url: linkReservas(), titulo: 'QR de tu página de reservas', archivo: 'qr-' + P.taller.slug + '.gif',
     afiche: { titulo: '🚲 ' + P.taller.nombre, texto: 'Escanea y reserva tu hora online. Sigue el estado de tu bici desde el celular.' } });
@@ -435,6 +453,8 @@
       '</div>' +
       (trabajando ? '<div class="card"><h2>🔧 Estado del trabajo</h2><div class="btns" style="margin-top:0">' + (sig ? '<button id="dSig" data-e="' + sig[0] + '">' + sig[1] + '</button>' : '') +
         (['recibida', 'en_reparacion'].includes(r.estado) ? '<button class="alt" data-e="esperando_repuesto">📦 Esperando repuesto</button>' : '') +
+        (r.estado === 'lista' ? '<button class="okb" type="button" id="dCobrar">💵 Cobrar y entregar</button>' : '') +
+        (['recibida', 'en_reparacion', 'esperando_repuesto'].includes(r.estado) && r.abono_estado === 'sin_abono' ? '<button class="ghost" data-e="cancelada">❌ Anular</button>' : '') +
         (r.estado === 'confirmada' ? '<button class="danger" data-e="no_asistio">🚫 No llegó</button><button class="danger" data-e="cancelada">Cancelar (devolver abono)</button>' : '') + '</div></div>' +
         '<div class="card"><h2>🧾 Servicios y repuestos</h2><div class="items" id="dItems"></div>' +
         '<div class="row" style="margin-top:6px"><select id="dAddS" aria-label="Agregar servicio"><option value="">＋ Agregar servicio…</option>' +
@@ -461,9 +481,10 @@
     const pas = $('dPas'); if (pas) pas.onclick = () => editarPasaporte(r.pasaporte_id || null, { bici: r.bici, dueno: r.nombre, telefono: r.telefono, reserva: r.id }, () => abrirDetalle(r.id));  // G59f
     $('v-detalle').onclick = async (ev) => {
       if (await accionesComunes(ev)) return;
+      if (ev.target.closest('#dCobrar')) { await guardarTrabajo(true); cobrarOrden(r.id, () => abrirDetalle(r.id)); return; }
       const be = ev.target.closest('[data-e]'); if (!be) return;
       const est = be.dataset.e;
-      if (['no_asistio', 'cancelada'].includes(est) && !await confirmar(est === 'no_asistio' ? 'El cliente no llegó: pierde el abono. ¿Confirmar?' : 'Cancelar la reserva: tendrás que devolver el abono. ¿Confirmar?')) return;
+      if (['no_asistio', 'cancelada'].includes(est) && !await confirmar(est === 'no_asistio' ? 'El cliente no llegó: pierde el abono. ¿Confirmar?' : r.abono_estado === 'sin_abono' ? '¿Anular esta orden? Sale del tablero.' : 'Cancelar la reserva: tendrás que devolver el abono. ¿Confirmar?')) return;
       try {
         if (est === 'completada' || est === 'lista') await guardarTrabajo(true);
         await rpc('taller_estado', { p_id: r.id, p_estado: est });
@@ -493,6 +514,13 @@
       pintarPres();
       pintarPlan(r);  // G59i 🔁
       $('dPres').onclick = async (ev) => {
+        if (ev.target.closest('#dPresWa')) {  // G74a FREE: el detalle por WhatsApp (sin aprobar en el link)
+          const l = items.filter((it) => String(it.nombre || '').trim()), nom = (detalle.nombre || '').split(' ')[0];
+          const msg = 'Hola ' + nom + ' 👋 Te escribimos de ' + P.taller.nombre + '. Presupuesto para tu bici' + (detalle.bici ? ' (' + detalle.bici + ')' : '') + ':\n' +
+            l.map((it) => '• ' + it.nombre.trim() + ((+it.cant || 1) > 1 ? ' x' + it.cant : '') + ': ' + plata((+it.cant || 1) * (+it.precio || 0))).join('\n') +
+            '\nTotal: ' + $('dTotal').textContent + '\n¿Lo hacemos? Responde SÍ 🙌';
+          guardarTrabajo(true).catch(() => {}); window.open(App.wa(detalle.telefono, msg), '_blank', 'noopener'); return;
+        }
         if (!ev.target.closest('#dPedir')) return;
         if (!tiene('presupuesto')) { ofrecer('presupuesto'); return; }
         try {
@@ -567,6 +595,7 @@
     $('dPres').innerHTML = '<div class="aviso' + (pend ? ' warn' : '') + '" style="margin-top:10px;display:block"><div>' +
       (pend ? '⏳ Esperando que ' + esc(nom) + ' apruebe en su enlace.' : pr.estado === 'respondido' ? '✅ ' + esc(nom) + ' respondió el presupuesto.' : '🧾 ¿Necesitas su OK antes de trabajar? Pídele que apruebe cada arreglo.') + '</div><div class="btns">' +
       (sinPedir && items.length ? '<button type="button" class="small" id="dPedir">✅ Pedir aprobación</button>' : '') +
+      (!tiene('presupuesto') && items.length && detalle.telefono ? '<button type="button" class="small alt" id="dPresWa">📲 Enviar presupuesto</button>' : '') +
       ((nuevos || pend) && detalle.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(detalle.telefono, 'Hola ' + nom + ' 👋 Te escribimos de ' + P.taller.nombre +
         ': revisamos tu bici. Aprueba o rechaza cada arreglo aquí 👉 ' + link) + '">📲 Enviar por WhatsApp</a>' : '') + '</div></div>';
   }
@@ -615,15 +644,15 @@
   let subMas = null;
   $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); } };
   // Más = menú común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (body() dibuja dentro de ella).
-  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes', pasaporte: 'Ventas y clientes', domicilio: 'Tu taller', garantias: 'Ventas y clientes', planes: 'Ventas y clientes',
+  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller', caja: 'Ventas y clientes', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes', pasaporte: 'Ventas y clientes', domicilio: 'Tu taller', garantias: 'Ventas y clientes', planes: 'Ventas y clientes',
     stats: 'Ventas y clientes', recordar: 'Ventas y clientes', plan: 'Tu plan', modulos: 'Tu plan', cuenta: 'Configuración' };
   const K2 = { plan: 'premium', cuenta: 'micuenta', chat: 'mensajes' };
-  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', usadas: '🏷️', tradein: '🔄', pasaporte: '🪪', domicilio: '🚐', garantias: '🛡️', planes: '🔁', cuenta: '👤' };
+  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', caja: '💵', usadas: '🏷️', tradein: '🔄', pasaporte: '🪪', domicilio: '🚐', garantias: '🛡️', planes: '🔁', cuenta: '👤' };
   let hojaMas = null;
   function abrirSec(m) {
     if (m === 'chat') { $('chatBtn').click(); return; }
     const b = $('mSeg').querySelector('[data-m="' + m + '"]'); if (!b || b.classList.contains('hidden')) return;
-    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, usadas: verUsadas, tradein: verTradein, pasaporte: verPasaportes, domicilio: verDomicilio, garantias: verGarantias, planes: verPlanes };
+    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, caja: verCaja, usadas: verUsadas, tradein: verTradein, pasaporte: verPasaportes, domicilio: verDomicilio, garantias: verGarantias, planes: verPlanes };
     if (!hojaMas || hojaMas.m !== m || !hojaMas.h.d.isConnected) {
       const h = window.CFX_MENU.hoja((ICO[m] || '') + ' ' + esc(b.textContent.replace(/\d+$/, '').replace(/^[^\p{L}]+/u, '').trim()), () => { if (hojaMas && hojaMas.h === h) { hojaMas = null; subMas = null; } });
       hojaMas = { m, h };
@@ -863,6 +892,100 @@
   }
 
   // ---- G59d 🧩 📦 Repuestos y stock + 🛒 pedido a proveedor (G68: genérico, los proveedores del taller)
+  /* ---------- G74a 💵 Caja / Mostrador (FREE) ---------- */
+  const CAJA_M = [['efectivo', '💵 Efectivo'], ['transferencia', '🏦 Transferencia'], ['tarjeta', '💳 Tarjeta']];
+  const medioDe = (m) => (CAJA_M.find((x) => x[0] === m) || ['', m])[1];
+  // Elegir cómo pagó (3 botones grandes) → fn(medio)
+  function elegirMedio(titulo, fn) {
+    const d = modal('<h2>' + titulo + '</h2><p class="sub" style="margin-top:0">¿Cómo pagó?</p><div class="btns" style="flex-direction:column">' +
+      CAJA_M.map((m) => '<button type="button" data-medio="' + m[0] + '">' + m[1] + '</button>').join('') + '<button class="ghost" data-cerrar>Cancelar</button></div><p class="err" id="meErr"></p>');
+    d.onclick = async (e) => {
+      const b = e.target.closest('[data-medio]'); if (!b) return;
+      d.querySelectorAll('[data-medio]').forEach((x) => { x.disabled = true; });
+      try { await fn(b.dataset.medio); d.close(); }
+      catch (err) { d.querySelectorAll('[data-medio]').forEach((x) => { x.disabled = false; }); d.querySelector('#meErr').textContent = err.message; }
+    };
+  }
+  function cobrarOrden(id, luego, monto) {
+    elegirMedio('💵 Cobrar' + (monto != null ? ' ' + plata(monto) : ' la orden'), async (m) => {
+      const x = await rpc('taller_caja_cobrar', { p_reserva: id, p_medio: m });
+      sb.functions.invoke('servidor').catch(() => {});
+      toast('✅ Cobrado ' + plata(x.monto) + ' · ' + medioDe(m)); if (luego) luego();
+    });
+  }
+  let cajaF = null;
+  async function verCaja() {
+    body().innerHTML = '<p class="empty">Cargando…</p>';
+    let c;
+    try { [c] = await Promise.all([rpc('taller_caja', { p_fecha: cajaF }), tiene('stock') ? cargarStock().catch(() => null) : null]); }
+    catch (e) { body().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    const m = c.medios, esHoy = c.fecha === c.hoy;
+    body().innerHTML = '<div class="card"><h2>🛒 Venta de mostrador</h2><p class="sub" style="margin-top:0">Vende repuestos y accesorios sin orden. ' + (ST ? 'Baja el 📦 stock solo.' : '') + '</p>' +
+        '<div class="btns" style="margin-top:0"><button type="button" id="kVender">＋ Nueva venta</button>' + (ST ? '<button class="ghost" type="button" data-m2="stock">📦 Ver stock</button>' : P.venta ? '<button class="ghost" type="button" data-sin-atras data-ofrecer="stock">📦 Controlar stock</button>' : '') + '</div></div>' +
+      (c.por_cobrar.length ? '<div class="card"><h2>💵 Por cobrar <span class="pill warn">' + c.por_cobrar.length + '</span></h2><ul class="list">' + c.por_cobrar.map((r) =>
+        '<li><div class="grow"><b>' + esc(r.nombre) + '</b><div class="sub">' + (r.bici ? '🚲 ' + esc(r.bici) + ' · ' : '') + (r.estado === 'lista' ? '✅ Lista' : '🎉 Entregada sin cobrar') + '</div></div>' +
+        '<button class="small okb" type="button" data-cobrar="' + r.id + '" data-monto="' + r.a_pagar + '">💵 ' + plata(r.a_pagar) + '</button></li>').join('') + '</ul></div>' : '') +
+      '<div class="card"><h2>📊 Cierre del día</h2><label for="kF">Día</label><input type="date" id="kF" value="' + c.fecha + '" max="' + c.hoy + '">' +
+        '<div class="stats" style="margin-top:10px;grid-template-columns:1fr 1fr">' + CAJA_M.map((x) => '<div class="card"><span>' + x[1] + '</span><b>' + plata(m[x[0]]) + '</b></div>').join('') +
+        '<div class="card"><span>🧾 Total (' + m.n + ')</span><b>' + plata(m.total) + '</b></div></div>' +
+        (c.cobros.length ? '<ul class="list" id="kLista">' + c.cobros.map((k) => '<li><div class="grow"><b>' + plata(k.total) + '</b> · ' + medioDe(k.medio) +
+          '<div class="sub">' + k.hora + ' · ' + esc(k.nombre || (k.reserva ? 'Orden' : 'Venta de mostrador')) + (k.reserva ? '' : ' · ' + esc(k.items.map((i) => i.nombre + (i.cant > 1 ? ' x' + i.cant : '')).join(', ').slice(0, 90))) + '</div></div>' +
+          (P.dueno ? '<button class="small ghost" type="button" data-anular="' + k.id + '" aria-label="Anular cobro">✕</button>' : '') + '</li>').join('') + '</ul>'
+          : '<p class="sub">' + (esHoy ? 'Todavía no hay cobros hoy.' : 'Sin cobros ese día.') + '</p>') +
+        (c.cobros.length ? '<div class="btns"><button class="ghost" type="button" id="kCopiar">📋 Copiar cierre</button></div>' : '') + '</div>';
+    const z = body();
+    z.querySelector('#kF').onchange = (e) => { cajaF = e.target.value || null; verCaja(); };
+    z.querySelector('#kVender').onclick = () => ventaMostrador(verCaja);
+    const cp = z.querySelector('#kCopiar');
+    if (cp) cp.onclick = () => navigator.clipboard.writeText('🧾 Cierre ' + P.taller.nombre + ' · ' + App.fCorta(c.fecha) + '\n' + CAJA_M.map((x) => x[1] + ': ' + plata(m[x[0]])).join('\n') + '\nTotal: ' + plata(m.total) + ' (' + m.n + ' cobros)').then(() => toast('📋 Cierre copiado'));
+    z.onclick = async (e) => {
+      const st = e.target.closest('[data-m2]'); if (st) { abrirSec(st.dataset.m2); return; }
+      const cb = e.target.closest('[data-cobrar]'); if (cb) { cobrarOrden(cb.dataset.cobrar, verCaja, +cb.dataset.monto); return; }
+      const an = e.target.closest('[data-anular]');
+      if (an) { if (!await confirmar('¿Anular este cobro? Se borra del cierre' + (ST ? ' y vuelve el stock' : '') + '.')) return; try { await rpc('taller_caja_anular', { p_id: an.dataset.anular }); toast('Cobro anulado'); verCaja(); } catch (err) { toast(err.message); } }
+    };
+  }
+  // 🛒 Venta sin orden: ítems (mis repuestos/fábrica/servicios) → cobrar.
+  function ventaMostrador(luego) {
+    const its = [{ nombre: '', cant: 1, precio: 0 }];
+    const d = modal('<h2>🛒 Nueva venta</h2><div class="items" id="vItems"></div>' +
+      '<div class="row" style="margin-top:6px"><select id="vAddS" aria-label="Agregar servicio"><option value="">＋ Servicio…</option>' + servicios.filter((s) => s.activo).map((s) => '<option value="' + s.id + '">' + esc(s.nombre) + ' · ' + plata(s.precio) + '</option>').join('') + '</select>' +
+      '<button class="alt" id="vAdd" type="button" style="flex:0 0 auto">＋ Ítem</button></div>' +
+      '<label for="vN">Cliente (opcional)</label><input id="vN" maxlength="80" autocomplete="off">' +
+      '<p style="margin:12px 0 0">Total: <b class="precio" id="vTot">$0</b></p>' +
+      '<div class="btns"><button class="ghost" data-cerrar>Cancelar</button><button class="okb" id="vOk" type="button">💵 Cobrar</button></div><p class="err" id="vErr"></p>');
+    if (ST) listaStock(); else if (window.CFX_FABRICA) CFX_FABRICA.repuestos(document.createElement('input'));
+    const zi = d.querySelector('#vItems');
+    const tot = () => its.reduce((s, it) => s + Math.max(+it.cant || 0, 0) * Math.max(+it.precio || 0, 0), 0);
+    const pintar = () => {
+      zi.innerHTML = its.map((it, i) => '<div class="it"><input data-i="' + i + '" data-k="nombre" value="' + esc(it.nombre) + '" placeholder="Elige o escribe" aria-label="Qué vendiste" list="' + (ST ? 'stRep' : 'fabRep') + '">' +
+        '<input data-i="' + i + '" data-k="cant" value="' + it.cant + '" inputmode="numeric" aria-label="Cantidad"><input data-i="' + i + '" data-k="precio" value="' + it.precio + '" inputmode="numeric" aria-label="Precio">' +
+        '<button class="danger" type="button" data-x="' + i + '" aria-label="Quitar">✕</button>' + stockDe(it) + '</div>').join('');
+      d.querySelector('#vTot').textContent = plata(tot());
+    };
+    zi.oninput = (e) => {
+      const i = e.target.dataset.i; if (i === undefined) return;
+      const k = e.target.dataset.k; its[i][k] = k === 'nombre' ? e.target.value : App.numero(e.target.value);
+      if (k === 'nombre') {
+        const rs = repDe(e.target.value), pf = rs ? rs.precio : window.CFX_FABRICA && CFX_FABRICA.precio(e.target.value);
+        if (pf && !its[i].precio) { its[i].precio = pf; const ip = zi.querySelector('[data-i="' + i + '"][data-k=precio]'); if (ip) ip.value = pf; }
+        const fila = e.target.closest('.it'), viejo = fila.querySelector('.ap'); if (viejo) viejo.remove(); fila.insertAdjacentHTML('beforeend', stockDe(its[i]));
+      }
+      d.querySelector('#vTot').textContent = plata(tot());
+    };
+    zi.onclick = (e) => { const x = e.target.closest('[data-x]'); if (x) { its.splice(+x.dataset.x, 1); if (!its.length) its.push({ nombre: '', cant: 1, precio: 0 }); pintar(); } };
+    d.querySelector('#vAdd').onclick = () => { its.push({ nombre: '', cant: 1, precio: 0 }); pintar(); const l = zi.querySelectorAll('[data-k=nombre]'); l[l.length - 1].focus(); };
+    d.querySelector('#vAddS').onchange = (e) => { const s = servicios.find((x) => x.id === e.target.value); if (s) { const v = its.findIndex((it) => !String(it.nombre).trim()); const n = { nombre: s.nombre, cant: 1, precio: s.precio }; if (v >= 0) its[v] = n; else its.push(n); } e.target.value = ''; pintar(); };
+    d.querySelector('#vOk').onclick = () => {
+      const l = its.filter((it) => String(it.nombre || '').trim());
+      if (!l.length) { d.querySelector('#vErr').textContent = 'Agrega lo que vendiste'; return; }
+      elegirMedio('💵 Cobrar ' + plata(tot()), async (m) => {
+        await rpc('taller_caja_vender', { p_items: l.map((it) => ({ nombre: String(it.nombre).trim(), cant: Math.max(+it.cant || 1, 1), precio: Math.max(Math.round(+it.precio || 0), 0) })), p_medio: m, p_nombre: d.querySelector('#vN').value });
+        d.close(); toast('✅ Venta cobrada · ' + medioDe(m)); if (luego) luego();
+      });
+    };
+    pintar();
+  }
   let ST = null;  // { repuestos, proveedores } (taller_stock)
   async function cargarStock() { ST = await rpc('taller_stock'); if (ST.bloqueado) ST = null; return ST; }
   const repDe = (nombre) => ST && ST.repuestos.find((x) => x.nombre.trim().toLowerCase() === String(nombre || '').trim().toLowerCase());

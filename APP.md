@@ -73,3 +73,9 @@
 - orden_total(items, %) = suma sin rechazados − floor(suma·%/100): la usan taller_trabajo, reserva_presupuesto y domicilio_aplicar (JS totalItems y /r/ presTot igual).
 - RPC: taller_planes() ({bloqueado}; equipo sin precios ni cobrado_mes) · taller_plan_guardar/borrar, taller_socio_guardar (meses = cobrar)/borrar = solo dueño · taller_plan_orden(reserva) · taller_plan_usar(reserva, bool) = todo el equipo (vigente y con visitas; orden abierta) · pública planes_publicos(taller). reserva_ver.plan + plan_desc · taller_panel.planes_vencen.
 - Pantalla: Más → 🔁 Planes de mantención (verPlanes, editarPlanMant, editarSocio) · orden #dPlan (pintarPlan) · Hoy #hPlanes · /r/ #cPlan · /t/ #planes.
+
+## 🧾 G74a · Orden rápida, presupuesto y 💵 Caja (2.96, bd 2.38, FREE) — prueba SaaS/pruebas/g74a_caja.js
+- Hoy #cAcc: ＋ Nueva orden (#hOrden) · 🧾 Presupuesto (#hPres) · 💵 Caja (data-m=caja). ordenNueva(pres) → taller_orden_nueva(nombre, tel, bici, nota, pres) = reserva origen 'taller', estado 'recibida', sin abono, hora = ahora (no ocupa agenda), servicio_nombre 'Orden de trabajo'|'Presupuesto' → abre la orden.
+- Orden: sin módulo presupuesto → #dPresWa "📲 Enviar presupuesto" (WhatsApp con ítems y total, gratis) · lista → #dCobrar 💵 Cobrar y entregar · recibida/en reparación sin abono → ❌ Anular (cancelada).
+- Tabla caja (taller, fecha, medio efectivo|transferencia|tarjeta, total, items, nombre, reserva_id único, stock). RPC: taller_caja_vender(items, medio, nombre) (baja stock si tiene 📦) · taller_caja_cobrar(reserva, medio) (a pagar = total − abono; lista → completada; no cobra 2 veces) · taller_caja(fecha) {cobros, medios, por_cobrar (lista o entregadas ≤3 días sin cobro)} · taller_caja_anular(id) (solo dueño; devuelve stock).
+- Pantalla: Más → 💵 Caja (verCaja, ventaMostrador, elegirMedio, cobrarOrden; constante CAJA_M porque MEDIOS ya existe).

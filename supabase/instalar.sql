@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.37'::text $$;
+language sql immutable as $$ select '2.38'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -7053,6 +7053,139 @@ do $$ declare t record; begin
     perform public.taller_fabrica_agregar(t.id);
   end loop;
 end $$;
+
+-- =====================================================================
+-- G74a 🧾 Orden rápida, presupuesto y Caja/Mostrador (FREE)
+-- =====================================================================
+-- Orden sin hora (cliente que llega al mesón): queda 🚲 Recibida, sin abono. p_presupuesto = abre como presupuesto.
+create or replace function public.taller_orden_nueva(p_nombre text, p_telefono text, p_bici text, p_nota text, p_presupuesto boolean) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); c public.talleres; ahora timestamp; nid uuid;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if trim(coalesce(p_nombre, '')) = '' then raise exception 'Escribe el nombre del cliente'; end if;
+  select * into c from public.talleres where id = tid;
+  ahora := now() at time zone c.zona;
+  insert into public.reservas (taller_id, servicio_nombre, precio, fecha, hora, hora_fin, nombre, telefono, tel_norm, bici, nota, origen, estado,
+    abono_monto, abono_estado, historial, items, total)
+  values (tid, case when coalesce(p_presupuesto, false) then 'Presupuesto' else 'Orden de trabajo' end, 0, ahora::date,
+    date_trunc('minute', ahora)::time, date_trunc('minute', ahora)::time + make_interval(mins => c.bloque_min),
+    left(trim(p_nombre), 80), left(trim(coalesce(p_telefono, '')), 30), public.tel_norm(p_telefono), left(trim(coalesce(p_bici, '')), 120),
+    left(trim(coalesce(p_nota, '')), 500), 'taller', 'recibida', 0, 'sin_abono', public.historial_mas('[]', 'recibida'), '[]'::jsonb, 0)
+  returning id into nid;
+  return nid;
+end $$;
+revoke all on function public.taller_orden_nueva(text, text, text, text, boolean) from public, anon;
+grant execute on function public.taller_orden_nueva(text, text, text, text, boolean) to authenticated;
+
+-- Caja: cada cobro (venta de mostrador o cobro de una orden) con su medio de pago.
+create table if not exists public.caja (
+  id         uuid primary key default gen_random_uuid(),
+  taller_id  uuid not null references public.talleres (id) on delete cascade,
+  fecha      date not null,
+  medio      text not null check (medio in ('efectivo', 'transferencia', 'tarjeta')),
+  total      int not null default 0 check (total >= 0),
+  items      jsonb not null default '[]',
+  nombre     text not null default '',
+  reserva_id uuid references public.reservas (id) on delete set null,
+  stock      boolean not null default false,
+  por        uuid,
+  created_at timestamptz not null default now()
+);
+create index if not exists caja_taller_fecha_idx on public.caja (taller_id, fecha);
+create unique index if not exists caja_reserva_idx on public.caja (reserva_id) where reserva_id is not null;
+alter table public.caja enable row level security;
+
+create or replace function public.caja_hoy(tid uuid) returns date
+language sql stable security definer set search_path = '' as $$ select (now() at time zone t.zona)::date from public.talleres t where t.id = tid $$;
+revoke all on function public.caja_hoy(uuid) from public, anon, authenticated;
+
+-- 🛒 Venta de mostrador (sin orden): repuestos/accesorios/servicios. Baja el stock si tiene 📦.
+create or replace function public.taller_caja_vender(p_items jsonb, p_medio text, p_nombre text) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); its jsonb; tot int; st boolean; nid uuid; bajos text;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if p_medio not in ('efectivo', 'transferencia', 'tarjeta') then raise exception 'Elige cómo pagó'; end if;
+  if jsonb_typeof(p_items) <> 'array' then raise exception 'Ítems no válidos'; end if;
+  select coalesce(jsonb_agg(jsonb_build_object('nombre', left(trim(i ->> 'nombre'), 100), 'cant', greatest(coalesce((i ->> 'cant')::int, 1), 1),
+    'precio', greatest(coalesce((i ->> 'precio')::int, 0), 0))), '[]') into its
+  from jsonb_array_elements(p_items) i where trim(coalesce(i ->> 'nombre', '')) <> '';
+  if jsonb_array_length(its) = 0 then raise exception 'Agrega lo que vendiste'; end if;
+  if jsonb_array_length(its) > 50 then raise exception 'Máximo 50 ítems por venta'; end if;
+  select coalesce(sum((i ->> 'cant')::int * (i ->> 'precio')::int), 0) into tot from jsonb_array_elements(its) i;
+  st := public.taller_tiene('stock');
+  insert into public.caja (taller_id, fecha, medio, total, items, nombre, stock, por)
+  values (tid, public.caja_hoy(tid), p_medio, tot, its, left(trim(coalesce(p_nombre, '')), 80), st, auth.uid()) returning id into nid;
+  if st then
+    with uso as (select lower(trim(i ->> 'nombre')) n, sum((i ->> 'cant')::int) c from jsonb_array_elements(its) i group by 1),
+    bajo as (
+      update public.repuestos p set stock = greatest(p.stock - u.c, 0), updated_at = now()
+      from uso u where p.taller_id = tid and lower(trim(p.nombre)) = u.n
+      returning p.nombre, p.stock, p.minimo, p.stock + u.c antes)
+    select string_agg(nombre, ', ') into bajos from bajo where minimo > 0 and stock <= minimo and antes > minimo;
+    if bajos is not null then
+      perform public.avisar_taller(tid, '📦 Se está acabando: ' || left(bajos, 80), 'Toca para armar el pedido a tu proveedor', '/taller/#mas/stock');
+    end if;
+  end if;
+  return nid;
+end $$;
+
+-- 💵 Cobrar una orden lista (o ya entregada sin cobrar): a pagar = total − abono. Si estaba lista, queda 🎉 entregada.
+create or replace function public.taller_caja_cobrar(p_reserva uuid, p_medio text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); r public.reservas; monto int;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if p_medio not in ('efectivo', 'transferencia', 'tarjeta') then raise exception 'Elige cómo pagó'; end if;
+  select * into r from public.reservas where id = p_reserva and taller_id = tid for update;
+  if r.id is null then raise exception 'Orden no encontrada'; end if;
+  if r.estado not in ('lista', 'completada') then raise exception 'Primero deja la bici ✅ Lista'; end if;
+  if exists (select 1 from public.caja where reserva_id = r.id) then raise exception 'Esta orden ya está cobrada'; end if;
+  monto := greatest(coalesce(r.total, 0) - case when r.abono_estado in ('pagado', 'aplicado') then coalesce(r.abono_monto, 0) else 0 end, 0);
+  insert into public.caja (taller_id, fecha, medio, total, items, nombre, reserva_id, por)
+  values (tid, public.caja_hoy(tid), p_medio, monto, coalesce(r.items, '[]'), left(r.nombre || coalesce(nullif(' · 🚲 ' || r.bici, ' · 🚲 '), ''), 80), r.id, auth.uid());
+  if r.estado = 'lista' then perform public.taller_estado(r.id, 'completada'); end if;
+  return jsonb_build_object('monto', monto);
+end $$;
+
+-- 🧾 Caja del día: cobros, total por medio y órdenes por cobrar.
+create or replace function public.taller_caja(p_fecha date) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); f date;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  f := coalesce(p_fecha, public.caja_hoy(tid));
+  return jsonb_build_object('fecha', f, 'hoy', public.caja_hoy(tid),
+    'cobros', (select coalesce(jsonb_agg(jsonb_build_object('id', k.id, 'medio', k.medio, 'total', k.total, 'items', k.items, 'nombre', k.nombre,
+        'reserva', k.reserva_id, 'hora', to_char(k.created_at at time zone t.zona, 'HH24:MI')) order by k.created_at desc), '[]')
+      from public.caja k join public.talleres t on t.id = k.taller_id where k.taller_id = tid and k.fecha = f),
+    'medios', (select jsonb_build_object('efectivo', coalesce(sum(total) filter (where medio = 'efectivo'), 0),
+        'transferencia', coalesce(sum(total) filter (where medio = 'transferencia'), 0), 'tarjeta', coalesce(sum(total) filter (where medio = 'tarjeta'), 0),
+        'total', coalesce(sum(total), 0), 'n', count(*))
+      from public.caja where taller_id = tid and fecha = f),
+    'por_cobrar', (select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'nombre', r.nombre, 'bici', r.bici, 'estado', r.estado,
+        'a_pagar', greatest(coalesce(r.total, 0) - case when r.abono_estado in ('pagado', 'aplicado') then coalesce(r.abono_monto, 0) else 0 end, 0)) order by r.lista_at nulls last), '[]')
+      from public.reservas r where r.taller_id = tid and (r.estado = 'lista' or (r.estado = 'completada' and r.completada_at > now() - interval '3 days'))
+        and not exists (select 1 from public.caja k where k.reserva_id = r.id)));
+end $$;
+
+-- Anular un cobro equivocado (solo el dueño): devuelve el stock si la venta lo bajó.
+create or replace function public.taller_caja_anular(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.mi_taller(); k public.caja;
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño puede anular un cobro'; end if;
+  delete from public.caja where id = p_id and taller_id = tid returning * into k;
+  if k.id is null then raise exception 'Cobro no encontrado'; end if;
+  if k.stock then
+    update public.repuestos p set stock = p.stock + u.c, updated_at = now()
+    from (select lower(trim(i ->> 'nombre')) n, sum((i ->> 'cant')::int) c from jsonb_array_elements(k.items) i group by 1) u
+    where p.taller_id = tid and lower(trim(p.nombre)) = u.n;
+  end if;
+end $$;
+revoke all on function public.taller_caja_vender(jsonb, text, text), public.taller_caja_cobrar(uuid, text), public.taller_caja(date), public.taller_caja_anular(uuid) from public, anon;
+grant execute on function public.taller_caja_vender(jsonb, text, text), public.taller_caja_cobrar(uuid, text), public.taller_caja(date), public.taller_caja_anular(uuid) to authenticated;
 -- =====================================================================
 --  BiciTaller · Tareas automáticas (pégalo en Supabase → SQL Editor → Run,
 --  DESPUÉS de schema.sql y de crear la función "servidor").
