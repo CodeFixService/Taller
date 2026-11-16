@@ -41,7 +41,7 @@
     document.querySelectorAll('#mSeg .dueno').forEach((b) => b.classList.toggle('hidden', !P.dueno));
     $('mSeg').querySelector('[data-m=modulos]').classList.toggle('hidden', !P.dueno || !P.venta);  // 🧩 solo con la venta prendida (CM → Apps → 🚲 → 🧩)
     $('mSeg').querySelector('[data-m=stock]').classList.toggle('hidden', !P.dueno && !tiene('stock'));  // G59d 📦: el equipo solo si el taller lo tiene
-    ['usadas', 'tradein', 'pasaporte', 'domicilio', 'garantias'].forEach((m) => $('mSeg').querySelector('[data-m=' + m + ']').classList.toggle('hidden', !P.dueno && !tiene(m === 'usadas' ? 'certificadas' : m)));  // G59e · G59f
+    ['usadas', 'tradein', 'pasaporte', 'domicilio', 'garantias', 'planes'].forEach((m) => $('mSeg').querySelector('[data-m=' + m + ']').classList.toggle('hidden', !P.dueno && !tiene(m === 'usadas' ? 'certificadas' : m === 'planes' ? 'plan_mant' : m)));  // G59e · G59f · G59i
   }
   // G59 🧩 ¿El taller puede usar este módulo? (venta apagada = todos lo tienen)
   const tiene = (k) => !!(P && P.modulos && P.modulos[k]);
@@ -70,7 +70,7 @@
 
   /* ---------- Navegación ---------- */
   // #plan y #mas/<sección> (perfil, horario, servicios, abono…): abren esa parte de Más (la guía para partir los usa).
-  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock|usadas|tradein|pasaporte|domicilio|garantias)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
+  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock|usadas|tradein|pasaporte|domicilio|garantias|planes)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
   const show = App.pestanas((v) => {
     vista = v;
     if (v === 'hoy') pintarHoy();
@@ -123,6 +123,7 @@
     $('hStock').innerHTML = tiene('stock') && P.stock_bajo ? '<div class="aviso warn"><div class="grow">📦 ' + P.stock_bajo + ' repuesto' + (P.stock_bajo === 1 ? '' : 's') + ' por pedir a tu proveedor.</div><button class="small" type="button" data-m="stock">🛒 Ver</button></div>' : '';
     $('hDom').innerHTML = tiene('domicilio') && P.domicilio_hoy ? '<div class="aviso"><div class="grow">🚐 ' + P.domicilio_hoy + ' visita' + (P.domicilio_hoy === 1 ? '' : 's') + ' a domicilio hoy.</div><button class="small" type="button" data-m="domicilio">🗺️ Ruta</button></div>' : '';  // G59g
     $('hGar').innerHTML = tiene('garantias') && P.garantia_reclamos ? '<div class="aviso bad"><div class="grow">🛡️ ' + P.garantia_reclamos + ' cliente' + (P.garantia_reclamos === 1 ? ' usó su' : 's usaron su') + ' garantía.</div><button class="small" type="button" data-m="garantias">👀 Ver</button></div>' : '';  // G59h
+    $('hPlanes').innerHTML = tiene('plan_mant') && P.planes_vencen ? '<div class="aviso warn"><div class="grow">🔁 ' + P.planes_vencen + ' plan' + (P.planes_vencen === 1 ? '' : 'es') + ' de mantención por vencer: avísales para renovar.</div><button class="small" type="button" data-m="planes">👀 Ver</button></div>' : '';  // G59i
     $('hLink').textContent = linkReservas(); $('hAbrir').href = linkReservas();
     $('kRev').textContent = P.por_revisar; $('kDev').textContent = P.por_devolver;
     // Plan
@@ -440,7 +441,7 @@
           servicios.map((s) => '<option value="' + s.id + '">' + esc(s.nombre) + ' · ' + plata(s.precio) + '</option>').join('') + '</select>' +
           '<button class="alt" id="dAddR" type="button" style="flex:0 0 auto">＋ Repuesto</button></div>' +
         '<p style="margin:12px 0 0">Total: <b class="precio" id="dTotal"></b><span class="sub" id="dSaldo"></span></p>' +
-        '<div id="dPres"></div>' +
+        '<div id="dPres"></div><div id="dPlan"></div>' +
         '<label for="dDiag">Diagnóstico (lo ve el cliente)</label><textarea id="dDiag" maxlength="1000">' + esc(r.diagnostico) + '</textarea>' +
         '<label for="dNotas">Notas internas (solo el taller)</label><textarea id="dNotas" maxlength="1000">' + esc(r.notas_internas) + '</textarea>' +
         '<div class="row"><div><label for="dMec">Mecánico</label><select id="dMec"><option value="">Sin asignar</option>' + equipo.map((p) => '<option value="' + p.id + '"' + (p.id === r.mecanico_id ? ' selected' : '') + '>' + esc(p.nombre) + '</option>').join('') + '</select></div>' +
@@ -490,6 +491,7 @@
       $('dAddR').onclick = () => { items.push({ nombre: '', cant: 1, precio: 0 }); pintarItems(); const ins = $('dItems').querySelectorAll('[data-k=nombre]'); ins[ins.length - 1].focus(); };
       $('dGuardar').onclick = () => guardarTrabajo(false);
       pintarPres();
+      pintarPlan(r);  // G59i 🔁
       $('dPres').onclick = async (ev) => {
         if (!ev.target.closest('#dPedir')) return;
         if (!tiene('presupuesto')) { ofrecer('presupuesto'); return; }
@@ -569,10 +571,11 @@
         ': revisamos tu bici. Aprueba o rechaza cada arreglo aquí 👉 ' + link) + '">📲 Enviar por WhatsApp</a>' : '') + '</div></div>';
   }
   function totalItems() {
-    const tot = items.filter((it) => it.aprob !== 'no').reduce((s, it) => s + Math.max(+it.cant || 0, 0) * Math.max(+it.precio || 0, 0), 0);
+    const sub = items.filter((it) => it.aprob !== 'no').reduce((s, it) => s + Math.max(+it.cant || 0, 0) * Math.max(+it.precio || 0, 0), 0);
+    const pd = detalle.plan_desc || 0, tot = sub - Math.floor(sub * pd / 100);  // G59i 🔁 igual que orden_total en la base
     const ab = ['pagado', 'aplicado'].includes(detalle.abono_estado) ? detalle.abono_monto : 0;
     $('dTotal').textContent = plata(tot);
-    $('dSaldo').textContent = ab ? ' · menos abono ' + plata(ab) + ' = a pagar ' + plata(Math.max(tot - ab, 0)) : '';
+    $('dSaldo').textContent = (pd ? ' (🔁 plan −' + pd + '%)' : '') + (ab ? ' · menos abono ' + plata(ab) + ' = a pagar ' + plata(Math.max(tot - ab, 0)) : '');
   }
   async function guardarTrabajo(callado) {
     const limpios = items.filter((it) => String(it.nombre || '').trim()).map((it) => Object.assign({ nombre: String(it.nombre).trim().slice(0, 100), cant: Math.max(+it.cant || 1, 0), precio: Math.max(Math.round(+it.precio || 0), 0) },
@@ -612,15 +615,15 @@
   let subMas = null;
   $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); } };
   // Más = menú común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (body() dibuja dentro de ella).
-  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes', pasaporte: 'Ventas y clientes', domicilio: 'Tu taller', garantias: 'Ventas y clientes',
+  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes', pasaporte: 'Ventas y clientes', domicilio: 'Tu taller', garantias: 'Ventas y clientes', planes: 'Ventas y clientes',
     stats: 'Ventas y clientes', recordar: 'Ventas y clientes', plan: 'Tu plan', modulos: 'Tu plan', cuenta: 'Configuración' };
   const K2 = { plan: 'premium', cuenta: 'micuenta', chat: 'mensajes' };
-  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', usadas: '🏷️', tradein: '🔄', pasaporte: '🪪', domicilio: '🚐', garantias: '🛡️', cuenta: '👤' };
+  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', usadas: '🏷️', tradein: '🔄', pasaporte: '🪪', domicilio: '🚐', garantias: '🛡️', planes: '🔁', cuenta: '👤' };
   let hojaMas = null;
   function abrirSec(m) {
     if (m === 'chat') { $('chatBtn').click(); return; }
     const b = $('mSeg').querySelector('[data-m="' + m + '"]'); if (!b || b.classList.contains('hidden')) return;
-    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, usadas: verUsadas, tradein: verTradein, pasaporte: verPasaportes, domicilio: verDomicilio, garantias: verGarantias };
+    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, usadas: verUsadas, tradein: verTradein, pasaporte: verPasaportes, domicilio: verDomicilio, garantias: verGarantias, planes: verPlanes };
     if (!hojaMas || hojaMas.m !== m || !hojaMas.h.d.isConnected) {
       const h = window.CFX_MENU.hoja((ICO[m] || '') + ' ' + esc(b.textContent.replace(/\d+$/, '').replace(/^[^\p{L}]+/u, '').trim()), () => { if (hojaMas && hojaMas.h === h) { hojaMas = null; subMas = null; } });
       hojaMas = { m, h };
@@ -1201,6 +1204,124 @@
     };
     const qb = q1('#paQ'); if (qb) qb.onclick = () => stickerPas(x);
     const xb = q1('#paX'); if (xb) xb.onclick = async () => { if (!await confirmar('¿Borrar el pasaporte de "' + x.bici + '"? El sticker QR deja de funcionar.')) return; try { await rpc('taller_pasaporte_borrar', { p_id: id }); d.close(); verPasaportes(); } catch (e) { toast(e.message); } };
+  }
+
+  // ---- G59i 🧩 🔁 Plan de mantención: el cliente paga al mes → N visitas incluidas + % de descuento al usarlo en la orden
+  const MEDIOS = { efectivo: '💵 Efectivo', transferencia: '🏦 Transferencia', tarjeta: '💳 Tarjeta' };
+  const planTxt = (p) => p.visitas + (p.visitas === 1 ? ' visita' : ' visitas') + ' al mes' + (p.descuento ? ' · ' + p.descuento + '% de descuento' : '');
+  const venceSocio = (s) => !s.activa ? 'Pausado' : s.dias < 0 ? 'Venció el ' + App.fCorta(s.hasta) : s.dias === 0 ? 'Vence hoy' : 'Pagado hasta el ' + App.fCorta(s.hasta) + (s.dias <= 5 ? ' (' + s.dias + ' día' + (s.dias === 1 ? '' : 's') + ')' : '');
+  const waSocio = (s, txt) => App.wa(s.telefono, 'Hola ' + (s.nombre || '').split(' ')[0] + ' 👋 Te escribimos de ' + P.taller.nombre + ': ' + txt);
+  let PL = null;
+  async function verPlanes() {
+    body().innerHTML = '<p class="empty">Cargando…</p>';
+    try { PL = await rpc('taller_planes'); } catch (e) { body().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    if (PL.bloqueado) { body().innerHTML = modOfrecer('plan_mant', '🔁 Plan de mantención', 'Tus clientes pagan al mes y tienen visitas incluidas y descuento. Tú tienes plata segura cada mes y ellos vuelven siempre.'); return; }
+    const S = PL.socios, pv = S.filter((s) => s.activa && s.dias <= 5 && s.dias >= -7), al = S.filter((s) => s.activa && s.dias > 5), ven = S.filter((s) => !s.activa || s.dias < -7);
+    const fila = (s) => '<li class="clic" data-so="' + s.id + '"><span style="font-size:24px;flex:none">' + (!s.vigente ? '⌛' : '🔁') + '</span>' +
+      '<div class="grow"><b>' + esc(s.nombre) + '</b><div class="sub">' + esc([s.plan_nombre, s.bici].filter(Boolean).join(' · ')) + '</div><div class="sub">' +
+      esc(venceSocio(s)) + (s.vigente ? ' · quedan ' + s.quedan + ' de ' + s.visitas : '') + '</div></div>' +
+      (s.activa && s.dias <= 5 && s.dias >= -7 && s.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" data-sin-atras href="' + waSocio(s, s.dias < 0 ? 'tu plan ' + s.plan_nombre + ' venció el ' + App.fCorta(s.hasta) + '. ¿Lo renovamos? 🔁' : 'tu plan ' + s.plan_nombre + ' vence el ' + App.fCorta(s.hasta) + '. ¿Lo renovamos? 🔁') + '">📲 Avisar</a>' : '') + '</li>';
+    const sec = (tit, l) => l.length ? '<h3>' + tit + ' <span class="pill">' + l.length + '</span></h3><ul class="list">' + l.map(fila).join('') + '</ul>' : '';
+    body().innerHTML = '<div class="card"><h2>🔁 Tus planes</h2><p class="sub" style="margin-top:0">El cliente paga al mes. Cuando trae la bici, en la orden tocas ✅ Usar el plan: gasta 1 visita y baja el total.</p>' +
+      (PL.planes.length ? '<ul class="list">' + PL.planes.map((p) => '<li' + (P.dueno ? ' class="clic" data-pl="' + p.id + '"' : '') + '><span style="font-size:24px;flex:none">' + (p.activo ? '🔁' : '⏸️') + '</span><div class="grow"><b>' + esc(p.nombre) + '</b>' +
+        (p.precio != null ? '<div><b style="white-space:nowrap">' + plata(p.precio) + '</b> al mes</div>' : '') + '<div class="sub">' + esc(planTxt(p)) + (p.activo ? '' : ' · ya no se vende') + '</div>' + (p.incluye ? '<div class="sub">' + esc(p.incluye) + '</div>' : '') +
+        '</div><span class="pill">' + p.socios + ' 👤</span></li>').join('') + '</ul>' : '<p class="sub">' + (P.dueno ? 'Crea tu primer plan: ej. "Rodador" $15.000 al mes · 1 mantención + 10% de descuento.' : 'El dueño todavía no crea planes.') + '</p>') +
+      (P.dueno ? '<div class="btns"><button id="plNuevo" type="button" class="' + (PL.planes.length ? 'alt' : '') + '">＋ Nuevo plan</button></div>' : '') + '</div>' +
+      '<div class="card"><h2>👤 Clientes con plan <span class="pill">' + S.filter((s) => s.vigente).length + ' al día</span></h2>' +
+      (PL.cobrado_mes != null ? '<p class="sub" style="margin-top:0">💰 Cobrado este mes: <b>' + plata(PL.cobrado_mes) + '</b></p>' : '') +
+      (S.length ? sec('⏳ Por vencer', pv) + sec('✅ Al día', al) + (ven.length ? '<details><summary class="sub">⌛ Vencidos o pausados (' + ven.length + ')</summary><ul class="list">' + ven.map(fila).join('') + '</ul></details>' : '')
+        : '<p class="sub">' + (PL.planes.length ? 'Suma al primer cliente y cóbrale el mes.' : 'Primero crea un plan.') + '</p>') +
+      (P.dueno && PL.planes.some((p) => p.activo) ? '<div class="btns"><button id="soNuevo" type="button">＋ Sumar cliente</button></div>' : '') + '</div>';
+    body().onclick = (e) => {
+      if (e.target.closest('a')) return;
+      const pl = e.target.closest('[data-pl]'); if (pl) { editarPlanMant(PL.planes.find((p) => p.id === pl.dataset.pl)); return; }
+      const so = e.target.closest('[data-so]'); if (so) { editarSocio(S.find((s) => s.id === so.dataset.so)); return; }
+      if (e.target.closest('#plNuevo')) editarPlanMant(null);
+      if (e.target.closest('#soNuevo')) editarSocio(null);
+    };
+  }
+  function editarPlanMant(p) {
+    const nuevo = !p; p = p || { nombre: '', precio: '', visitas: 1, descuento: 10, incluye: '', activo: true };
+    const d = modal('<h2>🔁 ' + (nuevo ? 'Nuevo plan' : esc(p.nombre)) + '</h2>' +
+      '<label for="plN">Nombre</label><input id="plN" maxlength="60" value="' + esc(p.nombre) + '" placeholder="Ej: Rodador">' +
+      '<div class="row"><div><label for="plP">Precio al mes</label><input id="plP" inputmode="numeric" value="' + esc(p.precio) + '" placeholder="15000"></div>' +
+      '<div><label for="plV">Visitas al mes</label><select id="plV">' + [1, 2, 3, 4, 5, 6, 8, 10].map((v) => '<option' + (v === +p.visitas ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></div></div>' +
+      '<label for="plD">Descuento al usarlo (en el total de la orden)</label><select id="plD">' + [0, 5, 10, 15, 20, 25, 30, 40, 50].map((v) => '<option value="' + v + '"' + (v === +p.descuento ? ' selected' : '') + '>' + (v ? v + '%' : 'Sin descuento') + '</option>').join('') + '</select>' +
+      '<label for="plI">Qué incluye (lo ve el cliente)</label><input id="plI" maxlength="300" value="' + esc(p.incluye) + '" placeholder="Ej: Ajuste de cambios y frenos, lubricación">' +
+      (!nuevo ? '<label class="check"><input type="checkbox" id="plA"' + (p.activo ? ' checked' : '') + '> Se vende (sale en tu página)</label>' : '') +
+      '<div class="btns">' + (!nuevo ? '<button class="danger" id="plX" type="button">🗑️ Borrar</button>' : '') + '<button id="plG" type="button">💾 Guardar</button></div>');
+    const q1 = (s) => d.querySelector(s);
+    q1('#plG').onclick = async () => {
+      try {
+        await rpc('taller_plan_guardar', { p: { id: nuevo ? null : p.id, nombre: q1('#plN').value, precio: App.numero(q1('#plP').value), visitas: +q1('#plV').value, descuento: +q1('#plD').value,
+          incluye: q1('#plI').value, activo: q1('#plA') ? q1('#plA').checked : true } });
+        d.close(); toast(nuevo ? '🔁 Plan creado: ahora suma clientes' : '💾 Guardado'); verPlanes();
+      } catch (e) { toast(e.message); }
+    };
+    const xb = q1('#plX'); if (xb) xb.onclick = async () => { if (!await confirmar('¿Borrar el plan "' + p.nombre + '"?')) return; try { await rpc('taller_plan_borrar', { p_id: p.id }); d.close(); verPlanes(); } catch (e) { toast(e.message); } };
+  }
+  async function editarSocio(s, base, alGuardar) {
+    if (!PL || !PL.planes) { try { PL = await rpc('taller_planes'); } catch (e) { toast(e.message); return; } }
+    if (!P.dueno) { if (s) toast(s.nombre + ': ' + venceSocio(s) + (s.vigente ? ' · quedan ' + s.quedan + ' de ' + s.visitas + ' visitas este mes' : '') + '. Para cobrar, pídele al dueño.'); return; }
+    const nuevo = !s; s = s || Object.assign({ nombre: '', telefono: '', bici: '', plan: (PL.planes.find((p) => p.activo) || {}).id, activa: true }, base || {});
+    const planes = PL.planes.filter((p) => p.activo || p.id === s.plan);
+    const d = modal('<h2>🔁 ' + (nuevo ? 'Sumar cliente al plan' : esc(s.nombre)) + '</h2>' +
+      (!nuevo ? '<div class="aviso' + (s.vigente ? '' : ' warn') + '" style="display:block">' + esc(venceSocio(s)) + (s.vigente ? ' · quedan ' + s.quedan + ' de ' + s.visitas + ' visitas este mes' : '') + '</div>' : '') +
+      '<label for="soP">Plan</label><select id="soP">' + planes.map((p) => '<option value="' + p.id + '"' + (p.id === s.plan ? ' selected' : '') + '>' + esc(p.nombre) + ' · ' + plata(p.precio) + '/mes</option>').join('') + '</select>' +
+      '<div class="row"><div><label for="soN">Cliente</label><input id="soN" maxlength="80" value="' + esc(s.nombre) + '"></div><div><label for="soT">Teléfono</label><input id="soT" maxlength="30" inputmode="tel" value="' + esc(s.telefono) + '"></div></div>' +
+      '<label for="soB">Bici</label><input id="soB" maxlength="120" value="' + esc(s.bici) + '">' +
+      '<h3>💰 Cobrar</h3><div class="row"><div><select id="soM" aria-label="Meses"><option value="1">1 mes</option><option value="3">3 meses</option><option value="6">6 meses</option><option value="12">12 meses</option></select></div>' +
+      '<div><select id="soMe" aria-label="Medio de pago">' + Object.keys(MEDIOS).map((k) => '<option value="' + k + '">' + MEDIOS[k] + '</option>').join('') + '</select></div></div>' +
+      '<div class="btns"><button id="soC" type="button">💰 Cobrar y ' + (nuevo ? 'sumar' : 'renovar') + '</button>' + (!nuevo ? '<button class="alt" id="soG" type="button">💾 Solo guardar</button>' : '') + '</div>' +
+      (!nuevo ? '<div class="btns">' + (s.telefono ? '<a class="btn alt" target="_blank" rel="noopener" href="' + waSocio(s, 'tu plan ' + s.plan_nombre + ' está ' + (s.vigente ? 'al día hasta el ' + App.fCorta(s.hasta) + '. Te quedan ' + s.quedan + ' visitas este mes 🔁' : 'vencido. ¿Lo renovamos? 🔁')) + '">📲 WhatsApp</a>' : '') +
+        '<button class="ghost" id="soPa" type="button">' + (s.activa ? '⏸️ Pausar' : '▶️ Reactivar') + '</button><button class="danger" id="soX" type="button">🗑️ Borrar</button></div>' : ''));
+    const q1 = (x) => d.querySelector(x);
+    if (window.CFX_FABRICA) CFX_FABRICA.bici(q1('#soB'));
+    const fin = () => { if (alGuardar) alGuardar(); else if (subMas === 'planes') verPlanes(); };
+    const guardar = async (meses, activa) => {
+      try {
+        const x = await rpc('taller_socio_guardar', { p: { id: nuevo ? null : s.id, plan: q1('#soP').value, nombre: q1('#soN').value, telefono: q1('#soT').value, bici: q1('#soB').value,
+          meses, medio: q1('#soMe').value, activa: activa === undefined ? null : activa } });
+        d.close(); toast(meses ? '💰 Cobrado: pagado hasta el ' + App.fCorta(x.hasta) : '💾 Guardado'); fin();
+      } catch (e) { toast(e.message); }
+    };
+    q1('#soC').onclick = () => guardar(+q1('#soM').value);
+    const gb = q1('#soG'); if (gb) gb.onclick = () => guardar(0);
+    const pa = q1('#soPa'); if (pa) pa.onclick = () => guardar(0, !s.activa);
+    const xb = q1('#soX'); if (xb) xb.onclick = async () => { if (!await confirmar('¿Borrar el plan de ' + s.nombre + '? Se pierde su historial de cobros.')) return; try { await rpc('taller_socio_borrar', { p_id: s.id }); d.close(); fin(); } catch (e) { toast(e.message); } };
+  }
+  // En la orden: ¿el cliente tiene plan? → ✅ Usar el plan (1 visita + descuento) / ↩️ Quitar.
+  async function pintarPlan(r) {
+    const el = $('dPlan'); if (!el) return;
+    if (!tiene('plan_mant') || !r.telefono) { el.innerHTML = ''; return; }
+    let s = null; try { s = await rpc('taller_plan_orden', { p_reserva: r.id }); } catch (e) { el.innerHTML = ''; return; }
+    if (!detalle || detalle.id !== r.id) return;
+    const abierta = r.estado !== 'completada';
+    el.innerHTML = !s ? (P.dueno && abierta ? '<p class="sub" style="margin:8px 0 0"><button class="small ghost" type="button" id="dPlanSumar" data-sin-atras>🔁 Ofrecerle un plan</button></p>' : '') :
+      '<div class="aviso' + (s.usado ? '' : !s.vigente || !s.quedan ? ' warn' : '') + '" style="margin-top:10px;display:block"><div>🔁 ' +
+      (s.usado ? 'Plan <b>' + esc(s.plan_nombre) + '</b> usado en esta orden' + (s.descuento ? ': −' + s.descuento + '% en el total' : '') + '.'
+        : !s.vigente ? 'El plan <b>' + esc(s.plan_nombre) + '</b> de ' + esc(s.nombre.split(' ')[0]) + ' ' + (s.activa ? 'venció el ' + App.fCorta(s.hasta) : 'está pausado') + '.'
+        : !s.quedan ? esc(s.nombre.split(' ')[0]) + ' ya usó sus ' + s.visitas + ' visitas del plan este mes.'
+        : esc(s.nombre.split(' ')[0]) + ' tiene el plan <b>' + esc(s.plan_nombre) + '</b>: quedan ' + s.quedan + ' de ' + s.visitas + ' visitas este mes' + (s.descuento ? ' · −' + s.descuento + '%' : '') + '.') +
+      '</div><div class="btns">' + (abierta && !s.usado && s.vigente && s.quedan ? '<button class="small okb" type="button" id="dPlanUsar" data-sin-atras>✅ Usar el plan</button>' : '') +
+      (abierta && s.usado ? '<button class="small ghost" type="button" id="dPlanQuitar" data-sin-atras>↩️ Quitar el plan</button>' : '') +
+      (!s.vigente && P.dueno ? '<button class="small" type="button" id="dPlanCobrar" data-sin-atras>💰 Cobrar el mes</button>' : '') + '</div></div>';
+    const usar = async (si) => {
+      try {
+        if (si) await guardarTrabajo(true);
+        await rpc('taller_plan_usar', { p_reserva: r.id, p_usar: si });
+        detalle.plan_desc = si ? s.descuento : 0; totalItems(); pintarPlan(r);
+        toast(si ? '🔁 Plan usado' + (s.descuento ? ': −' + s.descuento + '%' : '') : '↩️ Plan quitado');
+      } catch (e) { toast(e.message); }
+    };
+    const u = $('dPlanUsar'); if (u) u.onclick = () => usar(true);
+    const qb = $('dPlanQuitar'); if (qb) qb.onclick = () => usar(false);
+    const cb = $('dPlanCobrar'); if (cb) cb.onclick = () => editarSocio(s, null, () => pintarPlan(r));
+    const sb2 = $('dPlanSumar'); if (sb2) sb2.onclick = async () => {
+      try { PL = await rpc('taller_planes'); } catch (e) { toast(e.message); return; }
+      if (!PL.planes.some((p) => p.activo)) { toast('Primero crea un plan en Más → 🔁 Planes'); return; }
+      editarSocio(null, { nombre: r.nombre, telefono: r.telefono, bici: r.bici }, () => pintarPlan(r));
+    };
   }
 
   // ---- G59h 🧩 🛡️ Garantías: del trabajo, repuestos o bici usada, con vencimiento → link del cliente /g/ (la "usa" en 1 toque)

@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.36'::text $$;
+language sql immutable as $$ select '2.37'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -621,6 +621,10 @@ alter table public.reservas add column if not exists lista_recordada boolean not
 alter table public.reservas add column if not exists pasaporte_id uuid;
 -- G59g 🧩 🚐 Mecánico a domicilio: { direccion, comuna, ref, orden (ruta del día), camino_at }. El taller: { activo, recargo, zona }.
 alter table public.reservas add column if not exists domicilio jsonb;
+-- G59i 🔁 % de descuento del plan de mantención usado en esta orden (lo aplica orden_total).
+alter table public.reservas add column if not exists plan_desc int not null default 0;
+alter table public.reservas drop constraint if exists reservas_plan_desc_chk;
+alter table public.reservas add constraint reservas_plan_desc_chk check (plan_desc between 0 and 50);
 alter table public.talleres add column if not exists domicilio jsonb not null default '{}'::jsonb;
 
 -- Fotos antes/después del trabajo (v1.6, taller Premium). Livianas y se borran solas después de N días.
@@ -1143,7 +1147,12 @@ begin
       'ref', r.domicilio ->> 'ref', 'camino_at', r.domicilio ->> 'camino_at') end,
     -- G59h 🛡️ garantía de esta orden (link /g/), si el taller tiene el módulo.
     'garantia', (select jsonb_build_object('token', g.token, 'hasta', g.hasta, 'cubre', g.cubre, 'reclamo', g.reclamo) from public.garantias g
-      where g.reserva_id = r.id and public.cfx_modulo_de('garantias', c.owner_id)));
+      where g.reserva_id = r.id and public.cfx_modulo_de('garantias', c.owner_id)),
+    -- G59i 🔁 descuento del plan en esta orden y el plan del cliente (por teléfono), si el taller tiene el módulo.
+    'plan_desc', r.plan_desc,
+    'plan', (select jsonb_build_object('nombre', j ->> 'plan_nombre', 'hasta', j -> 'hasta', 'vigente', j -> 'vigente', 'quedan', j -> 'quedan', 'visitas', j -> 'visitas', 'descuento', j -> 'descuento')
+      from public.plan_socios s, lateral (select public.plan_socio_json(s, false) j) x
+      where s.taller_id = c.id and s.tel_norm = r.tel_norm and length(r.tel_norm) >= 8 and s.activa and public.cfx_modulo_de('plan_mant', c.owner_id) order by s.hasta desc limit 1));
 end $$;
 
 -- El cliente sube la foto del comprobante del abono.
@@ -1315,6 +1324,7 @@ begin
     'domicilio_hoy', (select count(*) from public.reservas where taller_id = tid and fecha = hoy and domicilio is not null
       and estado not in ('rechazada', 'expirada', 'cancelada', 'no_asistio', 'completada')),  -- G59g 🚐
     'garantia_reclamos', (select count(*) from public.garantias where taller_id = tid and reclamo = 'abierto'),  -- G59h 🛡️
+    'planes_vencen', (select count(*) from public.plan_socios where taller_id = tid and activa and hasta between hoy - 7 and hoy + 5),  -- G59i 🔁
     'por_devolver', (select count(*) from public.reservas where taller_id = tid and abono_estado = 'devolver'));
 end $$;
 
@@ -1406,7 +1416,7 @@ language sql stable security definer set search_path = '' as $$
     select r.id, r.fecha, to_char(r.hora, 'HH24:MI') as hora, to_char(r.hora_fin, 'HH24:MI') as hora_fin, r.nombre, r.telefono,
       r.email, r.bici, r.nota, r.servicio_id, r.servicio_nombre, r.precio, r.estado, r.abono_monto, r.abono_estado, r.expira_at,
       r.origen, r.cliente_id, r.mecanico_id, r.items, r.total, r.diagnostico, r.notas_internas, r.proxima_mantencion,
-      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta, r.entrega_estimada, r.checklist, r.presupuesto, r.lista_at, r.pasaporte_id, r.domicilio,
+      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta, r.entrega_estimada, r.checklist, r.presupuesto, r.lista_at, r.pasaporte_id, r.domicilio, r.plan_desc,
       (select p.nombre from public.perfiles p where p.id = r.mecanico_id) as mecanico,
       exists (select 1 from public.comprobantes k where k.reserva_id = r.id) as tiene_comprobante,
       public.nota_cliente(r.telefono) as nota_cliente,
@@ -1486,16 +1496,15 @@ end $$;
 create or replace function public.taller_trabajo(p_id uuid, p_items jsonb, p_diagnostico text, p_notas text,
   p_mecanico uuid, p_proxima date) returns void
 language plpgsql security definer set search_path = '' as $$
-declare tid uuid := public.taller_de(auth.uid()); tot int; antes uuid; r public.reservas;
+declare tid uuid := public.taller_de(auth.uid()); tot int; antes uuid; r public.reservas; pd int;
 begin
   if tid is null then raise exception 'Sin acceso'; end if;
   if jsonb_typeof(p_items) <> 'array' then raise exception 'Ítems no válidos'; end if;
-  select mecanico_id into antes from public.reservas where id = p_id and taller_id = tid;
+  select mecanico_id, plan_desc into antes, pd from public.reservas where id = p_id and taller_id = tid;
   if p_mecanico is not null and not exists (select 1 from public.perfiles where id = p_mecanico and taller_id = tid and rol in ('taller', 'equipo')) then
     raise exception 'Mecánico no válido';
   end if;
-  select coalesce(sum(greatest(coalesce((i ->> 'cant')::numeric, 1), 0) * greatest(coalesce((i ->> 'precio')::numeric, 0), 0)), 0)::int
-    into tot from jsonb_array_elements(p_items) i where coalesce(i ->> 'aprob', '') <> 'no';  -- G59: lo que el cliente rechazó no se cobra
+  tot := public.orden_total(p_items, pd);  -- G59: lo que el cliente rechazó no se cobra · G59i 🔁 menos el % del plan
   update public.reservas set items = p_items, total = tot, diagnostico = left(coalesce(p_diagnostico, ''), 1000),
     notas_internas = left(coalesce(p_notas, ''), 1000), mecanico_id = p_mecanico, proxima_mantencion = p_proxima, updated_at = now()
   where id = p_id and taller_id = tid
@@ -2869,7 +2878,7 @@ language sql stable security definer set search_path = '' as $$
   select coalesce((select public.taller_es_premium(t.id) from public.talleres t where t.owner_id = n), false)
 $$;
 create or replace function public.cfx_modulos_app() returns text[]
-language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock', 'certificadas', 'tradein', 'pasaporte', 'domicilio', 'garantias'] $$;
+language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock', 'certificadas', 'tradein', 'pasaporte', 'domicilio', 'garantias', 'plan_mant'] $$;
 revoke all on function public.cfx_negocio_de_cuenta(uuid), public.cfx_es_premium(uuid), public.cfx_modulos_app() from public, anon, authenticated;
 create or replace function public.taller_tiene(p_modulo text) returns boolean
 language plpgsql stable security definer set search_path = '' as $$ begin return public.cfx_modulo_de(p_modulo, public.cfx_negocio_de_cuenta(auth.uid())); end $$;
@@ -2917,6 +2926,7 @@ begin
            filter (where coalesce(i ->> 'aprob', '') <> 'no'), 0)::int,
          count(*) filter (where i ->> 'aprob' = 'si'), count(*) filter (where i ->> 'aprob' = 'no')
     into tot, nsi, nno from jsonb_array_elements(nuevos) i;
+  tot := public.orden_total(nuevos, r.plan_desc);  -- G59i 🔁
   update public.reservas set items = nuevos, total = tot, updated_at = now(),
     presupuesto = r.presupuesto || jsonb_build_object('estado', 'respondido', 'respondido_at', now())
   where id = r.id;
@@ -3384,7 +3394,7 @@ begin
   select coalesce(jsonb_agg(i), '[]') into nuevos from jsonb_array_elements(r.items) i where i ->> 'nombre' is distinct from nom;
   if d is not null and p_recargo > 0 then nuevos := nuevos || jsonb_build_array(jsonb_build_object('nombre', nom, 'cant', 1, 'precio', p_recargo)); end if;
   update public.reservas set domicilio = d, items = nuevos,
-    total = greatest(0, total - viejo + case when d is not null then p_recargo else 0 end),
+    total = public.orden_total(nuevos, r.plan_desc),  -- G59i 🔁
     precio = greatest(0, precio - viejo + case when d is not null then p_recargo else 0 end), updated_at = now()
   where id = r.id;
 end $$;
@@ -3675,6 +3685,243 @@ grant execute on function public.taller_garantias(), public.taller_garantia(uuid
   public.taller_garantia_resolver(uuid, text, text) to authenticated;
 grant execute on function public.garantia_ver(text), public.garantia_reclamar(text, text) to anon, authenticated;
 grant execute on function public.domicilio_info(uuid), public.reserva_domicilio(text, jsonb) to anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- G59i 🔁 Plan de mantención (módulo 'plan_mant'): el cliente paga al mes y tiene N visitas incluidas + % de descuento en la orden.
+--   planes_mant (los planes del taller) · plan_socios (quién tiene plan y hasta cuándo) · plan_cobros (lo cobrado) · plan_usos (visitas usadas).
+--   Usar el plan en una orden = 1 visita del mes + reservas.plan_desc (el total baja ese %: orden_total).
+-- ---------------------------------------------------------------------
+create table if not exists public.planes_mant (
+  id         uuid primary key default gen_random_uuid(),
+  taller_id  uuid not null references public.talleres (id) on delete cascade,
+  nombre     text not null check (length(nombre) between 2 and 60),
+  precio     int  not null default 0 check (precio between 0 and 1000000),
+  visitas    int  not null default 1 check (visitas between 1 and 10),
+  descuento  int  not null default 0 check (descuento between 0 and 50),
+  incluye    text not null default '' check (length(incluye) <= 300),
+  activo     boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists planes_mant_t_idx on public.planes_mant (taller_id);
+alter table public.planes_mant enable row level security;
+create table if not exists public.plan_socios (
+  id         uuid primary key default gen_random_uuid(),
+  taller_id  uuid not null references public.talleres (id) on delete cascade,
+  plan_id    uuid not null references public.planes_mant (id) on delete cascade,
+  cliente_id uuid,
+  nombre     text not null check (length(nombre) between 2 and 80),
+  telefono   text not null default '' check (length(telefono) <= 30),
+  tel_norm   text not null default '',
+  bici       text not null default '' check (length(bici) <= 120),
+  hasta      date not null,
+  activa     boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists plan_socios_t_idx on public.plan_socios (taller_id, tel_norm);
+alter table public.plan_socios enable row level security;
+create table if not exists public.plan_cobros (
+  id         uuid primary key default gen_random_uuid(),
+  taller_id  uuid not null references public.talleres (id) on delete cascade,
+  socio_id   uuid not null references public.plan_socios (id) on delete cascade,
+  meses      int  not null check (meses between 1 and 12),
+  monto      int  not null default 0,
+  medio      text not null default 'efectivo' check (medio in ('efectivo', 'transferencia', 'tarjeta')),
+  por        uuid,
+  created_at timestamptz not null default now()
+);
+create index if not exists plan_cobros_t_idx on public.plan_cobros (taller_id, created_at);
+alter table public.plan_cobros enable row level security;
+create table if not exists public.plan_usos (
+  id         uuid primary key default gen_random_uuid(),
+  socio_id   uuid not null references public.plan_socios (id) on delete cascade,
+  reserva_id uuid unique,
+  por        uuid,
+  created_at timestamptz not null default now()
+);
+create index if not exists plan_usos_s_idx on public.plan_usos (socio_id, created_at);
+alter table public.plan_usos enable row level security;
+
+-- Total de una orden: suma de ítems (sin los rechazados) menos el % del plan.
+create or replace function public.orden_total(p_items jsonb, p_desc int) returns int
+language sql immutable set search_path = '' as $$
+  select (s - s * greatest(0, least(50, coalesce(p_desc, 0))) / 100)::int
+  from (select coalesce(sum(greatest(coalesce((i ->> 'cant')::numeric, 1), 0) * greatest(coalesce((i ->> 'precio')::numeric, 0), 0)), 0)::bigint s
+        from jsonb_array_elements(coalesce(p_items, '[]')) i where coalesce(i ->> 'aprob', '') <> 'no') x
+$$;
+
+create or replace function public.plan_socio_json(s public.plan_socios, plata boolean) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('id', s.id, 'plan', s.plan_id, 'plan_nombre', p.nombre, 'visitas', p.visitas, 'descuento', p.descuento, 'incluye', p.incluye,
+    'precio', case when plata then p.precio end, 'nombre', s.nombre, 'telefono', s.telefono, 'bici', s.bici, 'hasta', s.hasta, 'activa', s.activa,
+    'dias', s.hasta - h.hoy, 'vigente', s.activa and s.hasta >= h.hoy, 'usados', u.n, 'quedan', greatest(0, p.visitas - u.n))
+  from public.planes_mant p, public.talleres t,
+    lateral (select (now() at time zone t.zona)::date hoy) h,
+    lateral (select count(*)::int n from public.plan_usos x where x.socio_id = s.id and x.created_at >= (date_trunc('month', h.hoy::timestamp) at time zone t.zona)) u
+  where p.id = s.plan_id and t.id = s.taller_id
+$$;
+
+-- Planes + socios del taller ({bloqueado} sin módulo). El equipo no ve precios ni lo cobrado.
+create or replace function public.taller_planes() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); d boolean; t public.talleres;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('plan_mant') then return jsonb_build_object('bloqueado', true); end if;
+  d := public.es_dueno(tid);
+  select * into t from public.talleres where id = tid;
+  return jsonb_build_object(
+    'planes', (select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'nombre', p.nombre, 'precio', case when d then p.precio end, 'visitas', p.visitas,
+        'descuento', p.descuento, 'incluye', p.incluye, 'activo', p.activo,
+        'socios', (select count(*) from public.plan_socios s where s.plan_id = p.id and s.activa)) order by p.activo desc, p.precio), '[]')
+      from public.planes_mant p where p.taller_id = tid),
+    'socios', (select coalesce(jsonb_agg(public.plan_socio_json(s, d) order by s.hasta), '[]') from public.plan_socios s where s.taller_id = tid and (d or s.activa)),
+    'cobrado_mes', case when d then (select coalesce(sum(monto), 0) from public.plan_cobros
+      where taller_id = tid and created_at >= (date_trunc('month', now() at time zone t.zona) at time zone t.zona)) end);
+end $$;
+
+-- Crear/editar un plan (solo dueño). p: { id?, nombre, precio, visitas, descuento, incluye, activo }
+create or replace function public.taller_plan_guardar(p jsonb) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); pid uuid := nullif(p ->> 'id', '')::uuid;
+  v int := coalesce(nullif(p ->> 'visitas', '')::int, 1); ds int := coalesce(nullif(p ->> 'descuento', '')::int, 0); pr int := coalesce(nullif(p ->> 'precio', '')::int, 0);
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller'; end if;
+  if not public.taller_tiene('plan_mant') then raise exception 'Necesitas el módulo 🔁 Plan de mantención'; end if;
+  if length(trim(coalesce(p ->> 'nombre', ''))) < 2 then raise exception 'Ponle nombre al plan'; end if;
+  if v < 1 or v > 10 then raise exception 'Las visitas van de 1 a 10 al mes'; end if;
+  if ds < 0 or ds > 50 then raise exception 'El descuento va de 0 a 50%%'; end if;
+  if pr < 0 or pr > 1000000 then raise exception 'Precio no válido'; end if;
+  if pid is null then
+    if (select count(*) from public.planes_mant where taller_id = tid) >= 10 then raise exception 'Máximo 10 planes'; end if;
+    insert into public.planes_mant (taller_id, nombre, precio, visitas, descuento, incluye)
+    values (tid, left(trim(p ->> 'nombre'), 60), pr, v, ds, left(trim(coalesce(p ->> 'incluye', '')), 300)) returning id into pid;
+  else
+    update public.planes_mant set nombre = left(trim(p ->> 'nombre'), 60), precio = pr, visitas = v, descuento = ds,
+      incluye = left(trim(coalesce(p ->> 'incluye', '')), 300), activo = coalesce((p ->> 'activo')::boolean, activo)
+    where id = pid and taller_id = tid;
+    if not found then raise exception 'Plan no encontrado'; end if;
+  end if;
+  return pid;
+end $$;
+
+create or replace function public.taller_plan_borrar(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller'; end if;
+  if exists (select 1 from public.plan_socios where plan_id = p_id and activa) then raise exception 'Este plan tiene clientes: mejor apágalo (Ya no se vende)'; end if;
+  delete from public.planes_mant where id = p_id and taller_id = tid;
+end $$;
+
+-- Sumar/editar un cliente con plan y cobrar meses (solo dueño). p: { id?, plan, nombre, telefono, bici, activa?, meses (0 = solo editar), medio }
+create or replace function public.taller_socio_guardar(p jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); sid uuid := nullif(p ->> 'id', '')::uuid; s public.plan_socios; pl public.planes_mant; t public.talleres;
+  meses int := coalesce(nullif(p ->> 'meses', '')::int, 0); hoy date; tel text := left(trim(coalesce(p ->> 'telefono', '')), 30); cli uuid;
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller'; end if;
+  if not public.taller_tiene('plan_mant') then raise exception 'Necesitas el módulo 🔁 Plan de mantención'; end if;
+  if meses < 0 or meses > 12 then raise exception 'Cobra de 1 a 12 meses'; end if;
+  select * into t from public.talleres where id = tid;
+  hoy := (now() at time zone t.zona)::date;
+  select * into pl from public.planes_mant where id = nullif(p ->> 'plan', '')::uuid and taller_id = tid;
+  if pl.id is null then raise exception 'Elige el plan'; end if;
+  if length(trim(coalesce(p ->> 'nombre', ''))) < 2 then raise exception 'Escribe el nombre del cliente'; end if;
+  if length(public.tel_norm(tel)) < 8 then raise exception 'Escribe el teléfono del cliente (así lo reconoce en sus órdenes)'; end if;
+  -- Si el cliente tiene cuenta y ya vino con ese teléfono, queda enlazado (le llegan los avisos).
+  select r.cliente_id into cli from public.reservas r where r.taller_id = tid and r.tel_norm = public.tel_norm(tel) and r.cliente_id is not null order by r.created_at desc limit 1;
+  if sid is null then
+    if not pl.activo then raise exception 'Ese plan ya no se vende'; end if;
+    if exists (select 1 from public.plan_socios where taller_id = tid and tel_norm = public.tel_norm(tel) and activa) then raise exception 'Ese teléfono ya tiene un plan: ábrelo y cóbrale el mes'; end if;
+    if (select count(*) from public.plan_socios where taller_id = tid and activa) >= 2000 then raise exception 'Máximo 2.000 clientes con plan'; end if;
+    insert into public.plan_socios (taller_id, plan_id, cliente_id, nombre, telefono, tel_norm, bici, hasta)
+    values (tid, pl.id, cli, left(trim(p ->> 'nombre'), 80), tel, public.tel_norm(tel), left(trim(coalesce(p ->> 'bici', '')), 120), hoy - 1) returning * into s;
+  else
+    update public.plan_socios x set plan_id = pl.id, cliente_id = coalesce(cli, x.cliente_id), nombre = left(trim(p ->> 'nombre'), 80), telefono = tel, tel_norm = public.tel_norm(tel),
+      bici = left(trim(coalesce(p ->> 'bici', x.bici)), 120), activa = coalesce((p ->> 'activa')::boolean, x.activa), updated_at = now()
+    where x.id = sid and x.taller_id = tid returning * into s;
+    if s.id is null then raise exception 'Cliente con plan no encontrado'; end if;
+  end if;
+  if meses > 0 then
+    update public.plan_socios set activa = true, hasta = (greatest(hasta, hoy - 1) + make_interval(months => meses))::date, updated_at = now()
+    where id = s.id returning * into s;
+    insert into public.plan_cobros (taller_id, socio_id, meses, monto, medio, por)
+    values (tid, s.id, meses, pl.precio * meses, case when p ->> 'medio' in ('transferencia', 'tarjeta') then p ->> 'medio' else 'efectivo' end, auth.uid());
+  end if;
+  return public.plan_socio_json(s, true);
+end $$;
+
+create or replace function public.taller_socio_borrar(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller'; end if;
+  update public.reservas r set plan_desc = 0, total = public.orden_total(r.items, 0), updated_at = now()
+  where r.id in (select reserva_id from public.plan_usos where socio_id = p_id) and r.taller_id = tid and r.estado <> 'completada';
+  delete from public.plan_socios where id = p_id and taller_id = tid;
+end $$;
+
+-- ¿El cliente de esta orden tiene plan? (por teléfono). Trae si ya se usó en esta orden.
+create or replace function public.taller_plan_orden(p_reserva uuid) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); r public.reservas; s public.plan_socios; u uuid;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('plan_mant') then return null; end if;
+  select * into r from public.reservas where id = p_reserva and taller_id = tid;
+  if r.id is null then return null; end if;
+  select x.socio_id into u from public.plan_usos x where x.reserva_id = r.id;
+  if u is not null then select * into s from public.plan_socios where id = u;
+  elsif length(r.tel_norm) >= 8 then select * into s from public.plan_socios where taller_id = tid and tel_norm = r.tel_norm and activa order by hasta desc limit 1;
+  end if;
+  if s.id is null then return null; end if;
+  return public.plan_socio_json(s, public.es_dueno(tid)) || jsonb_build_object('usado', u is not null);
+end $$;
+
+-- Usar (o quitar) el plan en una orden (todo el equipo): 1 visita del mes + descuento en el total.
+create or replace function public.taller_plan_usar(p_reserva uuid, p_usar boolean) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); r public.reservas; s public.plan_socios; j jsonb; pl public.planes_mant;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('plan_mant') then raise exception 'Necesitas el módulo 🔁 Plan de mantención'; end if;
+  select * into r from public.reservas where id = p_reserva and taller_id = tid for update;
+  if r.id is null then raise exception 'Orden no encontrada'; end if;
+  if r.estado in ('completada', 'rechazada', 'expirada', 'cancelada', 'no_asistio') then raise exception 'Esta orden ya está cerrada'; end if;
+  if not coalesce(p_usar, false) then
+    delete from public.plan_usos where reserva_id = r.id;
+    update public.reservas set plan_desc = 0, total = public.orden_total(items, 0), updated_at = now() where id = r.id;
+    return jsonb_build_object('ok', true, 'total', public.orden_total(r.items, 0));
+  end if;
+  if exists (select 1 from public.plan_usos where reserva_id = r.id) then raise exception 'El plan ya se usó en esta orden'; end if;
+  select * into s from public.plan_socios where taller_id = tid and tel_norm = r.tel_norm and length(r.tel_norm) >= 8 and activa order by hasta desc limit 1 for update;
+  if s.id is null then raise exception 'Este cliente no tiene plan'; end if;
+  j := public.plan_socio_json(s, false);
+  if not (j ->> 'vigente')::boolean then raise exception 'El plan de % venció: cóbrale el mes en Más → 🔁 Planes', s.nombre; end if;
+  if (j ->> 'quedan')::int <= 0 then raise exception '% ya usó sus % visitas de este mes', s.nombre, j ->> 'visitas'; end if;
+  select * into pl from public.planes_mant where id = s.plan_id;
+  insert into public.plan_usos (socio_id, reserva_id, por) values (s.id, r.id, auth.uid());
+  update public.reservas set plan_desc = pl.descuento, total = public.orden_total(items, pl.descuento), updated_at = now() where id = r.id;
+  return jsonb_build_object('ok', true, 'total', public.orden_total(r.items, pl.descuento));
+end $$;
+
+-- Pública: planes que vende el taller (para /t/). [] si no tiene el módulo.
+create or replace function public.planes_publicos(p_taller uuid) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare t public.talleres;
+begin
+  select * into t from public.talleres where id = p_taller and activo and not suspendido;
+  if t.id is null or not public.cfx_modulo_de('plan_mant', t.owner_id) then return '[]'; end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('nombre', p.nombre, 'precio', p.precio, 'visitas', p.visitas, 'descuento', p.descuento, 'incluye', p.incluye)
+    order by p.precio), '[]') from public.planes_mant p where p.taller_id = t.id and p.activo);
+end $$;
+revoke all on function public.orden_total(jsonb, int), public.plan_socio_json(public.plan_socios, boolean), public.taller_planes(), public.taller_plan_guardar(jsonb),
+  public.taller_plan_borrar(uuid), public.taller_socio_guardar(jsonb), public.taller_socio_borrar(uuid), public.taller_plan_orden(uuid), public.taller_plan_usar(uuid, boolean),
+  public.planes_publicos(uuid) from public, anon, authenticated;
+grant execute on function public.taller_planes(), public.taller_plan_guardar(jsonb), public.taller_plan_borrar(uuid), public.taller_socio_guardar(jsonb),
+  public.taller_socio_borrar(uuid), public.taller_plan_orden(uuid), public.taller_plan_usar(uuid, boolean) to authenticated;
+grant execute on function public.planes_publicos(uuid) to anon, authenticated;
 
 -- >>> CFX núcleo (no editar aquí: se copia de saas/nucleo/sql con sincronizar.py)
 -- ---------------------------------------------------------------------
@@ -5112,7 +5359,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bicis_usadas', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.garantias', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.pasaportes', 'public.perfiles', 'public.planes', 'public.promos', 'public.proveedores', 'public.push_subs', 'public.repuestos', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bicis_usadas', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.garantias', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.pasaportes', 'public.perfiles', 'public.plan_cobros', 'public.plan_socios', 'public.plan_usos', 'public.planes', 'public.planes_mant', 'public.promos', 'public.proveedores', 'public.push_subs', 'public.repuestos', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
@@ -5386,7 +5633,8 @@ language sql immutable as $$
          ('tradein', '🔄 Parte de pago', 'Calculadora: cuánto ofrecer por la bici usada del cliente para que se lleve una nueva o un arreglo.'),
          ('pasaporte', '🪪 Pasaporte de la bici', 'Sticker QR para el cuadro: historial de mantenciones, dueño y aviso de robo. Quien la escanea sabe si es robada.'),
          ('domicilio', '🚐 Mecánico a domicilio', 'El cliente reserva con su dirección (+ recargo de visita); armas la ruta del día y le avisas “Voy en camino”.'),
-         ('garantias', '🛡️ Garantías', 'Garantía del trabajo, repuestos o bici usada, con vencimiento: el cliente la ve en su link y la usa en 1 toque.')
+         ('garantias', '🛡️ Garantías', 'Garantía del trabajo, repuestos o bici usada, con vencimiento: el cliente la ve en su link y la usa en 1 toque.'),
+         ('plan_mant', '🔁 Plan de mantención', 'Tus clientes pagan al mes y tienen visitas incluidas y descuento: plata segura cada mes y vuelven siempre.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb

@@ -59,6 +59,7 @@
 
     <div id="promos"></div>
     <div id="usadas"></div>
+    <div id="planes"></div>
 
     <div class="card hidden" id="cerrado"><p style="margin:0" id="cerradoTxt"></p></div>
 
@@ -143,6 +144,14 @@
   $('nomCuenta').textContent = t.nombre;
   $('terminos').textContent = App.txt('terminos') || 'Acepto los términos de uso';
   $('cargando').classList.add('hidden'); $('todo').classList.remove('hidden');
+  // G59i 🔁 Planes de mantención (solo si tiene el módulo y planes a la venta): "Lo quiero" por WhatsApp.
+  App.rpc('planes_publicos', { p_taller: t.id }).then((l) => {
+    if (!l || !l.length) return;
+    $('planes').innerHTML = '<div class="card"><h2>🔁 Planes de mantención</h2><p class="sub" style="margin-top:0">Pagas al mes y tu bici siempre a punto.</p><ul class="list">' +
+      l.map((p) => '<li style="display:flex;align-items:center;gap:12px"><span style="font-size:28px;flex:none">🔁</span><div class="grow" style="min-width:0"><b>' + esc(p.nombre) + '</b><div><b style="white-space:nowrap">' + plata(p.precio) + '</b> al mes</div>' +
+        '<div class="sub">' + p.visitas + (p.visitas === 1 ? ' visita' : ' visitas') + ' al mes' + (p.descuento ? ' · ' + p.descuento + '% de descuento' : '') + '</div>' + (p.incluye ? '<div class="sub">' + esc(p.incluye) + '</div>' : '') + '</div>' +
+        (t.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" style="flex:none" href="' + App.wa(t.telefono, 'Hola ' + t.nombre + ' 👋 Quiero el plan de mantención ' + p.nombre + ' (' + plata(p.precio) + '/mes) 🔁') + '">📲 Lo quiero</a>' : '') + '</li>').join('') + '</ul></div>';
+  }).catch(() => {});
   // G59e 🏷️ Bicis usadas certificadas del taller (solo si tiene el módulo y hay publicadas).
   App.rpc('usadas_publicas', { p_slug: slug }).then((l) => {
     if (!l || !l.length) return;

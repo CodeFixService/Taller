@@ -51,6 +51,7 @@
       <div id="bloque" style="margin-top:12px"></div>
     </div>
     <div class="card hidden" id="cPas"><h2>🪪 Pasaporte de tu bici</h2><p class="sub" style="margin-top:0">Su historial de mantenciones y, si te la roban, la reportas en 1 toque.</p><div class="btns"><a class="btn" id="pasLink" href="#">🪪 Ver mi pasaporte</a></div></div>
+    <div class="card hidden" id="cPlan"><h2>🔁 Tu plan de mantención</h2><p class="sub" style="margin-top:0" id="planTxt"></p></div>
     <div class="card hidden" id="cGar"><h2>🛡️ Tu garantía</h2><p class="sub" style="margin-top:0" id="garTxt"></p><div class="btns"><a class="btn" id="garLink" href="#">🛡️ Ver mi garantía</a></div></div>
     <div class="card hidden" id="cDom"><h2>🏠 Visita a domicilio</h2><p style="margin:0" id="domDir"></p><p class="sub" id="domRef"></p><div class="aviso hidden" id="domCamino" style="margin-top:8px"><div class="grow">🚐 <b>¡Vamos en camino!</b></div></div></div>
     <div class="card hidden pres" id="cPres"><h2>🧾 Aprueba tu presupuesto</h2><p class="sub" style="margin-top:0">Elige Sí o No en cada arreglo. Solo se cobra lo que apruebes.</p>
@@ -175,6 +176,7 @@
       const abonoAplica = ['pagado', 'aplicado'].includes(r.abono_estado) ? r.abono_monto : 0;
       $('detalle').innerHTML = (r.diagnostico ? '<p style="margin:6px 0">🔍 ' + esc(r.diagnostico) + '</p>' : '') + (items.length ? '<table>' +
         items.map((it) => '<tr' + (it.aprob === 'no' ? ' class="no"' : '') + '><td>' + (it.aprob === 'pend' ? '⏳ ' : it.aprob === 'si' ? '✅ ' : it.aprob === 'no' ? '❌ ' : '') + esc(it.nombre) + (Number(it.cant) !== 1 ? ' × ' + it.cant : '') + '</td><td class="r">' + plata(it.cant * it.precio) + '</td></tr>').join('') +
+        (r.plan_desc ? '<tr class="sub2"><td>🔁 Descuento de tu plan</td><td class="r">−' + r.plan_desc + '%</td></tr>' : '') +
         '<tr class="tot"><td>Total</td><td class="r">' + plata(r.total) + '</td></tr>' +
         (abonoAplica ? '<tr class="sub2"><td>Abono pagado</td><td class="r">−' + plata(abonoAplica) + '</td></tr><tr class="sub2"><td><b>Saldo a pagar</b></td><td class="r"><b>' +
           plata(Math.max(r.total - abonoAplica, 0)) + '</b></td></tr>' : '') + '</table>' : '') +
@@ -184,6 +186,10 @@
     // G59f 🪪 Pasaporte de la bici (con la clave del dueño para reportar robo).
     $('cPas').classList.toggle('hidden', !r.pasaporte);
     if (r.pasaporte) $('pasLink').href = '../p/?t=' + encodeURIComponent(r.pasaporte.token) + '&c=' + encodeURIComponent(r.pasaporte.clave);
+    // G59i 🔁 Plan de mantención del cliente (visitas que le quedan y hasta cuándo está pagado).
+    $('cPlan').classList.toggle('hidden', !r.plan);
+    if (r.plan) $('planTxt').textContent = r.plan.vigente ? 'Plan ' + r.plan.nombre + ': te quedan ' + r.plan.quedan + ' de ' + r.plan.visitas + ' visitas este mes' + (r.plan.descuento ? ' (−' + r.plan.descuento + '% al usarlo)' : '') + '. Pagado hasta el ' + App.fLarga(r.plan.hasta) + '.'
+      : 'Tu plan ' + r.plan.nombre + ' venció el ' + App.fLarga(r.plan.hasta) + '. Pídele al taller renovarlo.';
     // G59h 🛡️ Garantía de esta orden (hasta cuándo vale y "Usar mi garantía" en /g/).
     $('cGar').classList.toggle('hidden', !r.garantia);
     if (r.garantia) {
@@ -202,7 +208,7 @@
     const verPres = !!(r.presupuesto && r.presupuesto.estado === 'enviado' && pend.length);
     $('cPres').classList.toggle('hidden', !verPres);
     if (verPres) {
-      const totPres = () => { $('presTot').textContent = plata((r.items || []).reduce((s, it, i) => s + ((it.aprob === 'si' || (it.aprob === 'pend' && resp[i] === 'si')) ? it.cant * it.precio : 0), 0)); };
+      const totPres = () => { const x = (r.items || []).reduce((s, it, i) => s + ((it.aprob === 'si' || (it.aprob === 'pend' && resp[i] === 'si')) ? it.cant * it.precio : 0), 0); $('presTot').textContent = plata(x - Math.floor(x * (r.plan_desc || 0) / 100)); };  // G59i 🔁 menos el plan
       const pintarPres = () => {
         $('presItems').innerHTML = pend.map(([it, i]) => '<div class="pi"><div class="fila"><b>' + esc(it.nombre) + (Number(it.cant) !== 1 ? ' × ' + esc(it.cant) : '') + '</b><b>' + plata(it.cant * it.precio) + '</b></div>' +
           '<div class="sn"><button type="button" class="' + (resp[i] === 'si' ? 'on' : 'alt') + '" data-r="si" data-i="' + i + '">✅ Sí</button>' +
