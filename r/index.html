@@ -51,6 +51,7 @@
       <div id="bloque" style="margin-top:12px"></div>
     </div>
     <div class="card hidden" id="cPas"><h2>🪪 Pasaporte de tu bici</h2><p class="sub" style="margin-top:0">Su historial de mantenciones y, si te la roban, la reportas en 1 toque.</p><div class="btns"><a class="btn" id="pasLink" href="#">🪪 Ver mi pasaporte</a></div></div>
+    <div class="card hidden" id="cGar"><h2>🛡️ Tu garantía</h2><p class="sub" style="margin-top:0" id="garTxt"></p><div class="btns"><a class="btn" id="garLink" href="#">🛡️ Ver mi garantía</a></div></div>
     <div class="card hidden" id="cDom"><h2>🏠 Visita a domicilio</h2><p style="margin:0" id="domDir"></p><p class="sub" id="domRef"></p><div class="aviso hidden" id="domCamino" style="margin-top:8px"><div class="grow">🚐 <b>¡Vamos en camino!</b></div></div></div>
     <div class="card hidden pres" id="cPres"><h2>🧾 Aprueba tu presupuesto</h2><p class="sub" style="margin-top:0">Elige Sí o No en cada arreglo. Solo se cobra lo que apruebes.</p>
       <div id="presItems"></div><p style="margin:10px 0">Total aprobado: <b id="presTot"></b></p><button type="button" id="presEnviar" style="width:100%">Enviar respuesta</button></div>
@@ -183,6 +184,12 @@
     // G59f 🪪 Pasaporte de la bici (con la clave del dueño para reportar robo).
     $('cPas').classList.toggle('hidden', !r.pasaporte);
     if (r.pasaporte) $('pasLink').href = '../p/?t=' + encodeURIComponent(r.pasaporte.token) + '&c=' + encodeURIComponent(r.pasaporte.clave);
+    // G59h 🛡️ Garantía de esta orden (hasta cuándo vale y "Usar mi garantía" en /g/).
+    $('cGar').classList.toggle('hidden', !r.garantia);
+    if (r.garantia) {
+      $('garTxt').textContent = (r.garantia.reclamo === 'abierto' ? '🔔 Ya avisaste al taller. ' : '') + 'Vale hasta el ' + App.fLarga(r.garantia.hasta) + '. Si algo falla, úsala en 1 toque.';
+      $('garLink').href = '../g/?t=' + encodeURIComponent(r.garantia.token);
+    }
     // G59g 🚐 Visita a domicilio: dirección y aviso "vamos en camino".
     $('cDom').classList.toggle('hidden', !r.domicilio);
     if (r.domicilio) {

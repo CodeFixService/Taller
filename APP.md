@@ -18,7 +18,7 @@
 - Ganchos del núcleo (schema.sql, después de taller_checklist): cfx_negocio_de_cuenta(u) = owner_id del taller · cfx_es_premium(n) = taller_es_premium · cfx_modulos_app() = ['presupuesto'] (sumar aquí los próximos; catálogo + demo en SaaS/nucleo: sql/modulos_venta.sql y modulos.js). NO vienen en Premium (G39). Packs del núcleo se vacían (al final de schema.sql, solo si siguen los de fábrica).
 - taller_tiene(clave) en la base · taller_panel trae modulos (cfx_modulos()) y venta → JS tiene(k) / ofrecer(k) (demo ▶️ + Comprar; equipo: "pídele al dueño"). Más → 🧩 Módulos (data-m=modulos, solo dueño y con la venta prendida) = CFX_MODULOS_TIENDA.montar.
 - ✅ Presupuesto por link: reservas.presupuesto {estado enviado|respondido, enviado_at, respondido_at} + items[i].aprob pend|si|no. taller_presupuesto(id) (marca ⏳ lo no respondido, avisa al cliente) · reserva_presupuesto(token, {"0":"si","1":"no"}) (anon, responde todos, avisa al taller). Total sin lo rechazado (taller_trabajo y JS). Editar un ítem le borra aprob. Taller: #dPres en la orden (✅ Pedir aprobación + 📲 WhatsApp); cliente: #cPres en /r/.
-- Siguiente: 🛠️ garantías → 🔁 plan mensual (✅ aviso lista, recordatorio, stock, certificadas+trade-in, pasaporte, domicilio). (Fotos del daño por ítem: pendiente, hoy usa 📸 Llegada.)
+- Siguiente: 🔁 plan mensual → ⭐ reseñas Google (✅ aviso lista, recordatorio, stock, certificadas+trade-in, pasaporte, domicilio, garantías). (Fotos del daño por ítem: pendiente, hoy usa 📸 Llegada.)
 
 ## 🏭 G65 · De fábrica (2.87, bd 2.30) — prueba SaaS/pruebas/g65_fabrica.js
 - SQL (final de schema.sql): taller_fabrica_agregar(tid) (lista de 23; agrega lo que falta por nombre hasta el límite) · trigger talleres_fabrica (taller nuevo) · RPC taller_servicios_fabrica() (solo dueño; botón ✨ en Más → Servicios) · FREE servicios 40.
@@ -60,3 +60,9 @@
 - Taller: Más → 🚐 A domicilio (verDomicilio): Ruta del día Hoy/Mañana (taller_ruta), ▲▼ (taller_ruta_orden), 🗺️ Cómo llegar / Abrir la ruta en Google Maps (origen = dirección del taller, waypoints), 🚐 Voy en camino (WhatsApp + taller_en_camino → push al cliente con cuenta), ⚙️ configuración. Orden: #dDom (editarDomicilio) + #dDomTxt. Hoy: #hDom "N visitas a domicilio hoy".
 - Error visto: al volver a guardar la dirección se borraba el recargo (el JS mandaba recargo:false) → sin "recargo" queda el que tenía (categoría DATOS).
 
+## 🛡️ G59h · Módulo Garantías (2.93, bd 2.36 · núcleo 2.89) — prueba SaaS/pruebas/g59h_garantias.js
+- cfx_modulos_app() suma 'garantias'. Catálogo + demo en el núcleo. Ícono 🛡️ (🛠️ = Servicios).
+- Tabla garantias (reserva_id única o usada_id, cliente_id, nombre, telefono, bici, cubre trabajo|repuestos|todo|bici, detalle, meses 1-36, desde, hasta, token, reclamo ''|abierto|resuelto|rechazado, reclamo_nota/at, respuesta, resuelto_at).
+- RPC: taller_garantias() ({bloqueado} sin módulo; reclamos abiertos primero, luego por vencimiento) · taller_garantia(id, reserva) · taller_garantia_guardar(p) = todo el equipo (con reserva: solo lista/completada; si ya tiene, la edita) · taller_garantia_resolver(id, resuelto|rechazado, texto) → push al cliente con cuenta · taller_garantia_borrar = solo dueño · públicas: garantia_ver(token) y garantia_reclamar(token, nota) (vigente y sin otro abierto → avisar_taller). reserva_ver.garantia · taller_panel.garantia_reclamos.
+- Pantalla: orden lista/entregada → 🛡️ Garantía (editarGarantia) · Más → 🛡️ Garantías (verGarantias: 🔔 La usaron · ⏳ Por vencer ≤15 días + 📲 Avisar · ✅ Vigentes · ⌛ Vencidas) · Hoy #hGar · 🏷️ usada ✅ Se vendió → ofrece la garantía al comprador (cubre bici, meses de la usada).
+- Público: g/?t=token (VIGENTE/VENCIÓ, 🛡️ Usar mi garantía con CFX_DIALOGO.pedir, respuesta del taller). r/ #cGar enlaza. g/ en FILES de sw.js.

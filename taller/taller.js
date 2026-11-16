@@ -41,7 +41,7 @@
     document.querySelectorAll('#mSeg .dueno').forEach((b) => b.classList.toggle('hidden', !P.dueno));
     $('mSeg').querySelector('[data-m=modulos]').classList.toggle('hidden', !P.dueno || !P.venta);  // 🧩 solo con la venta prendida (CM → Apps → 🚲 → 🧩)
     $('mSeg').querySelector('[data-m=stock]').classList.toggle('hidden', !P.dueno && !tiene('stock'));  // G59d 📦: el equipo solo si el taller lo tiene
-    ['usadas', 'tradein', 'pasaporte', 'domicilio'].forEach((m) => $('mSeg').querySelector('[data-m=' + m + ']').classList.toggle('hidden', !P.dueno && !tiene(m === 'usadas' ? 'certificadas' : m)));  // G59e · G59f
+    ['usadas', 'tradein', 'pasaporte', 'domicilio', 'garantias'].forEach((m) => $('mSeg').querySelector('[data-m=' + m + ']').classList.toggle('hidden', !P.dueno && !tiene(m === 'usadas' ? 'certificadas' : m)));  // G59e · G59f
   }
   // G59 🧩 ¿El taller puede usar este módulo? (venta apagada = todos lo tienen)
   const tiene = (k) => !!(P && P.modulos && P.modulos[k]);
@@ -70,7 +70,7 @@
 
   /* ---------- Navegación ---------- */
   // #plan y #mas/<sección> (perfil, horario, servicios, abono…): abren esa parte de Más (la guía para partir los usa).
-  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock|usadas|tradein|pasaporte|domicilio)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
+  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock|usadas|tradein|pasaporte|domicilio|garantias)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
   const show = App.pestanas((v) => {
     vista = v;
     if (v === 'hoy') pintarHoy();
@@ -122,6 +122,7 @@
       esc(App.txt('bienvenida_taller')) + '</p><ul class="list">' + falta.map((f) => '<li class="clic" data-m="' + f[0] + '" style="display:flex;align-items:center;gap:12px"><span aria-hidden="true" style="flex:none;width:22px;height:22px;border-radius:50%;border:2px solid color-mix(in srgb,var(--brand,#0ea5e9) 55%,transparent)"></span><span class="grow">' + esc(f[1]) + '</span><span>›</span></li>').join('') + '</ul></div>' : '';
     $('hStock').innerHTML = tiene('stock') && P.stock_bajo ? '<div class="aviso warn"><div class="grow">📦 ' + P.stock_bajo + ' repuesto' + (P.stock_bajo === 1 ? '' : 's') + ' por pedir a tu proveedor.</div><button class="small" type="button" data-m="stock">🛒 Ver</button></div>' : '';
     $('hDom').innerHTML = tiene('domicilio') && P.domicilio_hoy ? '<div class="aviso"><div class="grow">🚐 ' + P.domicilio_hoy + ' visita' + (P.domicilio_hoy === 1 ? '' : 's') + ' a domicilio hoy.</div><button class="small" type="button" data-m="domicilio">🗺️ Ruta</button></div>' : '';  // G59g
+    $('hGar').innerHTML = tiene('garantias') && P.garantia_reclamos ? '<div class="aviso bad"><div class="grow">🛡️ ' + P.garantia_reclamos + ' cliente' + (P.garantia_reclamos === 1 ? ' usó su' : 's usaron su') + ' garantía.</div><button class="small" type="button" data-m="garantias">👀 Ver</button></div>' : '';  // G59h
     $('hLink').textContent = linkReservas(); $('hAbrir').href = linkReservas();
     $('kRev').textContent = P.por_revisar; $('kDev').textContent = P.por_devolver;
     // Plan
@@ -426,7 +427,7 @@
       (r.motivo ? '<div class="sub">Motivo: ' + esc(r.motivo) + '</div>' : '') +
       '<div class="btns">' + (r.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(r.telefono, 'Hola ' + r.nombre.split(' ')[0] + ' 👋 Te escribimos de ' + P.taller.nombre + ': ' +
         (msgCliente || '') + '\nTu reserva: ' + link) + '">📲 WhatsApp</a>' : '') +
-      '<button class="small ghost" id="dLink">🔗 Enlace del cliente</button>' + (tiene('domicilio') && !['completada', 'rechazada', 'expirada', 'cancelada', 'no_asistio'].includes(r.estado) ? '<button class="small ghost" id="dDom" type="button">🚐 ' + (r.domicilio ? 'Domicilio' : 'A domicilio') + '</button>' : '') + (tiene('pasaporte') ? '<button class="small ghost" id="dPas">🪪 Pasaporte</button>' : P.venta && r.bici ? '<button class="small ghost" type="button" data-sin-atras data-ofrecer="pasaporte">🪪 Pasaporte</button>' : '') + (r.tiene_comprobante ? '<button class="small ghost" data-comp="' + r.id + '">👁️ Comprobante</button>' : '') + '</div>' +
+      '<button class="small ghost" id="dLink">🔗 Enlace del cliente</button>' + (tiene('domicilio') && !['completada', 'rechazada', 'expirada', 'cancelada', 'no_asistio'].includes(r.estado) ? '<button class="small ghost" id="dDom" type="button">🚐 ' + (r.domicilio ? 'Domicilio' : 'A domicilio') + '</button>' : '') + (tiene('pasaporte') ? '<button class="small ghost" id="dPas">🪪 Pasaporte</button>' : P.venta && r.bici ? '<button class="small ghost" type="button" data-sin-atras data-ofrecer="pasaporte">🪪 Pasaporte</button>' : '') + (['lista', 'completada'].includes(r.estado) ? (tiene('garantias') ? '<button class="small ghost" id="dGar" type="button">🛡️ Garantía</button>' : P.venta ? '<button class="small ghost" type="button" data-sin-atras data-ofrecer="garantias">🛡️ Garantía</button>' : '') : '') + (r.tiene_comprobante ? '<button class="small ghost" data-comp="' + r.id + '">👁️ Comprobante</button>' : '') + '</div>' +
       (r.estado === 'en_revision' ? botonesRevisar(r) : '') +
       (r.estado === 'lista' && !tiene('aviso_lista') && P.venta ? '<div class="aviso" style="margin-top:12px"><div class="grow">🔔 Avísale solo con el total y el link, y recuérdale si no la retira.</div><button class="small" type="button" data-sin-atras data-ofrecer="aviso_lista">🧩 Ver</button></div>' : '') +
       (r.abono_estado === 'devolver' ? '<div class="aviso warn" style="margin-top:12px"><div class="grow">Devuelve el abono de ' + plata(r.abono_monto) + ' al cliente.</div><button class="small okb" data-devuelto="' + r.id + '">✓ Ya lo devolví</button></div>' : '') +
@@ -455,6 +456,7 @@
     $('dVolver').onclick = () => history.length > 1 ? show(volverA) : show('reservas');
     $('dLink').onclick = () => { navigator.clipboard.writeText(link).then(() => toast('🔗 Enlace copiado')); };
     const dom = $('dDom'); if (dom) dom.onclick = () => editarDomicilio(r, () => abrirDetalle(r.id));  // G59g
+    const gar = $('dGar'); if (gar) gar.onclick = () => editarGarantia(null, { reserva: r.id, nombre: r.nombre, telefono: r.telefono, bici: r.bici || r.servicio_nombre, detalle: r.servicio_nombre }, () => abrirDetalle(r.id));  // G59h
     const pas = $('dPas'); if (pas) pas.onclick = () => editarPasaporte(r.pasaporte_id || null, { bici: r.bici, dueno: r.nombre, telefono: r.telefono, reserva: r.id }, () => abrirDetalle(r.id));  // G59f
     $('v-detalle').onclick = async (ev) => {
       if (await accionesComunes(ev)) return;
@@ -610,15 +612,15 @@
   let subMas = null;
   $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); } };
   // Más = menú común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (body() dibuja dentro de ella).
-  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes', pasaporte: 'Ventas y clientes', domicilio: 'Tu taller',
+  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes', pasaporte: 'Ventas y clientes', domicilio: 'Tu taller', garantias: 'Ventas y clientes',
     stats: 'Ventas y clientes', recordar: 'Ventas y clientes', plan: 'Tu plan', modulos: 'Tu plan', cuenta: 'Configuración' };
   const K2 = { plan: 'premium', cuenta: 'micuenta', chat: 'mensajes' };
-  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', usadas: '🏷️', tradein: '🔄', pasaporte: '🪪', domicilio: '🚐', cuenta: '👤' };
+  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', usadas: '🏷️', tradein: '🔄', pasaporte: '🪪', domicilio: '🚐', garantias: '🛡️', cuenta: '👤' };
   let hojaMas = null;
   function abrirSec(m) {
     if (m === 'chat') { $('chatBtn').click(); return; }
     const b = $('mSeg').querySelector('[data-m="' + m + '"]'); if (!b || b.classList.contains('hidden')) return;
-    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, usadas: verUsadas, tradein: verTradein, pasaporte: verPasaportes, domicilio: verDomicilio };
+    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, usadas: verUsadas, tradein: verTradein, pasaporte: verPasaportes, domicilio: verDomicilio, garantias: verGarantias };
     if (!hojaMas || hojaMas.m !== m || !hojaMas.h.d.isConnected) {
       const h = window.CFX_MENU.hoja((ICO[m] || '') + ' ' + esc(b.textContent.replace(/\d+$/, '').replace(/^[^\p{L}]+/u, '').trim()), () => { if (hojaMas && hojaMas.h === h) { hojaMas = null; subMas = null; } });
       hojaMas = { m, h };
@@ -1077,7 +1079,12 @@
     };
     q1('#uG2').onclick = () => guardar(x.estado || 'borrador');
     const pb = q1('#uPub'); if (pb) pb.onclick = () => guardar('publicada');
-    const vb = q1('#uV'); if (vb) vb.onclick = async () => { if (await confirmar('¿Se vendió "' + x.titulo + '"? Sale de tu página.')) guardar('vendida'); };
+    const vb = q1('#uV'); if (vb) vb.onclick = async () => {
+      if (!await confirmar('¿Se vendió "' + x.titulo + '"? Sale de tu página.')) return;
+      const ok = await guardar('vendida');
+      // G59h 🛡️ la garantía de la bici usada pasa al comprador.
+      if (ok && tiene('garantias') && x.garantia > 0) editarGarantia(null, { usada: id, bici: x.titulo, cubre: 'bici', meses: x.garantia, detalle: 'Bici usada certificada (informe de 50 puntos)' });
+    };
     const cb = q1('#uC'); if (cb) cb.onclick = () => App.compartir(linkUsada(x.token), '🏷️ ' + x.titulo + ' certificada en ' + P.taller.nombre, x.titulo);
     const bb = q1('#uB'); if (bb) bb.onclick = async () => { if (!await confirmar('¿Borrar "' + x.titulo + '"?')) return; try { await rpc('taller_usada_borrar', { p_id: id }); d.close(); verUsadas(); } catch (e) { toast(e.message); } };
   }
@@ -1194,6 +1201,75 @@
     };
     const qb = q1('#paQ'); if (qb) qb.onclick = () => stickerPas(x);
     const xb = q1('#paX'); if (xb) xb.onclick = async () => { if (!await confirmar('¿Borrar el pasaporte de "' + x.bici + '"? El sticker QR deja de funcionar.')) return; try { await rpc('taller_pasaporte_borrar', { p_id: id }); d.close(); verPasaportes(); } catch (e) { toast(e.message); } };
+  }
+
+  // ---- G59h 🧩 🛡️ Garantías: del trabajo, repuestos o bici usada, con vencimiento → link del cliente /g/ (la "usa" en 1 toque)
+  const CUBRE = { trabajo: '🔧 El trabajo', repuestos: '📦 Los repuestos', todo: '🔧📦 Trabajo y repuestos', bici: '🚲 La bici' };
+  const linkGar = (g) => App.ROOT + 'g/?t=' + g.token;
+  const venceTxt = (g) => g.dias < 0 ? 'Venció el ' + App.fCorta(g.hasta) : g.dias === 0 ? 'Vence hoy' : 'Vence el ' + App.fCorta(g.hasta) + (g.dias <= 30 ? ' (' + g.dias + ' día' + (g.dias === 1 ? '' : 's') + ')' : '');
+  const waGar = (g, txt) => App.wa(g.telefono, 'Hola ' + (g.nombre || '').split(' ')[0] + ' 👋 Te escribimos de ' + P.taller.nombre + ': ' + txt + ' 👉 ' + linkGar(g));
+  async function verGarantias() {
+    body().innerHTML = '<p class="empty">Cargando…</p>';
+    let s;
+    try { s = await rpc('taller_garantias'); } catch (e) { body().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    if (s.bloqueado) { body().innerHTML = modOfrecer('garantias', '🛡️ Garantías', 'Al entregar, le das garantía del trabajo, de los repuestos o de la bici usada. El cliente la ve en su link y la usa en 1 toque: tú recibes el aviso.'); return; }
+    const L = s.garantias, rec = L.filter((g) => g.reclamo === 'abierto'), pv = L.filter((g) => g.reclamo !== 'abierto' && g.dias >= 0 && g.dias <= 15),
+      vig = L.filter((g) => g.reclamo !== 'abierto' && g.dias > 15), ven = L.filter((g) => g.reclamo !== 'abierto' && g.dias < 0);
+    const fila = (g) => '<li class="clic" data-ga="' + g.id + '"><span style="font-size:24px;flex:none">' + (g.reclamo === 'abierto' ? '🔔' : g.dias < 0 ? '⌛' : '🛡️') + '</span>' +
+      '<div class="grow"><b>' + esc(g.bici || 'Bici') + '</b><div class="sub">' + esc([g.nombre, CUBRE[g.cubre]].filter(Boolean).join(' · ')) + '</div><div class="sub">' +
+      (g.reclamo === 'abierto' ? '<b>Usó la garantía:</b> ' + esc(g.reclamo_nota) : esc(venceTxt(g))) + '</div></div>' +
+      (g.reclamo !== 'abierto' && g.dias >= 0 && g.dias <= 15 && g.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" data-sin-atras href="' + waGar(g, 'la garantía de tu ' + (g.bici || 'bici') + ' vence el ' + App.fCorta(g.hasta) + '. Si notas algo raro, tráela antes y te la revisamos sin costo') + '">📲 Avisar</a>' : '') + '</li>';
+    const sec = (tit, l, vacio) => l.length ? '<h3>' + tit + ' <span class="pill">' + l.length + '</span></h3><ul class="list">' + l.map(fila).join('') + '</ul>' : (vacio ? '<p class="sub">' + vacio + '</p>' : '');
+    body().innerHTML = '<div class="card"><h2>🛡️ Garantías <span class="pill">' + (L.length - ven.length) + ' vigente' + (L.length - ven.length === 1 ? '' : 's') + '</span></h2><p class="sub" style="margin-top:0">Dala desde la orden lista o entregada (🛡️ Garantía) o aquí. El cliente la ve en su link y la usa en 1 toque.</p>' +
+      sec('🔔 La usaron', rec) + sec('⏳ Por vencer', pv) + sec('✅ Vigentes', vig, L.length ? '' : 'Todavía no das garantías. Abre una orden lista → 🛡️ Garantía.') +
+      (ven.length ? '<details><summary class="sub">⌛ Vencidas (' + ven.length + ')</summary><ul class="list">' + ven.map(fila).join('') + '</ul></details>' : '') +
+      '<div class="btns"><button id="gNueva" type="button">＋ Nueva garantía</button></div></div>';
+    body().onclick = (e) => {
+      if (e.target.closest('a')) return;
+      const u = e.target.closest('[data-ga]'); if (u) { editarGarantia(u.dataset.ga); return; }
+      if (e.target.closest('#gNueva')) editarGarantia(null, {});
+    };
+  }
+  async function editarGarantia(id, base, alGuardar) {
+    let g = null;
+    try { g = id ? await rpc('taller_garantia', { p_id: id }) : base.reserva ? await rpc('taller_garantia', { p_id: null, p_reserva: base.reserva }) : null; } catch (e) { toast(e.message); return; }
+    const nueva = !g;
+    if (nueva) g = Object.assign({ nombre: '', telefono: '', bici: '', cubre: 'trabajo', detalle: '', meses: 3, reclamo: '' }, base);
+    const ab = g.reclamo === 'abierto';
+    const d = modal('<h2>🛡️ ' + (nueva ? 'Dar garantía' : esc(g.bici || 'Garantía')) + '</h2>' +
+      (!nueva ? '<div class="aviso' + (g.dias < 0 ? ' warn' : '') + '" style="display:block">' + esc(venceTxt(g)) + ' · desde el ' + App.fCorta(g.desde) + '</div>' : '') +
+      (ab ? '<div class="aviso bad" style="display:block;margin-top:8px"><b>🔔 La usó</b>' + (g.reclamo_at ? ' el ' + App.fCorta(g.reclamo_at.slice(0, 10)) : '') + '<div>' + esc(g.reclamo_nota) + '</div>' +
+        '<div class="btns"><button class="okb" id="gaOk" type="button">✅ Lo arreglé</button><button class="danger" id="gaNo" type="button">❌ No lo cubre</button>' +
+        (g.telefono ? '<a class="btn alt" target="_blank" rel="noopener" href="' + waGar(g, 'vimos tu aviso de garantía de la ' + (g.bici || 'bici') + '. Tráela cuando puedas y la revisamos') + '">📲 WhatsApp</a>' : '') + '</div></div>' : '') +
+      (!ab && g.reclamo && g.reclamo !== 'abierto' ? '<p class="sub">' + (g.reclamo === 'resuelto' ? '✅ Reclamo resuelto' : '❌ Reclamo no cubierto') + (g.respuesta ? ': ' + esc(g.respuesta) : '') + '</p>' : '') +
+      '<label for="gaQ">¿Qué cubre?</label><select id="gaQ">' + Object.keys(CUBRE).map((k) => '<option value="' + k + '"' + (k === g.cubre ? ' selected' : '') + '>' + CUBRE[k] + '</option>').join('') + '</select>' +
+      '<label for="gaM">¿Cuánto dura?</label><select id="gaM">' + [1, 3, 6, 12, 24].concat([1, 3, 6, 12, 24].includes(+g.meses) ? [] : [+g.meses]).map((m) => '<option value="' + m + '"' + (m === +g.meses ? ' selected' : '') + '>' + m + (m === 1 ? ' mes' : ' meses') + '</option>').join('') + '</select>' +
+      '<label for="gaD">Detalle (lo ve el cliente)</label><input id="gaD" maxlength="300" value="' + esc(g.detalle) + '" placeholder="Ej: Cambio de cadena y ajuste de cambios">' +
+      '<div class="row"><div><label for="gaN">Cliente</label><input id="gaN" maxlength="80" value="' + esc(g.nombre) + '"></div><div><label for="gaT">Teléfono</label><input id="gaT" maxlength="30" inputmode="tel" value="' + esc(g.telefono) + '"></div></div>' +
+      '<label for="gaB">Bici</label><input id="gaB" maxlength="120" value="' + esc(g.bici) + '">' +
+      '<div class="btns">' + (!nueva && P.dueno ? '<button class="danger" id="gaX" type="button">🗑️ Borrar</button>' : '') + '<button id="gaG" type="button">' + (nueva ? '🛡️ Dar garantía' : '💾 Guardar') + '</button></div>' +
+      (!nueva ? '<div class="btns">' + (g.telefono ? '<a class="btn alt" target="_blank" rel="noopener" href="' + waGar(g, 'tu ' + (g.bici || 'bici') + ' tiene 🛡️ garantía hasta el ' + App.fCorta(g.hasta) + '. Si algo falla, la usas desde aquí') + '">📲 Enviar al cliente</a>' : '') +
+        '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(linkGar(g)) + '">👀 Ver</a></div>' : ''));
+    const q1 = (sel) => d.querySelector(sel);
+    if (window.CFX_FABRICA) CFX_FABRICA.bici(q1('#gaB'));
+    const fin = (nid) => { if (alGuardar) alGuardar(nid); else if (subMas === 'garantias') verGarantias(); };
+    q1('#gaG').onclick = async () => {
+      try {
+        const nid = await rpc('taller_garantia_guardar', { p: { id: nueva ? null : g.id, reserva: nueva ? (g.reserva || null) : null, usada: nueva ? (g.usada || null) : null,
+          cubre: q1('#gaQ').value, meses: +q1('#gaM').value, detalle: q1('#gaD').value, nombre: q1('#gaN').value, telefono: q1('#gaT').value, bici: q1('#gaB').value } });
+        d.close(); toast(nueva ? '🛡️ Garantía lista: envíasela al cliente' : '💾 Guardado');
+        fin(nid);
+        if (nueva) editarGarantia(nid, null, alGuardar);
+      } catch (err) { toast(err.message); }
+    };
+    const resolver = async (est) => {
+      const t = await pedirTexto(est === 'resuelto' ? '✅ Lo arreglé' : '❌ No lo cubre', est === 'resuelto' ? 'Qué hiciste (lo ve el cliente)' : 'Por qué no lo cubre (lo ve el cliente)', '');
+      if (t === null) return;
+      try { await rpc('taller_garantia_resolver', { p_id: g.id, p_estado: est, p_resp: t }); d.close(); toast(est === 'resuelto' ? '✅ Reclamo resuelto' : '❌ Respondido'); fin(g.id); } catch (e) { toast(e.message); }
+    };
+    const okb = q1('#gaOk'); if (okb) okb.onclick = () => resolver('resuelto');
+    const nob = q1('#gaNo'); if (nob) nob.onclick = () => resolver('rechazado');
+    const xb = q1('#gaX'); if (xb) xb.onclick = async () => { if (!await confirmar('¿Borrar la garantía de "' + (g.bici || 'la bici') + '"? El link del cliente deja de funcionar.')) return; try { await rpc('taller_garantia_borrar', { p_id: g.id }); d.close(); fin(null); } catch (e) { toast(e.message); } };
   }
 
   // ---- G59g 🧩 🚐 Mecánico a domicilio: ruta del día (orden ▲▼, Google Maps) + "Voy en camino"

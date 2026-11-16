@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.35'::text $$;
+language sql immutable as $$ select '2.36'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -1144,7 +1144,10 @@ begin
     'pasaporte', (select jsonb_build_object('token', p.token, 'clave', p.clave) from public.pasaportes p where p.id = r.pasaporte_id and public.cfx_modulo_de('pasaporte', c.owner_id)),
     -- G59g 🚐 visita a domicilio (dirección y si el mecánico va en camino).
     'domicilio', case when r.domicilio is not null then jsonb_build_object('direccion', r.domicilio ->> 'direccion', 'comuna', r.domicilio ->> 'comuna',
-      'ref', r.domicilio ->> 'ref', 'camino_at', r.domicilio ->> 'camino_at') end);
+      'ref', r.domicilio ->> 'ref', 'camino_at', r.domicilio ->> 'camino_at') end,
+    -- G59h 🛡️ garantía de esta orden (link /g/), si el taller tiene el módulo.
+    'garantia', (select jsonb_build_object('token', g.token, 'hasta', g.hasta, 'cubre', g.cubre, 'reclamo', g.reclamo) from public.garantias g
+      where g.reserva_id = r.id and public.cfx_modulo_de('garantias', c.owner_id)));
 end $$;
 
 -- El cliente sube la foto del comprobante del abono.
@@ -1315,6 +1318,7 @@ begin
     'stock_bajo', (select count(*) from public.repuestos where taller_id = tid and stock <= minimo and minimo > 0),  -- G59d 📦
     'domicilio_hoy', (select count(*) from public.reservas where taller_id = tid and fecha = hoy and domicilio is not null
       and estado not in ('rechazada', 'expirada', 'cancelada', 'no_asistio', 'completada')),  -- G59g 🚐
+    'garantia_reclamos', (select count(*) from public.garantias where taller_id = tid and reclamo = 'abierto'),  -- G59h 🛡️
     'por_devolver', (select count(*) from public.reservas where taller_id = tid and abono_estado = 'devolver'));
 end $$;
 
@@ -2869,7 +2873,7 @@ language sql stable security definer set search_path = '' as $$
   select coalesce((select public.taller_es_premium(t.id) from public.talleres t where t.owner_id = n), false)
 $$;
 create or replace function public.cfx_modulos_app() returns text[]
-language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock', 'certificadas', 'tradein', 'pasaporte', 'domicilio'] $$;
+language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock', 'certificadas', 'tradein', 'pasaporte', 'domicilio', 'garantias'] $$;
 revoke all on function public.cfx_negocio_de_cuenta(uuid), public.cfx_es_premium(uuid), public.cfx_modulos_app() from public, anon, authenticated;
 create or replace function public.taller_tiene(p_modulo text) returns boolean
 language plpgsql stable security definer set search_path = '' as $$ begin return public.cfx_modulo_de(p_modulo, public.cfx_negocio_de_cuenta(auth.uid())); end $$;
@@ -3512,6 +3516,168 @@ revoke all on function public.domicilio_cfg(public.talleres), public.domicilio_a
   public.taller_ruta(date), public.taller_ruta_orden(uuid[]), public.taller_en_camino(uuid) from public, anon, authenticated;
 grant execute on function public.taller_domicilio_config(jsonb), public.taller_domicilio(uuid, jsonb), public.taller_ruta(date),
   public.taller_ruta_orden(uuid[]), public.taller_en_camino(uuid) to authenticated;
+
+-- =====================================================================
+-- G59h 🧩 🛡️ Garantías: del trabajo, de los repuestos o de la bici (usada vendida), con vencimiento.
+-- El cliente la ve en su link (/g/?t=token, también desde /r/) y la "usa" (reclamo) → el taller la ve en Hoy y la resuelve.
+-- =====================================================================
+create table if not exists public.garantias (
+  id          uuid primary key default gen_random_uuid(),
+  taller_id   uuid not null references public.talleres (id) on delete cascade,
+  reserva_id  uuid,
+  usada_id    uuid,
+  cliente_id  uuid,
+  nombre      text not null default '' check (length(nombre) <= 80),
+  telefono    text not null default '' check (length(telefono) <= 30),
+  tel_norm    text not null default '',
+  bici        text not null default '' check (length(bici) <= 120),
+  cubre       text not null default 'trabajo' check (cubre in ('trabajo', 'repuestos', 'todo', 'bici')),
+  detalle     text not null default '' check (length(detalle) <= 300),
+  meses       int  not null default 3 check (meses between 1 and 36),
+  desde       date not null,
+  hasta       date not null,
+  token       text not null unique default replace(gen_random_uuid()::text, '-', ''),
+  reclamo     text not null default '' check (reclamo in ('', 'abierto', 'resuelto', 'rechazado')),
+  reclamo_nota text not null default '' check (length(reclamo_nota) <= 300),
+  reclamo_at  timestamptz,
+  respuesta   text not null default '' check (length(respuesta) <= 300),
+  resuelto_at timestamptz,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create unique index if not exists garantias_reserva_idx on public.garantias (reserva_id) where reserva_id is not null;
+create index if not exists garantias_t_idx on public.garantias (taller_id, hasta);
+alter table public.garantias enable row level security;
+
+create or replace function public.garantia_json(g public.garantias) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('id', g.id, 'reserva', g.reserva_id, 'usada', g.usada_id, 'nombre', g.nombre, 'telefono', g.telefono, 'bici', g.bici,
+    'cubre', g.cubre, 'detalle', g.detalle, 'meses', g.meses, 'desde', g.desde, 'hasta', g.hasta, 'token', g.token,
+    'dias', g.hasta - (now() at time zone t.zona)::date, 'reclamo', g.reclamo, 'reclamo_nota', g.reclamo_nota, 'reclamo_at', g.reclamo_at,
+    'respuesta', g.respuesta, 'resuelto_at', g.resuelto_at)
+  from public.talleres t where t.id = g.taller_id
+$$;
+
+create or replace function public.taller_garantias() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('garantias') then return jsonb_build_object('bloqueado', true); end if;
+  return jsonb_build_object('garantias', (select coalesce(jsonb_agg(public.garantia_json(g) order by (g.reclamo = 'abierto') desc, g.hasta), '[]')
+    from public.garantias g where g.taller_id = tid));
+end $$;
+
+-- Una garantía por id o la de una orden (null si no tiene).
+create or replace function public.taller_garantia(p_id uuid, p_reserva uuid default null) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); g public.garantias;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  select * into g from public.garantias where taller_id = tid and (id = p_id or (p_id is null and reserva_id = p_reserva));
+  if g.id is null then return null; end if;
+  return public.garantia_json(g);
+end $$;
+
+-- Crear o editar (todo el equipo). p: { id?, reserva?, usada?, nombre, telefono, bici, cubre, detalle, meses, desde? }
+create or replace function public.taller_garantia_guardar(p jsonb) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); gid uuid := nullif(p ->> 'id', '')::uuid; r public.reservas; t public.talleres;
+  m int := coalesce(nullif(p ->> 'meses', '')::int, 3); cu text := coalesce(nullif(p ->> 'cubre', ''), 'trabajo'); d date; tel text;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('garantias') then raise exception 'Necesitas el módulo 🛡️ Garantías'; end if;
+  if m < 1 or m > 36 then raise exception 'La garantía va de 1 a 36 meses'; end if;
+  if cu not in ('trabajo', 'repuestos', 'todo', 'bici') then raise exception 'Elige qué cubre la garantía'; end if;
+  select * into t from public.talleres where id = tid;
+  if gid is null and nullif(p ->> 'reserva', '') is not null then
+    select * into r from public.reservas where id = (p ->> 'reserva')::uuid and taller_id = tid;
+    if r.id is null then raise exception 'Orden no encontrada'; end if;
+    if r.estado not in ('lista', 'completada') then raise exception 'La garantía se da cuando la bici está lista o entregada'; end if;
+    select id into gid from public.garantias where reserva_id = r.id;
+  end if;
+  tel := left(trim(coalesce(p ->> 'telefono', r.telefono, '')), 30);
+  if gid is null then
+    if (select count(*) from public.garantias where taller_id = tid) >= 20000 then raise exception 'Llegaste al máximo de 20.000 garantías'; end if;
+    d := coalesce(nullif(p ->> 'desde', '')::date, (now() at time zone t.zona)::date);
+    insert into public.garantias (taller_id, reserva_id, usada_id, cliente_id, nombre, telefono, tel_norm, bici, cubre, detalle, meses, desde, hasta)
+    values (tid, r.id, case when r.id is null then nullif(p ->> 'usada', '')::uuid end, r.cliente_id,
+      left(trim(coalesce(nullif(p ->> 'nombre', ''), r.nombre, '')), 80), tel, public.tel_norm(tel), left(trim(coalesce(nullif(p ->> 'bici', ''), r.bici, '')), 120),
+      cu, left(trim(coalesce(p ->> 'detalle', '')), 300), m, d, (d + make_interval(months => m))::date)
+    returning id into gid;
+  else
+    update public.garantias g set nombre = left(trim(coalesce(p ->> 'nombre', g.nombre)), 80), telefono = tel, tel_norm = public.tel_norm(tel),
+      bici = left(trim(coalesce(p ->> 'bici', g.bici)), 120), cubre = cu, detalle = left(trim(coalesce(p ->> 'detalle', '')), 300), meses = m,
+      desde = coalesce(nullif(p ->> 'desde', '')::date, g.desde), hasta = (coalesce(nullif(p ->> 'desde', '')::date, g.desde) + make_interval(months => m))::date,
+      updated_at = now()
+    where g.id = gid and g.taller_id = tid;
+    if not found then raise exception 'Garantía no encontrada'; end if;
+  end if;
+  return gid;
+end $$;
+
+create or replace function public.taller_garantia_borrar(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller'; end if;
+  delete from public.garantias where id = p_id and taller_id = tid;
+end $$;
+
+-- El taller responde el reclamo: resuelto (la arregló) o rechazado (no lo cubre). Avisa al cliente si tiene cuenta.
+create or replace function public.taller_garantia_resolver(p_id uuid, p_estado text, p_resp text default '') returns void
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); g public.garantias; t public.talleres;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('garantias') then raise exception 'Necesitas el módulo 🛡️ Garantías'; end if;
+  if p_estado not in ('resuelto', 'rechazado') then raise exception 'Estado no válido'; end if;
+  select * into g from public.garantias where id = p_id and taller_id = tid for update;
+  if g.id is null then raise exception 'Garantía no encontrada'; end if;
+  if g.reclamo <> 'abierto' then raise exception 'Esta garantía no tiene un reclamo abierto'; end if;
+  select * into t from public.talleres where id = tid;
+  update public.garantias set reclamo = p_estado, respuesta = left(trim(coalesce(p_resp, '')), 300), resuelto_at = now(), updated_at = now() where id = g.id;
+  if g.cliente_id is not null then
+    perform public.avisar(g.cliente_id, case when p_estado = 'resuelto' then '🛡️ Garantía: listo' else '🛡️ Garantía: respuesta del taller' end,
+      t.nombre || ' · ' || coalesce(nullif(trim(p_resp), ''), case when p_estado = 'resuelto' then 'Tu reclamo quedó resuelto' else 'Tu reclamo no lo cubre la garantía' end), '/g/?t=' || g.token);
+  end if;
+end $$;
+
+-- Pública: la garantía (link del cliente).
+create or replace function public.garantia_ver(p_token text) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare g public.garantias; t public.talleres;
+begin
+  select * into g from public.garantias where token = p_token and length(p_token) >= 20;
+  if g.id is null then return null; end if;
+  select * into t from public.talleres where id = g.taller_id;
+  if not public.cfx_modulo_de('garantias', t.owner_id) then return null; end if;
+  return (public.garantia_json(g) - 'id' - 'reserva' - 'usada' - 'telefono') || jsonb_build_object('nombre', split_part(g.nombre, ' ', 1),
+    'taller', jsonb_build_object('nombre', t.nombre, 'slug', t.slug, 'telefono', t.telefono, 'logo', t.logo, 'color', t.color, 'icono', t.icono,
+      'comuna', t.comuna, 'direccion', t.direccion));
+end $$;
+
+-- Pública: el cliente "usa" su garantía (vigente y sin otro reclamo abierto) → aviso al taller.
+create or replace function public.garantia_reclamar(p_token text, p_nota text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare g public.garantias; t public.talleres; n text := left(trim(coalesce(p_nota, '')), 300);
+begin
+  select * into g from public.garantias where token = p_token and length(p_token) >= 20 for update;
+  if g.id is null then return jsonb_build_object('ok', false, 'error', 'Garantía no encontrada'); end if;
+  select * into t from public.talleres where id = g.taller_id;
+  if not public.cfx_modulo_de('garantias', t.owner_id) then return jsonb_build_object('ok', false, 'error', 'El taller ya no tiene las garantías activas'); end if;
+  if g.hasta < (now() at time zone t.zona)::date then return jsonb_build_object('ok', false, 'error', 'Esta garantía ya venció'); end if;
+  if g.reclamo = 'abierto' then return jsonb_build_object('ok', false, 'error', 'Ya enviaste un reclamo: el taller te va a contactar'); end if;
+  if length(n) < 3 then return jsonb_build_object('ok', false, 'error', 'Cuéntanos qué pasó'); end if;
+  update public.garantias set reclamo = 'abierto', reclamo_nota = n, reclamo_at = now(), respuesta = '', resuelto_at = null, updated_at = now() where id = g.id;
+  perform public.avisar_taller(t.id, '🛡️ Usaron una garantía', coalesce(nullif(g.nombre, ''), 'Un cliente') || ' · ' || g.bici || ' · ' || n, '/taller/#mas/garantias');
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function public.garantia_json(public.garantias), public.taller_garantias(), public.taller_garantia(uuid, uuid), public.taller_garantia_guardar(jsonb),
+  public.taller_garantia_borrar(uuid), public.taller_garantia_resolver(uuid, text, text), public.garantia_ver(text), public.garantia_reclamar(text, text) from public, anon, authenticated;
+grant execute on function public.taller_garantias(), public.taller_garantia(uuid, uuid), public.taller_garantia_guardar(jsonb), public.taller_garantia_borrar(uuid),
+  public.taller_garantia_resolver(uuid, text, text) to authenticated;
+grant execute on function public.garantia_ver(text), public.garantia_reclamar(text, text) to anon, authenticated;
 grant execute on function public.domicilio_info(uuid), public.reserva_domicilio(text, jsonb) to anon, authenticated;
 
 -- >>> CFX núcleo (no editar aquí: se copia de saas/nucleo/sql con sincronizar.py)
@@ -4950,7 +5116,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bicis_usadas', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.pasaportes', 'public.perfiles', 'public.planes', 'public.promos', 'public.proveedores', 'public.push_subs', 'public.repuestos', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bicis_usadas', 'public.bloqueos', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.garantias', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.pasaportes', 'public.perfiles', 'public.planes', 'public.promos', 'public.proveedores', 'public.push_subs', 'public.repuestos', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
@@ -5223,7 +5389,8 @@ language sql immutable as $$
          ('certificadas', '🏷️ Bicis usadas certificadas', 'Vende bicis usadas con informe de 50 puntos, fotos y garantía: se publican en tu página y te escriben por WhatsApp.'),
          ('tradein', '🔄 Parte de pago', 'Calculadora: cuánto ofrecer por la bici usada del cliente para que se lleve una nueva o un arreglo.'),
          ('pasaporte', '🪪 Pasaporte de la bici', 'Sticker QR para el cuadro: historial de mantenciones, dueño y aviso de robo. Quien la escanea sabe si es robada.'),
-         ('domicilio', '🚐 Mecánico a domicilio', 'El cliente reserva con su dirección (+ recargo de visita); armas la ruta del día y le avisas “Voy en camino”.')
+         ('domicilio', '🚐 Mecánico a domicilio', 'El cliente reserva con su dirección (+ recargo de visita); armas la ruta del día y le avisas “Voy en camino”.'),
+         ('garantias', '🛡️ Garantías', 'Garantía del trabajo, repuestos o bici usada, con vencimiento: el cliente la ve en su link y la usa en 1 toque.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb

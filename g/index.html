@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16a34a">
+<title>Garantía</title>
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icons/icon-192.png">
+<link rel="stylesheet" href="../shared/vendor/bootstrap-utilities.min.css">
+<link rel="stylesheet" href="../shared/app.css?v=2.2">
+<link rel="stylesheet" href="../shared/tema.css">
+<style>
+  .g-big { border-radius: 14px; padding: 14px; font-weight: 800; text-align: center; background: var(--cfx-ok, #16a34a); color: #fff; }
+  .g-big.no { background: var(--cfx-borde, #94a3b8); }
+  .g-big .sub { color: #fff; opacity: .9; font-weight: 400; }
+</style>
+<script src="../shared/seguro.js"></script>
+<script src="../shared/carga.js"></script>
+<script src="../shared/humano.js"></script>
+</head>
+<body>
+<main>
+  <p class="empty" id="cargando">Cargando…</p>
+  <div class="hidden" id="todo">
+    <div class="card">
+      <div class="sub">🛡️ Garantía</div>
+      <h1 id="tit" style="margin:4px 0"></h1>
+      <div class="sub" id="datos"></div>
+      <div id="estado" style="margin-top:12px"></div>
+      <p id="det" style="margin:10px 0 0"></p>
+    </div>
+    <div class="card hidden" id="cUsar">
+      <h2>🔧 ¿Algo falló?</h2>
+      <p class="sub" style="margin-top:0">Cuéntanos qué pasó: le avisamos al taller y te contacta.</p>
+      <div class="btns"><button type="button" id="bUsar">🛡️ Usar mi garantía</button></div>
+    </div>
+    <div class="card hidden" id="cRec"></div>
+    <div class="card">
+      <div class="hero"><div class="logo" id="logo"></div><div class="grow"><b id="tNom"></b><div class="sub" id="tDir"></div></div></div>
+      <div class="btns"><a class="btn alt hidden" id="tWa" target="_blank" rel="noopener" href="#">📲 WhatsApp</a><a class="btn ghost" id="tVer" href="#">🚲 Ver el taller</a></div>
+    </div>
+  </div>
+</main>
+<script src="../shared/config.js?v=2.2"></script>
+<script src="../shared/vendor/supabase.js"></script>
+<script src="../shared/app.js?v=2.2"></script>
+<script>
+(async function () {
+  'use strict';
+  // G59h 🛡️ Garantía pública (link que el taller manda al cliente): hasta cuándo vale, qué cubre y "🛡️ Usar mi garantía" (reclamo → aviso al taller).
+  const { $, esc } = App;
+  App.registrarSW();
+  const CUBRE = { trabajo: '🔧 El trabajo', repuestos: '📦 Los repuestos', todo: '🔧📦 El trabajo y los repuestos', bici: '🚲 La bici' };
+  const token = new URLSearchParams(location.search).get('t') || '';
+  if (token.length < 20) { $('cargando').textContent = 'Enlace no válido. Pídele el link de tu garantía al taller.'; return; }
+  await App.cargarPublica();
+  let g;
+  const cargar = async () => {
+    try { g = await App.rpc('garantia_ver', { p_token: token }); } catch (e) { $('cargando').textContent = '⚠️ ' + e.message; return; }
+    if (!g) { $('cargando').textContent = 'Esta garantía ya no está activa.'; return; }
+    pintar();
+  };
+  const pintar = () => {
+    const t = g.taller, vig = g.dias >= 0;
+    document.title = 'Garantía · ' + (g.bici || t.nombre);
+    App.tema(t.color);
+    $('tit').textContent = g.bici || 'Tu bici';
+    $('datos').textContent = [g.nombre && 'De ' + g.nombre, 'Cubre: ' + (CUBRE[g.cubre] || g.cubre), g.meses + (g.meses === 1 ? ' mes' : ' meses')].filter(Boolean).join(' · ');
+    $('estado').innerHTML = '<div class="g-big' + (vig ? '' : ' no') + '">' + (vig ? '✅ VIGENTE hasta el ' + esc(App.fLarga(g.hasta)) : '⌛ VENCIÓ el ' + esc(App.fLarga(g.hasta))) +
+      '<div class="sub">desde el ' + esc(App.fCorta(g.desde)) + (vig && g.dias <= 30 ? ' · quedan ' + g.dias + ' día' + (g.dias === 1 ? '' : 's') : '') + '</div></div>';
+    $('det').textContent = g.detalle || '';
+    $('cUsar').classList.toggle('hidden', !vig || g.reclamo === 'abierto');
+    const rec = $('cRec');
+    rec.classList.toggle('hidden', !g.reclamo);
+    rec.innerHTML = g.reclamo === 'abierto' ? '<h2>🔔 Aviso enviado</h2><p style="margin:0">' + esc(g.reclamo_nota) + '</p><p class="sub">El taller ya lo sabe y te va a contactar.</p>'
+      : g.reclamo ? '<h2>' + (g.reclamo === 'resuelto' ? '✅ Listo' : '❌ No lo cubre la garantía') + '</h2><p class="sub" style="margin-top:0">' + esc(g.reclamo_nota) + '</p>' + (g.respuesta ? '<p style="margin:0">💬 ' + esc(g.respuesta) + '</p>' : '') : '';
+    App.pintarLogo($('logo'), t);
+    $('tNom').textContent = t.nombre;
+    $('tDir').textContent = [t.direccion, t.comuna].filter(Boolean).join(', ');
+    $('tVer').href = '../t/?s=' + encodeURIComponent(t.slug);
+    $('tWa').classList.toggle('hidden', !t.telefono);
+    if (t.telefono) $('tWa').href = App.wa(t.telefono, 'Hola ' + t.nombre + ' 👋 Te escribo por la garantía de mi ' + (g.bici || 'bici') + ': ');
+    $('cargando').classList.add('hidden'); $('todo').classList.remove('hidden');
+  };
+  $('bUsar').onclick = async () => {
+    const D = window.CFX_DIALOGO;
+    const nota = D ? await D.pedir('🛡️ ¿Qué pasó con tu bici?', '') : '';
+    if (nota === null) return;
+    $('bUsar').disabled = true;
+    try {
+      const x = await App.rpc('garantia_reclamar', { p_token: token, p_nota: nota || '' });
+      if (!x.ok) throw new Error(x.error);
+      App.toast('🔔 Listo: le avisamos al taller');
+      await cargar();
+    } catch (e) { App.toast(e.message); }
+    $('bUsar').disabled = false;
+  };
+  await cargar();
+  App.pie();
+})();
+</script>
+<script src="../shared/iconos.js"></script>
+<script src="../shared/instalar.js"></script>
+<script src="../shared/barra.js"></script>
+<script src="../shared/auto.js"></script>
+<script src="../shared/fotos.js"></script>
+<script src="../shared/voz.js"></script>
+<script src="../shared/respaldo.js"></script>
+<script src="../shared/pagos.js"></script>
+<script src="../shared/verificar.js"></script>
+<script src="../shared/premium.js"></script>
+<script src="../shared/ayuda.js"></script>
+<script src="../shared/datos.js"></script>
+<script src="../shared/vitrina.js"></script>
+<script src="../shared/ui.js"></script>
+</body>
+</html>
