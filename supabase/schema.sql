@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.34'::text $$;
+language sql immutable as $$ select '2.35'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -619,6 +619,9 @@ alter table public.reservas add column if not exists lista_at timestamptz;
 alter table public.reservas add column if not exists lista_recordada boolean not null default false;
 -- G59f 🧩 🪪 Pasaporte de la bici: orden enlazada al pasaporte (su historial). Sin FK: el pasaporte se crea más abajo.
 alter table public.reservas add column if not exists pasaporte_id uuid;
+-- G59g 🧩 🚐 Mecánico a domicilio: { direccion, comuna, ref, orden (ruta del día), camino_at }. El taller: { activo, recargo, zona }.
+alter table public.reservas add column if not exists domicilio jsonb;
+alter table public.talleres add column if not exists domicilio jsonb not null default '{}'::jsonb;
 
 -- Fotos antes/después del trabajo (v1.6, taller Premium). Livianas y se borran solas después de N días.
 create table if not exists public.fotos_trabajo (
@@ -1134,7 +1137,10 @@ begin
       'color', c.color, 'icono', c.icono, 'direccion', c.direccion, 'comuna', c.comuna),
     'minutos_devolucion', dev, 'horas_cancelacion', hrs,
     -- G59f 🪪 link del dueño a su pasaporte (con la clave para reportar robo), si el taller tiene el módulo.
-    'pasaporte', (select jsonb_build_object('token', p.token, 'clave', p.clave) from public.pasaportes p where p.id = r.pasaporte_id and public.cfx_modulo_de('pasaporte', c.owner_id)));
+    'pasaporte', (select jsonb_build_object('token', p.token, 'clave', p.clave) from public.pasaportes p where p.id = r.pasaporte_id and public.cfx_modulo_de('pasaporte', c.owner_id)),
+    -- G59g 🚐 visita a domicilio (dirección y si el mecánico va en camino).
+    'domicilio', case when r.domicilio is not null then jsonb_build_object('direccion', r.domicilio ->> 'direccion', 'comuna', r.domicilio ->> 'comuna',
+      'ref', r.domicilio ->> 'ref', 'camino_at', r.domicilio ->> 'camino_at') end);
 end $$;
 
 -- El cliente sube la foto del comprobante del abono.
@@ -1303,6 +1309,8 @@ begin
     'modulos', public.cfx_modulos(), 'venta', public.cfx_venta_on(),  -- G59 🧩 qué módulos puede usar y si se venden
     'por_revisar', (select count(*) from public.reservas where taller_id = tid and estado = 'en_revision'),
     'stock_bajo', (select count(*) from public.repuestos where taller_id = tid and stock <= minimo and minimo > 0),  -- G59d 📦
+    'domicilio_hoy', (select count(*) from public.reservas where taller_id = tid and fecha = hoy and domicilio is not null
+      and estado not in ('rechazada', 'expirada', 'cancelada', 'no_asistio', 'completada')),  -- G59g 🚐
     'por_devolver', (select count(*) from public.reservas where taller_id = tid and abono_estado = 'devolver'));
 end $$;
 
@@ -1394,7 +1402,7 @@ language sql stable security definer set search_path = '' as $$
     select r.id, r.fecha, to_char(r.hora, 'HH24:MI') as hora, to_char(r.hora_fin, 'HH24:MI') as hora_fin, r.nombre, r.telefono,
       r.email, r.bici, r.nota, r.servicio_id, r.servicio_nombre, r.precio, r.estado, r.abono_monto, r.abono_estado, r.expira_at,
       r.origen, r.cliente_id, r.mecanico_id, r.items, r.total, r.diagnostico, r.notas_internas, r.proxima_mantencion,
-      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta, r.entrega_estimada, r.checklist, r.presupuesto, r.lista_at, r.pasaporte_id,
+      r.token, r.motivo, r.reagendada, r.created_at, r.comprobante_at, r.saldo_hasta, r.entrega_estimada, r.checklist, r.presupuesto, r.lista_at, r.pasaporte_id, r.domicilio,
       (select p.nombre from public.perfiles p where p.id = r.mecanico_id) as mecanico,
       exists (select 1 from public.comprobantes k where k.reserva_id = r.id) as tiene_comprobante,
       public.nota_cliente(r.telefono) as nota_cliente,
@@ -2857,7 +2865,7 @@ language sql stable security definer set search_path = '' as $$
   select coalesce((select public.taller_es_premium(t.id) from public.talleres t where t.owner_id = n), false)
 $$;
 create or replace function public.cfx_modulos_app() returns text[]
-language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock', 'certificadas', 'tradein', 'pasaporte'] $$;
+language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock', 'certificadas', 'tradein', 'pasaporte', 'domicilio'] $$;
 revoke all on function public.cfx_negocio_de_cuenta(uuid), public.cfx_es_premium(uuid), public.cfx_modulos_app() from public, anon, authenticated;
 create or replace function public.taller_tiene(p_modulo text) returns boolean
 language plpgsql stable security definer set search_path = '' as $$ begin return public.cfx_modulo_de(p_modulo, public.cfx_negocio_de_cuenta(auth.uid())); end $$;
@@ -3351,6 +3359,156 @@ revoke all on function public.pasaporte_enlazar(), public.pasaporte_historial(uu
   public.taller_pasaporte_guardar(jsonb), public.taller_pasaporte_borrar(uuid), public.pasaporte_ver(text, text), public.pasaporte_reportar(text, text, boolean, text) from public, anon, authenticated;
 grant execute on function public.taller_pasaportes(), public.taller_pasaporte(uuid), public.taller_pasaporte_guardar(jsonb), public.taller_pasaporte_borrar(uuid) to authenticated;
 grant execute on function public.pasaporte_ver(text, text), public.pasaporte_reportar(text, text, boolean, text) to anon, authenticated;
+
+-- =====================================================================
+-- G59g 🧩 🚐 Mecánico a domicilio: el cliente reserva con su dirección (+ recargo de visita), el taller arma la ruta del día
+-- (orden ▲▼, abrir en Google Maps) y avisa "🚐 Voy en camino". Configuración en talleres.domicilio { activo, recargo, zona }.
+-- =====================================================================
+create or replace function public.domicilio_cfg(t public.talleres) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('activo', coalesce((t.domicilio ->> 'activo')::boolean, false),
+    'recargo', greatest(0, coalesce((t.domicilio ->> 'recargo')::int, 0)), 'zona', coalesce(t.domicilio ->> 'zona', ''))
+$$;
+-- Pone (o saca, con d = null) la dirección de la visita y el ítem "🚐 Visita a domicilio" con el recargo (una sola vez).
+create or replace function public.domicilio_aplicar(p_id uuid, d jsonb, p_recargo int) returns void
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas; viejo int; nuevos jsonb; nom constant text := '🚐 Visita a domicilio';
+begin
+  select * into r from public.reservas where id = p_id for update;
+  select coalesce(sum((i ->> 'precio')::int * coalesce((i ->> 'cant')::int, 1)), 0) into viejo
+    from jsonb_array_elements(r.items) i where i ->> 'nombre' = nom;
+  select coalesce(jsonb_agg(i), '[]') into nuevos from jsonb_array_elements(r.items) i where i ->> 'nombre' is distinct from nom;
+  if d is not null and p_recargo > 0 then nuevos := nuevos || jsonb_build_array(jsonb_build_object('nombre', nom, 'cant', 1, 'precio', p_recargo)); end if;
+  update public.reservas set domicilio = d, items = nuevos,
+    total = greatest(0, total - viejo + case when d is not null then p_recargo else 0 end),
+    precio = greatest(0, precio - viejo + case when d is not null then p_recargo else 0 end), updated_at = now()
+  where id = r.id;
+end $$;
+create or replace function public.domicilio_limpio(p jsonb, viejo jsonb) returns jsonb
+language plpgsql immutable set search_path = '' as $$
+declare dir text := left(trim(coalesce(p ->> 'direccion', '')), 160);
+begin
+  if length(dir) < 5 then raise exception 'Escribe la dirección (calle y número)'; end if;
+  return jsonb_build_object('direccion', dir, 'comuna', left(trim(coalesce(p ->> 'comuna', '')), 60), 'ref', left(trim(coalesce(p ->> 'ref', '')), 160),
+    'orden', viejo -> 'orden', 'camino_at', viejo -> 'camino_at');
+end $$;
+
+-- Pública: ¿este taller va a domicilio? (para /t/). null = no.
+create or replace function public.domicilio_info(p_taller uuid) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare t public.talleres; c jsonb;
+begin
+  select * into t from public.talleres where id = p_taller and activo and not suspendido;
+  if t.id is null or not public.cfx_modulo_de('domicilio', t.owner_id) then return null; end if;
+  c := public.domicilio_cfg(t);
+  if not (c ->> 'activo')::boolean then return null; end if;
+  return c - 'activo';
+end $$;
+
+-- Pública: el cliente (con el link de su reserva) pide la visita a domicilio.
+create or replace function public.reserva_domicilio(p_token text, p jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas; t public.talleres; c jsonb; d jsonb;
+begin
+  select * into r from public.reservas where token = p_token and length(p_token) >= 20;
+  if r.id is null then return jsonb_build_object('ok', false, 'error', 'Reserva no encontrada'); end if;
+  if r.estado not in ('por_pagar', 'en_revision', 'confirmada') then return jsonb_build_object('ok', false, 'error', 'Esta reserva ya no se puede cambiar'); end if;
+  select * into t from public.talleres where id = r.taller_id;
+  c := public.domicilio_info(t.id);
+  if c is null then return jsonb_build_object('ok', false, 'error', 'Este taller no está yendo a domicilio'); end if;
+  begin d := public.domicilio_limpio(p, r.domicilio);
+  exception when others then return jsonb_build_object('ok', false, 'error', sqlerrm); end;
+  perform public.domicilio_aplicar(r.id, d, (c ->> 'recargo')::int);
+  if r.domicilio is null then
+    perform public.avisar_taller(t.id, '🚐 Visita a domicilio', r.nombre || ' · ' || to_char(r.fecha, 'DD/MM') || ' ' || to_char(r.hora, 'HH24:MI') || ' · ' || (d ->> 'direccion'), '/taller/#mas/domicilio');
+  end if;
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- Taller: configuración (solo el dueño).
+create or replace function public.taller_domicilio_config(p jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); rec int := coalesce(nullif(p ->> 'recargo', '')::int, 0);
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller'; end if;
+  if not public.taller_tiene('domicilio') then raise exception 'Necesitas el módulo 🚐 Mecánico a domicilio'; end if;
+  if rec < 0 or rec > 200000 then raise exception 'El recargo va de $0 a $200.000'; end if;
+  update public.talleres set domicilio = jsonb_build_object('activo', coalesce((p ->> 'activo')::boolean, false), 'recargo', rec,
+    'zona', left(trim(coalesce(p ->> 'zona', '')), 160)) where id = tid;
+  return public.domicilio_cfg((select t from public.talleres t where t.id = tid));
+end $$;
+
+-- Taller: poner/sacar la dirección de una orden (todo el equipo). p null o sin dirección = ya no es a domicilio.
+create or replace function public.taller_domicilio(p_id uuid, p jsonb) returns void
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); r public.reservas; t public.talleres;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('domicilio') then raise exception 'Necesitas el módulo 🚐 Mecánico a domicilio'; end if;
+  select * into r from public.reservas where id = p_id and taller_id = tid;
+  if r.id is null then raise exception 'Orden no encontrada'; end if;
+  if r.estado in ('completada', 'rechazada', 'expirada', 'cancelada', 'no_asistio') then raise exception 'Esta orden ya está cerrada'; end if;
+  select * into t from public.talleres where id = tid;
+  if p is null or trim(coalesce(p ->> 'direccion', '')) = '' then
+    perform public.domicilio_aplicar(r.id, null, 0);
+  else
+    -- Sin "recargo" (editar la dirección) = queda el recargo que ya tenía la orden.
+    perform public.domicilio_aplicar(r.id, public.domicilio_limpio(p, r.domicilio), case
+      when not (p ? 'recargo') then (select coalesce(sum((i ->> 'precio')::int), 0)::int from jsonb_array_elements(r.items) i where i ->> 'nombre' = '🚐 Visita a domicilio')
+      when coalesce((p ->> 'recargo')::boolean, true) then (public.domicilio_cfg(t) ->> 'recargo')::int else 0 end);
+  end if;
+end $$;
+
+-- Taller: ruta del día (todo el equipo).
+create or replace function public.taller_ruta(p_fecha date) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); t public.talleres;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  select * into t from public.talleres where id = tid;
+  if not public.taller_tiene('domicilio') then return jsonb_build_object('bloqueado', true); end if;
+  return jsonb_build_object('config', public.domicilio_cfg(t), 'hoy', (now() at time zone t.zona)::date,
+    'origen', concat_ws(', ', nullif(t.direccion, ''), nullif(t.comuna, '')),
+    'paradas', (select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'hora', to_char(r.hora, 'HH24:MI'), 'nombre', r.nombre, 'telefono', r.telefono,
+        'bici', r.bici, 'servicio', r.servicio_nombre, 'estado', r.estado, 'token', r.token, 'total', r.total,
+        'direccion', r.domicilio ->> 'direccion', 'comuna', r.domicilio ->> 'comuna', 'ref', r.domicilio ->> 'ref', 'camino_at', r.domicilio ->> 'camino_at')
+        order by (r.domicilio ->> 'orden')::int nulls last, r.hora), '[]')
+      from public.reservas r where r.taller_id = tid and r.fecha = p_fecha and r.domicilio is not null
+        and r.estado not in ('rechazada', 'expirada', 'cancelada', 'no_asistio')
+        and not (r.estado = 'por_pagar' and r.expira_at <= now())));
+end $$;
+
+-- Taller: guardar el orden de la ruta (lista de ids en el orden de visita).
+create or replace function public.taller_ruta_orden(p_ids uuid[]) returns void
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); i int;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('domicilio') then raise exception 'Necesitas el módulo 🚐 Mecánico a domicilio'; end if;
+  for i in 1 .. coalesce(array_length(p_ids, 1), 0) loop
+    update public.reservas set domicilio = jsonb_set(domicilio, '{orden}', to_jsonb(i)) where id = p_ids[i] and taller_id = tid and domicilio is not null;
+  end loop;
+end $$;
+
+-- Taller: "🚐 Voy en camino" → push al cliente con cuenta (la app abre además el WhatsApp).
+create or replace function public.taller_en_camino(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); r public.reservas; t public.talleres;
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not public.taller_tiene('domicilio') then raise exception 'Necesitas el módulo 🚐 Mecánico a domicilio'; end if;
+  select * into r from public.reservas where id = p_id and taller_id = tid and domicilio is not null for update;
+  if r.id is null then raise exception 'Esta orden no es a domicilio'; end if;
+  select * into t from public.talleres where id = tid;
+  update public.reservas set domicilio = jsonb_set(domicilio, '{camino_at}', to_jsonb(now())), updated_at = now() where id = r.id;
+  perform public.avisar(r.cliente_id, '🚐 Vamos en camino', t.nombre || ' va a ' || (r.domicilio ->> 'direccion'), '/r/?t=' || r.token);
+end $$;
+revoke all on function public.domicilio_cfg(public.talleres), public.domicilio_aplicar(uuid, jsonb, int), public.domicilio_limpio(jsonb, jsonb),
+  public.domicilio_info(uuid), public.reserva_domicilio(text, jsonb), public.taller_domicilio_config(jsonb), public.taller_domicilio(uuid, jsonb),
+  public.taller_ruta(date), public.taller_ruta_orden(uuid[]), public.taller_en_camino(uuid) from public, anon, authenticated;
+grant execute on function public.taller_domicilio_config(jsonb), public.taller_domicilio(uuid, jsonb), public.taller_ruta(date),
+  public.taller_ruta_orden(uuid[]), public.taller_en_camino(uuid) to authenticated;
+grant execute on function public.domicilio_info(uuid), public.reserva_domicilio(text, jsonb) to anon, authenticated;
 
 -- >>> CFX núcleo (no editar aquí: se copia de saas/nucleo/sql con sincronizar.py)
 -- ---------------------------------------------------------------------
@@ -5060,7 +5218,8 @@ language sql immutable as $$
          ('stock', '📦 Repuestos y stock', 'Stock de repuestos que baja solo con cada orden y pedido a tu proveedor por WhatsApp con un toque.'),
          ('certificadas', '🏷️ Bicis usadas certificadas', 'Vende bicis usadas con informe de 50 puntos, fotos y garantía: se publican en tu página y te escriben por WhatsApp.'),
          ('tradein', '🔄 Parte de pago', 'Calculadora: cuánto ofrecer por la bici usada del cliente para que se lleve una nueva o un arreglo.'),
-         ('pasaporte', '🪪 Pasaporte de la bici', 'Sticker QR para el cuadro: historial de mantenciones, dueño y aviso de robo. Quien la escanea sabe si es robada.')
+         ('pasaporte', '🪪 Pasaporte de la bici', 'Sticker QR para el cuadro: historial de mantenciones, dueño y aviso de robo. Quien la escanea sabe si es robada.'),
+         ('domicilio', '🚐 Mecánico a domicilio', 'El cliente reserva con su dirección (+ recargo de visita); armas la ruta del día y le avisas “Voy en camino”.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb

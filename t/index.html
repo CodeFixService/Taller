@@ -86,6 +86,9 @@
         </div>
         <label for="fBici">Tu bici (marca y modelo)</label><input id="fBici" maxlength="120" placeholder="Elige o escribe: Trek Marlin 5…" list="fabBicis" autocomplete="off">
         <label for="fNota">¿Qué le pasa? (opcional)</label><textarea id="fNota" maxlength="500" placeholder="Ej.: frena poco y el cambio salta"></textarea>
+        <div id="fDom" class="hidden" style="margin-top:12px"><label class="check"><input type="checkbox" id="fDomSi"> <span id="fDomTxt">🏠 Que vengan a mi casa</span></label>
+          <div id="fDomCampos" class="hidden"><label for="fDir">Dirección (calle y número)</label><input id="fDir" maxlength="160" autocomplete="street-address" placeholder="Ej.: Av. Grecia 1234, depto 52">
+            <div class="row"><div><label for="fCom">Comuna</label><input id="fCom" maxlength="60" autocomplete="address-level2"></div><div><label for="fRef">Referencia (opcional)</label><input id="fRef" maxlength="160" placeholder="Portón verde"></div></div></div></div>
         <div class="aviso" style="margin-top:14px"><div class="grow">
           <b>💳 Abono para confirmar: <span id="abono"></span></b> <span class="sub">(se descuenta del total)</span>
           <div class="sub" id="politica" style="margin-top:6px"></div></div></div>
@@ -249,6 +252,14 @@
     }).catch(() => {});
   };
   if (t.reservas_online) cargarDias();
+  // G59g 🧩 🚐 Mecánico a domicilio: si el taller lo ofrece, el cliente pone su dirección (+ recargo de la visita).
+  let dom = null;
+  try { dom = await App.rpc('domicilio_info', { p_taller: t.id }); } catch (e) { dom = null; }
+  if (dom) {
+    $('fDom').classList.remove('hidden');
+    $('fDomTxt').textContent = '🏠 Que vengan a mi casa' + (dom.recargo ? ' (+' + plata(dom.recargo) + ' la visita)' : '') + (dom.zona ? ' · ' + dom.zona : '');
+    $('fDomSi').onchange = () => $('fDomCampos').classList.toggle('hidden', !$('fDomSi').checked);
+  }
 
   // 3) Reservar
   $('bReservar').onclick = async () => {
@@ -256,12 +267,15 @@
     if (!dia || !hora) { $('fErr').textContent = 'Elige el día y la hora'; return; }
     if (!esMio && !$('fNom').value.trim()) { $('fErr').textContent = 'Escribe tu nombre'; return; }
     if (!esMio && App.telNorm($('fTel').value).length < 11) { $('fErr').textContent = 'Escribe tu WhatsApp (ej.: +56 9 1234 5678)'; return; }
+    const aCasa = !!(dom && $('fDomSi').checked);
+    if (aCasa && $('fDir').value.trim().length < 5) { $('fErr').textContent = 'Escribe tu dirección (calle y número)'; return; }
     b.disabled = true; b.textContent = 'Reservando…';
     try {
       const r = await App.rpc('reservar', { p_taller: t.id, p_servicio: serv, p_fecha: dia, p_hora: hora, p_nombre: $('fNom').value,
         p_telefono: $('fTel').value, p_email: $('fEmail').value, p_bici: $('fBici').value, p_nota: $('fNota').value,
         p_extras: Array.from($('servs').querySelectorAll('[data-x]:checked')).map((i) => i.dataset.x) });
       if (!r.ok) throw new Error(r.error);
+      if (aCasa) { try { await App.rpc('reserva_domicilio', { p_token: r.token, p: { direccion: $('fDir').value, comuna: $('fCom').value, ref: $('fRef').value } }); } catch (e) { /* la reserva ya quedó: la dirección se puede dar por WhatsApp */ } }
       try { const l = JSON.parse(localStorage.getItem('bt:reservas') || '[]'); l.unshift(r.token); localStorage.setItem('bt:reservas', JSON.stringify(l.slice(0, 20))); } catch (e) { /* sin espacio */ }
       location.href = '../r/?t=' + r.token;
     } catch (e) {

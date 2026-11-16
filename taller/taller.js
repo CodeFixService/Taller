@@ -41,7 +41,7 @@
     document.querySelectorAll('#mSeg .dueno').forEach((b) => b.classList.toggle('hidden', !P.dueno));
     $('mSeg').querySelector('[data-m=modulos]').classList.toggle('hidden', !P.dueno || !P.venta);  // 🧩 solo con la venta prendida (CM → Apps → 🚲 → 🧩)
     $('mSeg').querySelector('[data-m=stock]').classList.toggle('hidden', !P.dueno && !tiene('stock'));  // G59d 📦: el equipo solo si el taller lo tiene
-    ['usadas', 'tradein', 'pasaporte'].forEach((m) => $('mSeg').querySelector('[data-m=' + m + ']').classList.toggle('hidden', !P.dueno && !tiene(m === 'usadas' ? 'certificadas' : m)));  // G59e · G59f
+    ['usadas', 'tradein', 'pasaporte', 'domicilio'].forEach((m) => $('mSeg').querySelector('[data-m=' + m + ']').classList.toggle('hidden', !P.dueno && !tiene(m === 'usadas' ? 'certificadas' : m)));  // G59e · G59f
   }
   // G59 🧩 ¿El taller puede usar este módulo? (venta apagada = todos lo tienen)
   const tiene = (k) => !!(P && P.modulos && P.modulos[k]);
@@ -70,7 +70,7 @@
 
   /* ---------- Navegación ---------- */
   // #plan y #mas/<sección> (perfil, horario, servicios, abono…): abren esa parte de Más (la guía para partir los usa).
-  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock|usadas|tradein|pasaporte)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
+  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock|usadas|tradein|pasaporte|domicilio)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
   const show = App.pestanas((v) => {
     vista = v;
     if (v === 'hoy') pintarHoy();
@@ -121,6 +121,7 @@
     $('bienvenida').innerHTML = falta.length ? '<div class="card"><h2>👋 ' + esc(App.txt('bienvenida_taller') ? 'Para empezar' : '') + '</h2><p class="muted" style="margin-top:0">' +
       esc(App.txt('bienvenida_taller')) + '</p><ul class="list">' + falta.map((f) => '<li class="clic" data-m="' + f[0] + '" style="display:flex;align-items:center;gap:12px"><span aria-hidden="true" style="flex:none;width:22px;height:22px;border-radius:50%;border:2px solid color-mix(in srgb,var(--brand,#0ea5e9) 55%,transparent)"></span><span class="grow">' + esc(f[1]) + '</span><span>›</span></li>').join('') + '</ul></div>' : '';
     $('hStock').innerHTML = tiene('stock') && P.stock_bajo ? '<div class="aviso warn"><div class="grow">📦 ' + P.stock_bajo + ' repuesto' + (P.stock_bajo === 1 ? '' : 's') + ' por pedir a tu proveedor.</div><button class="small" type="button" data-m="stock">🛒 Ver</button></div>' : '';
+    $('hDom').innerHTML = tiene('domicilio') && P.domicilio_hoy ? '<div class="aviso"><div class="grow">🚐 ' + P.domicilio_hoy + ' visita' + (P.domicilio_hoy === 1 ? '' : 's') + ' a domicilio hoy.</div><button class="small" type="button" data-m="domicilio">🗺️ Ruta</button></div>' : '';  // G59g
     $('hLink').textContent = linkReservas(); $('hAbrir').href = linkReservas();
     $('kRev').textContent = P.por_revisar; $('kDev').textContent = P.por_devolver;
     // Plan
@@ -419,13 +420,13 @@
       '<h2 style="margin-top:12px">' + esc(r.nombre) + ' ' + (r.nota_cliente && r.nota_cliente.total ? '<span class="stars">★ ' + String(r.nota_cliente.promedio).replace('.', ',') + '</span>' : '') +
       (r.faltas ? ' <span class="pill bad">' + r.faltas + ' falta' + (r.faltas > 1 ? 's' : '') + '</span>' : '') + '</h2>' +
       '<div class="muted">' + App.fLarga(r.fecha) + ' · ' + r.hora + '–' + r.hora_fin + (r.entrega_estimada ? ' · 📦 entrega ' + App.fCorta(r.entrega_estimada) : '') + '</div><div class="muted">' + esc(r.servicio_nombre) + (r.precio ? ' · ' + plata(r.precio) : '') + '</div>' +
-      (r.bici ? '<div>🚲 ' + esc(r.bici) + '</div>' : '') + (r.nota ? '<div class="sub">📝 ' + esc(r.nota) + '</div>' : '') +
+      (r.bici ? '<div>🚲 ' + esc(r.bici) + '</div>' : '') + (r.domicilio ? '<div id="dDomTxt">🏠 A domicilio: <b>' + esc([r.domicilio.direccion, r.domicilio.comuna].filter(Boolean).join(', ')) + '</b>' + (r.domicilio.ref ? '<div class="sub">' + esc(r.domicilio.ref) + '</div>' : '') + (r.domicilio.camino_at ? '<div class="sub">🚐 Avisado: vamos en camino</div>' : '') + '</div>' : '') + (r.nota ? '<div class="sub">📝 ' + esc(r.nota) + '</div>' : '') +
       '<div class="sub">📞 ' + esc(r.telefono) + (r.email ? ' · ' + esc(r.email) : '') + ' · ' + (r.origen === 'taller' ? 'Reserva del taller' : r.origen === 'cliente' ? 'Cliente con cuenta' : 'Reserva online') + '</div>' +
       '<div class="sub">💳 ' + ABONO[r.abono_estado] + (r.abono_monto ? ' · ' + plata(r.abono_monto) : '') + (r.reagendada ? ' · reagendada ' + r.reagendada + ' vez/veces' : '') + '</div>' +
       (r.motivo ? '<div class="sub">Motivo: ' + esc(r.motivo) + '</div>' : '') +
       '<div class="btns">' + (r.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(r.telefono, 'Hola ' + r.nombre.split(' ')[0] + ' 👋 Te escribimos de ' + P.taller.nombre + ': ' +
         (msgCliente || '') + '\nTu reserva: ' + link) + '">📲 WhatsApp</a>' : '') +
-      '<button class="small ghost" id="dLink">🔗 Enlace del cliente</button>' + (tiene('pasaporte') ? '<button class="small ghost" id="dPas">🪪 Pasaporte</button>' : P.venta && r.bici ? '<button class="small ghost" type="button" data-sin-atras data-ofrecer="pasaporte">🪪 Pasaporte</button>' : '') + (r.tiene_comprobante ? '<button class="small ghost" data-comp="' + r.id + '">👁️ Comprobante</button>' : '') + '</div>' +
+      '<button class="small ghost" id="dLink">🔗 Enlace del cliente</button>' + (tiene('domicilio') && !['completada', 'rechazada', 'expirada', 'cancelada', 'no_asistio'].includes(r.estado) ? '<button class="small ghost" id="dDom" type="button">🚐 ' + (r.domicilio ? 'Domicilio' : 'A domicilio') + '</button>' : '') + (tiene('pasaporte') ? '<button class="small ghost" id="dPas">🪪 Pasaporte</button>' : P.venta && r.bici ? '<button class="small ghost" type="button" data-sin-atras data-ofrecer="pasaporte">🪪 Pasaporte</button>' : '') + (r.tiene_comprobante ? '<button class="small ghost" data-comp="' + r.id + '">👁️ Comprobante</button>' : '') + '</div>' +
       (r.estado === 'en_revision' ? botonesRevisar(r) : '') +
       (r.estado === 'lista' && !tiene('aviso_lista') && P.venta ? '<div class="aviso" style="margin-top:12px"><div class="grow">🔔 Avísale solo con el total y el link, y recuérdale si no la retira.</div><button class="small" type="button" data-sin-atras data-ofrecer="aviso_lista">🧩 Ver</button></div>' : '') +
       (r.abono_estado === 'devolver' ? '<div class="aviso warn" style="margin-top:12px"><div class="grow">Devuelve el abono de ' + plata(r.abono_monto) + ' al cliente.</div><button class="small okb" data-devuelto="' + r.id + '">✓ Ya lo devolví</button></div>' : '') +
@@ -453,6 +454,7 @@
     show('detalle');
     $('dVolver').onclick = () => history.length > 1 ? show(volverA) : show('reservas');
     $('dLink').onclick = () => { navigator.clipboard.writeText(link).then(() => toast('🔗 Enlace copiado')); };
+    const dom = $('dDom'); if (dom) dom.onclick = () => editarDomicilio(r, () => abrirDetalle(r.id));  // G59g
     const pas = $('dPas'); if (pas) pas.onclick = () => editarPasaporte(r.pasaporte_id || null, { bici: r.bici, dueno: r.nombre, telefono: r.telefono, reserva: r.id }, () => abrirDetalle(r.id));  // G59f
     $('v-detalle').onclick = async (ev) => {
       if (await accionesComunes(ev)) return;
@@ -608,15 +610,15 @@
   let subMas = null;
   $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); } };
   // Más = menú común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (body() dibuja dentro de ella).
-  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes', pasaporte: 'Ventas y clientes',
+  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes', pasaporte: 'Ventas y clientes', domicilio: 'Tu taller',
     stats: 'Ventas y clientes', recordar: 'Ventas y clientes', plan: 'Tu plan', modulos: 'Tu plan', cuenta: 'Configuración' };
   const K2 = { plan: 'premium', cuenta: 'micuenta', chat: 'mensajes' };
-  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', usadas: '🏷️', tradein: '🔄', pasaporte: '🪪', cuenta: '👤' };
+  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', usadas: '🏷️', tradein: '🔄', pasaporte: '🪪', domicilio: '🚐', cuenta: '👤' };
   let hojaMas = null;
   function abrirSec(m) {
     if (m === 'chat') { $('chatBtn').click(); return; }
     const b = $('mSeg').querySelector('[data-m="' + m + '"]'); if (!b || b.classList.contains('hidden')) return;
-    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, usadas: verUsadas, tradein: verTradein, pasaporte: verPasaportes };
+    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, usadas: verUsadas, tradein: verTradein, pasaporte: verPasaportes, domicilio: verDomicilio };
     if (!hojaMas || hojaMas.m !== m || !hojaMas.h.d.isConnected) {
       const h = window.CFX_MENU.hoja((ICO[m] || '') + ' ' + esc(b.textContent.replace(/\d+$/, '').replace(/^[^\p{L}]+/u, '').trim()), () => { if (hojaMas && hojaMas.h === h) { hojaMas = null; subMas = null; } });
       hojaMas = { m, h };
@@ -1192,6 +1194,75 @@
     };
     const qb = q1('#paQ'); if (qb) qb.onclick = () => stickerPas(x);
     const xb = q1('#paX'); if (xb) xb.onclick = async () => { if (!await confirmar('¿Borrar el pasaporte de "' + x.bici + '"? El sticker QR deja de funcionar.')) return; try { await rpc('taller_pasaporte_borrar', { p_id: id }); d.close(); verPasaportes(); } catch (e) { toast(e.message); } };
+  }
+
+  // ---- G59g 🧩 🚐 Mecánico a domicilio: ruta del día (orden ▲▼, Google Maps) + "Voy en camino"
+  const lugar = (x) => [x.direccion, x.comuna].filter(Boolean).join(', ');
+  const mapa = (x) => 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(lugar(x));
+  const waCamino = (x) => App.wa(x.telefono, 'Hola ' + x.nombre.split(' ')[0] + ' 👋 Somos de ' + P.taller.nombre + ': 🚐 vamos en camino a ' + lugar(x) + '. Tu orden: ' + App.ROOT + 'r/?t=' + x.token);
+  async function enCamino(x, alListo) {
+    try { await rpc('taller_en_camino', { p_id: x.id }); } catch (e) { toast(e.message); return; }
+    toast('🚐 Avisado'); if (alListo) alListo();
+  }
+  let rutaDia = 0;  // 0 = hoy, 1 = mañana
+  async function verDomicilio() {
+    body().innerHTML = '<p class="empty">Cargando…</p>';
+    const hoy = new Date(P.hoy + 'T12:00:00'); hoy.setDate(hoy.getDate() + rutaDia);
+    const fecha = hoy.toISOString().slice(0, 10);
+    let s;
+    try { s = await rpc('taller_ruta', { p_fecha: fecha }); } catch (e) { body().innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    if (s.bloqueado) { body().innerHTML = modOfrecer('domicilio', '🚐 Mecánico a domicilio', 'Tus clientes reservan con su dirección y pagan la visita. Ves la ruta del día en orden, la abres en Google Maps y les avisas “🚐 Vamos en camino”.'); return; }
+    const c = s.config, L = s.paradas;
+    const ruta = L.length ? 'https://www.google.com/maps/dir/?api=1' + (s.origen ? '&origin=' + encodeURIComponent(s.origen) : '') + '&destination=' + encodeURIComponent(lugar(L[L.length - 1])) +
+      (L.length > 1 ? '&waypoints=' + encodeURIComponent(L.slice(0, -1).map(lugar).join('|')) : '') + '&travelmode=driving' : '';
+    body().innerHTML = (!c.activo ? '<div class="aviso warn"><div class="grow">' + (P.dueno ? 'Prende “Ofrecer a domicilio” para que tus clientes lo elijan al reservar.' : 'El dueño aún no ofrece visitas a domicilio en la página de reservas.') + '</div></div>' : '') +
+      '<div class="card"><h2>🗺️ Ruta del día</h2><div class="seg" id="rDia"><button type="button" data-d="0" class="' + (rutaDia ? '' : 'on') + '">Hoy</button><button type="button" data-d="1" class="' + (rutaDia ? 'on' : '') + '">Mañana</button></div>' +
+      '<p class="sub">' + (L.length ? L.length + ' visita' + (L.length === 1 ? '' : 's') + ' · ordénalas con ▲▼ y abre la ruta.' : 'No hay visitas a domicilio ' + (rutaDia ? 'mañana' : 'hoy') + '. Abre una orden → 🚐 A domicilio para agregar una.') + '</p>' +
+      '<ul class="list" id="rLista">' + L.map((x, i) => '<li style="align-items:flex-start"><span class="pill" style="flex:none">' + (i + 1) + '</span><div class="grow"><b>' + esc(x.hora) + ' · ' + esc(x.nombre) + '</b>' +
+        '<div class="sub">🏠 ' + esc(lugar(x)) + (x.ref ? ' · ' + esc(x.ref) : '') + '</div><div class="sub">🚲 ' + esc(x.bici || x.servicio) + (x.camino_at ? ' · 🚐 avisado' : '') + '</div>' +
+        '<div class="btns" style="margin-top:6px"><a class="btn small ghost" target="_blank" rel="noopener" href="' + esc(mapa(x)) + '">🗺️ Cómo llegar</a>' +
+        (x.telefono ? '<button class="small alt" type="button" data-cam="' + i + '">🚐 Voy en camino</button>' : '') + '<button class="small ghost" type="button" data-ord="' + esc(x.id) + '">📋 Orden</button></div></div>' +
+        '<div style="display:flex;flex-direction:column;gap:4px;flex:none"><button class="small ghost" type="button" data-sin-atras data-sube="' + i + '" aria-label="Subir"' + (i ? '' : ' disabled') + '>▲</button>' +
+        '<button class="small ghost" type="button" data-sin-atras data-baja="' + i + '" aria-label="Bajar"' + (i < L.length - 1 ? '' : ' disabled') + '>▼</button></div></li>').join('') + '</ul>' +
+      (L.length ? '<div class="btns"><a class="btn" id="rMaps" target="_blank" rel="noopener" href="' + esc(ruta) + '">🗺️ Abrir la ruta en Google Maps</a></div>' : '') + '</div>' +
+      (P.dueno ? '<div class="card"><h2>⚙️ Visitas a domicilio</h2><label class="check"><input type="checkbox" id="dmA"' + (c.activo ? ' checked' : '') + '> Ofrecer a domicilio en mi página de reservas</label>' +
+        '<div class="row"><div><label for="dmR">Recargo por visita ($)</label><input id="dmR" type="number" min="0" max="200000" step="500" inputmode="numeric" value="' + (c.recargo || 0) + '"></div>' +
+        '<div><label for="dmZ">Zona que atiendes</label><input id="dmZ" maxlength="160" value="' + esc(c.zona) + '" placeholder="Ej: Ñuñoa, Providencia"></div></div>' +
+        '<div class="btns"><button id="dmG" type="button">💾 Guardar</button></div></div>' : '');
+    const mover = async (i, j) => {
+      const ids = L.map((x) => x.id); [ids[i], ids[j]] = [ids[j], ids[i]];
+      try { await rpc('taller_ruta_orden', { p_ids: ids }); verDomicilio(); } catch (e) { toast(e.message); }
+    };
+    body().onclick = async (e) => {
+      const d = e.target.closest('[data-d]'); if (d) { rutaDia = +d.dataset.d; verDomicilio(); return; }
+      const su = e.target.closest('[data-sube]'); if (su) { mover(+su.dataset.sube, +su.dataset.sube - 1); return; }
+      const ba = e.target.closest('[data-baja]'); if (ba) { mover(+ba.dataset.baja, +ba.dataset.baja + 1); return; }
+      const ca = e.target.closest('[data-cam]'); if (ca) { const x = L[+ca.dataset.cam]; window.open(waCamino(x), '_blank', 'noopener'); enCamino(x, verDomicilio); return; }
+      const o = e.target.closest('[data-ord]'); if (o) { const id = o.dataset.ord; if (hojaMas) hojaMas.h.cerrar(); setTimeout(() => { volverA = 'hoy'; abrirDetalle(id); }, 300); return; }
+      if (e.target.closest('#dmG')) {
+        try { await rpc('taller_domicilio_config', { p: { activo: body().querySelector('#dmA').checked, recargo: +body().querySelector('#dmR').value || 0, zona: body().querySelector('#dmZ').value } }); toast('💾 Guardado'); verDomicilio(); }
+        catch (err) { toast(err.message); }
+      }
+    };
+  }
+  // Orden → 🚐 A domicilio: dirección de la visita (suma el recargo como ítem).
+  function editarDomicilio(r, alGuardar) {
+    const x = r.domicilio || { direccion: '', comuna: '', ref: '' };
+    const d = modal('<h2>🚐 Visita a domicilio</h2><p class="sub" style="margin-top:0">' + esc(r.nombre) + ' · ' + App.fCorta(r.fecha) + ' ' + esc(r.hora) + '</p>' +
+      '<label for="doD">Dirección (calle y número)</label><input id="doD" maxlength="160" autocomplete="street-address" value="' + esc(x.direccion) + '" placeholder="Ej: Av. Grecia 1234, depto 52">' +
+      '<label for="doC">Comuna</label><input id="doC" maxlength="60" value="' + esc(x.comuna) + '">' +
+      '<label for="doR">Referencia (opcional)</label><input id="doR" maxlength="160" value="' + esc(x.ref) + '" placeholder="Ej: portón verde, tocar el timbre">' +
+      (!r.domicilio ? '<label class="check"><input type="checkbox" id="doX" checked> Sumar el recargo por visita a la orden</label>' : '') +
+      '<div class="btns">' + (r.domicilio ? '<button class="danger" id="doQ" type="button">🏪 Ya no es a domicilio</button>' : '') + '<button id="doG" type="button">💾 Guardar</button></div>' +
+      (r.domicilio ? '<div class="btns"><a class="btn ghost" target="_blank" rel="noopener" href="' + esc(mapa(x)) + '">🗺️ Cómo llegar</a>' +
+        (r.telefono ? '<button class="alt" id="doW" type="button">🚐 Voy en camino</button>' : '') + '</div>' : ''));
+    const q1 = (s) => d.querySelector(s);
+    const guardar = async (p, msg) => {
+      try { await rpc('taller_domicilio', { p_id: r.id, p }); d.close(); toast(msg); if (alGuardar) alGuardar(); } catch (e) { toast(e.message); }
+    };
+    q1('#doG').onclick = () => guardar({ direccion: q1('#doD').value, comuna: q1('#doC').value, ref: q1('#doR').value, recargo: q1('#doX') ? q1('#doX').checked : undefined }, '🚐 Guardado');
+    const qb = q1('#doQ'); if (qb) qb.onclick = async () => { if (await confirmar('¿Ya no es a domicilio? Se quita la dirección y el recargo de la visita.')) guardar(null, '🏪 Ahora es en el taller'); };
+    const wb = q1('#doW'); if (wb) wb.onclick = () => { window.open(waCamino(Object.assign({}, r, x)), '_blank', 'noopener'); d.close(); enCamino(r, alGuardar); };
   }
   async function verPlan() {
     const planes = pub.planes || {};

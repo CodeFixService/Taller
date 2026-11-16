@@ -18,7 +18,7 @@
 - Ganchos del núcleo (schema.sql, después de taller_checklist): cfx_negocio_de_cuenta(u) = owner_id del taller · cfx_es_premium(n) = taller_es_premium · cfx_modulos_app() = ['presupuesto'] (sumar aquí los próximos; catálogo + demo en SaaS/nucleo: sql/modulos_venta.sql y modulos.js). NO vienen en Premium (G39). Packs del núcleo se vacían (al final de schema.sql, solo si siguen los de fábrica).
 - taller_tiene(clave) en la base · taller_panel trae modulos (cfx_modulos()) y venta → JS tiene(k) / ofrecer(k) (demo ▶️ + Comprar; equipo: "pídele al dueño"). Más → 🧩 Módulos (data-m=modulos, solo dueño y con la venta prendida) = CFX_MODULOS_TIENDA.montar.
 - ✅ Presupuesto por link: reservas.presupuesto {estado enviado|respondido, enviado_at, respondido_at} + items[i].aprob pend|si|no. taller_presupuesto(id) (marca ⏳ lo no respondido, avisa al cliente) · reserva_presupuesto(token, {"0":"si","1":"no"}) (anon, responde todos, avisa al taller). Total sin lo rechazado (taller_trabajo y JS). Editar un ítem le borra aprob. Taller: #dPres en la orden (✅ Pedir aprobación + 📲 WhatsApp); cliente: #cPres en /r/.
-- Siguiente: pasaporte QR → domicilio (✅ aviso lista, recordatorio, stock, certificadas+trade-in). (Fotos del daño por ítem: pendiente, hoy usa 📸 Llegada.)
+- Siguiente: 🛠️ garantías → 🔁 plan mensual (✅ aviso lista, recordatorio, stock, certificadas+trade-in, pasaporte, domicilio). (Fotos del daño por ítem: pendiente, hoy usa 📸 Llegada.)
 
 ## 🏭 G65 · De fábrica (2.87, bd 2.30) — prueba SaaS/pruebas/g65_fabrica.js
 - SQL (final de schema.sql): taller_fabrica_agregar(tid) (lista de 23; agrega lo que falta por nombre hasta el límite) · trigger talleres_fabrica (taller nuevo) · RPC taller_servicios_fabrica() (solo dueño; botón ✨ en Más → Servicios) · FREE servicios 40.
@@ -51,4 +51,12 @@
 - RPC: taller_pasaportes() ({bloqueado} sin módulo) · taller_pasaporte(id) con historial (lista/completada, sin ítems rechazados) · taller_pasaporte_guardar(p) = todo el equipo (p.reserva enlaza la orden + las de ese teléfono y bici) · taller_pasaporte_borrar = solo dueño · públicas: pasaporte_ver(token, clave) (serie tapada salvo 4 últimos; con clave = es_dueno) y pasaporte_reportar(token, clave, robada, nota) → avisa al dueño del taller.
 - Pantalla: Más → 🪪 Pasaporte de la bici (lista, 🚨 robadas primero, buscar) y orden → 🪪 Pasaporte (crea con bici/dueño/teléfono de la orden). En el pasaporte: 🚨 Reportar robo / ✅ La recuperó, 🖨️ Sticker QR (2 de 5 cm), 📲 Enviar al dueño (link con clave), 👀 Ver ficha.
 - Público: p/?t=token (&c=clave del dueño: 🚨 Me la robaron / ✅ La recuperé). r/ muestra "🪪 Ver mi pasaporte" con la clave. p/ en FILES de sw.js.
+
+## 🚐 G59g · Módulo Mecánico a domicilio (2.92, bd 2.35 · núcleo 2.88) — prueba SaaS/pruebas/g59g_domicilio.js
+- cfx_modulos_app() suma 'domicilio'. Catálogo + demo en el núcleo.
+- talleres.domicilio { activo, recargo, zona } (solo dueño: taller_domicilio_config) · reservas.domicilio { direccion, comuna, ref, orden, camino_at }.
+- domicilio_aplicar pone/saca el ítem "🚐 Visita a domicilio" (recargo) una sola vez y ajusta total/precio. taller_domicilio(id, p): p sin "recargo" = deja el que tenía; p null = ya no es a domicilio.
+- Públicas: domicilio_info(taller) (null si no tiene módulo o no está prendido) · reserva_domicilio(token, p) (por_pagar/en_revision/confirmada; avisa al taller la 1ª vez). /t/ #fDom "🏠 Que vengan a mi casa (+$X)" → después de reservar llama reserva_domicilio. /r/ #cDom + "🚐 ¡Vamos en camino!".
+- Taller: Más → 🚐 A domicilio (verDomicilio): Ruta del día Hoy/Mañana (taller_ruta), ▲▼ (taller_ruta_orden), 🗺️ Cómo llegar / Abrir la ruta en Google Maps (origen = dirección del taller, waypoints), 🚐 Voy en camino (WhatsApp + taller_en_camino → push al cliente con cuenta), ⚙️ configuración. Orden: #dDom (editarDomicilio) + #dDomTxt. Hoy: #hDom "N visitas a domicilio hoy".
+- Error visto: al volver a guardar la dirección se borraba el recargo (el JS mandaba recargo:false) → sin "recargo" queda el que tenía (categoría DATOS).
 
