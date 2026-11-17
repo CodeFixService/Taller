@@ -638,6 +638,9 @@ create table if not exists public.fotos_trabajo (
 );
 create index if not exists fotos_r_idx on public.fotos_trabajo (reserva_id);
 alter table public.fotos_trabajo enable row level security;
+-- G91 📸 Foto del daño por ítem: tipo 'dano' (el ítem guarda su id en items[i].foto).
+alter table public.fotos_trabajo drop constraint if exists fotos_trabajo_tipo_check;
+alter table public.fotos_trabajo add constraint fotos_trabajo_tipo_check check (tipo in ('antes', 'despues', 'dano'));
 
 -- Comprobantes (imagen liviana). Se borran solos después de N días.
 create table if not exists public.comprobantes (
@@ -1513,6 +1516,9 @@ begin
   where id = p_id and taller_id = tid
   returning * into r;
   if r.id is null then raise exception 'Reserva no encontrada'; end if;
+  -- G91 📸 La foto del daño de un ítem que ya no está se borra.
+  delete from public.fotos_trabajo f where f.reserva_id = r.id and f.tipo = 'dano'
+    and not exists (select 1 from jsonb_array_elements(p_items) it where it->>'foto' = f.id::text);
   -- Al mecánico que le asignan la reserva (si no se la asignó él mismo).
   if p_mecanico is not null and p_mecanico is distinct from antes and p_mecanico <> auth.uid() then
     perform public.avisar(p_mecanico, '📅 Te asignaron una reserva',
@@ -2550,9 +2556,12 @@ begin
   select * into r from public.reservas where id = p_reserva and taller_id = tid;
   if r.id is null then raise exception 'Reserva no encontrada'; end if;
   -- G59: las fotos de llegada y entrega son GRATIS (antes eran Premium).
-  if p_tipo not in ('antes', 'despues') then raise exception 'Tipo no válido'; end if;
+  if p_tipo not in ('antes', 'despues', 'dano') then raise exception 'Tipo no válido'; end if;
   if p_imagen !~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' or length(p_imagen) > 160000 then raise exception 'Imagen no válida o muy pesada'; end if;
-  if (select count(*) from public.fotos_trabajo where reserva_id = r.id and tipo = p_tipo) >= 2 then
+  if p_tipo = 'dano' and (select count(*) from public.fotos_trabajo where reserva_id = r.id and tipo = 'dano') >= 12 then
+    raise exception 'Máximo 12 fotos de daño por orden. Borra una para subir otra.';
+  end if;
+  if p_tipo <> 'dano' and (select count(*) from public.fotos_trabajo where reserva_id = r.id and tipo = p_tipo) >= 2 then
     raise exception 'Máximo 2 fotos de "%". Borra una para subir otra.', case when p_tipo = 'antes' then 'antes' else 'después' end;
   end if;
   insert into public.fotos_trabajo (reserva_id, tipo, imagen) values (r.id, p_tipo, p_imagen);
@@ -2577,7 +2586,7 @@ end $$;
 -- El cliente ve las fotos desde el enlace de su reserva (ver fotos_visibles).
 create or replace function public.reserva_fotos(p_token text) returns jsonb
 language sql stable security definer set search_path = '' as $$
-  select coalesce(jsonb_agg(jsonb_build_object('tipo', f.tipo, 'imagen', f.imagen) order by f.tipo, f.created_at), '[]')
+  select coalesce(jsonb_agg(jsonb_build_object('id', f.id, 'tipo', f.tipo, 'imagen', f.imagen) order by f.tipo, f.created_at), '[]')
   from public.reservas r join public.fotos_trabajo f on f.reserva_id = r.id
   where r.token = p_token and length(p_token) >= 20 and public.fotos_visibles(r)
 $$;

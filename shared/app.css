@@ -218,6 +218,9 @@ footer.pie button { background: none; color: var(--brand); padding: 2px 4px; fon
 .items .it input { padding: 9px 10px; }
 .items .it button { padding: 6px; }
 .items .it .ap { grid-column: 1 / -1; font-size: 13px; font-weight: 700; margin-top: -2px; }
+.items .it .fd { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; margin-top: -2px; font-size: 13px; }
+.items .it .fd img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; cursor: zoom-in; background: var(--cfx-borde, #e2e8f0); }
+.items .it .fd label { margin: 0; cursor: pointer; color: var(--brand); font-weight: 700; }
 .items .it .ap.si { color: var(--ok); } .items .it .ap.no { color: var(--bad); } .items .it .ap.pend { color: var(--warn); }
 .tl { list-style: none; padding: 0; margin: 10px 0 0; }
 .tl li { position: relative; padding: 0 0 14px 26px; color: var(--muted); font-size: 14px; }

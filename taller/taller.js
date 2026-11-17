@@ -422,7 +422,7 @@
     try { r = (await rpc('taller_reservas', { p_desde: P.hoy, p_hasta: P.hoy, p_estados: null, p_id: id }))[0]; }
     catch (e) { toast(e.message); return; }
     if (!r) { toast('No encontré la reserva'); return; }
-    detalle = r; items = JSON.parse(JSON.stringify(r.items || []));
+    detalle = r; items = JSON.parse(JSON.stringify(r.items || [])); fotosR = [];
     // Reserva online sin detalle todavía: parte con el servicio reservado.
     if (!items.length && r.servicio_id && r.precio) items = [{ nombre: r.servicio_nombre, cant: 1, precio: r.precio }];
     const e = ESTADOS[r.estado] || [r.estado, ''];
@@ -507,7 +507,23 @@
         if (pf && !items[i].precio) { items[i].precio = pf; const ip = $('dItems').querySelector('[data-i="' + i + '"][data-k=precio]'); if (ip) ip.value = pf; }
         totalItems();
       };
-      $('dItems').onclick = (ev) => { const x = ev.target.closest('[data-x]'); if (x) { items.splice(+x.dataset.x, 1); pintarItems(); } };
+      $('dItems').onclick = async (ev) => {
+        const im = ev.target.closest('[data-fver]'); if (im) { App.verImagen(im.src, im.alt, 'dano.jpg'); return; }
+        const q = ev.target.closest('[data-fq]'); if (q) { if (!await confirmar('¿Quitar la foto de este ítem?')) return; delete items[+q.dataset.fq].foto; await guardarTrabajo(true).catch(() => {}); pintarFotos(detalle.id); return; }
+        const x = ev.target.closest('[data-x]'); if (x) { items.splice(+x.dataset.x, 1); pintarItems(); }
+      };
+      $('dItems').onchange = async (ev) => {  // G91 📸 foto del daño del ítem
+        const fi = ev.target.closest('[data-fi]'); if (!fi || !fi.files[0]) return;
+        const f = fi.files[0], i = +fi.dataset.fi; fi.value = '';
+        if (!String(items[i].nombre || '').trim()) { toast('Primero escribe qué es el ítem'); return; }
+        try {
+          const antes = new Set(fotosR.map((x) => x.id));
+          fotosR = await rpc('taller_foto_subir', { p_reserva: detalle.id, p_tipo: 'dano', p_imagen: await App.comprimirFoto(f) });
+          const nueva = fotosR.find((x) => x.tipo === 'dano' && !antes.has(x.id));
+          if (nueva) { items[i].foto = nueva.id; await guardarTrabajo(true); }
+          pintarItems(); toast('📸 Foto del daño guardada');
+        } catch (err) { toast(err.message); }
+      };
       $('dAddS').onchange = () => { const s = servicios.find((x) => x.id === $('dAddS').value); if (s) items.push({ nombre: s.nombre, cant: 1, precio: s.precio }); $('dAddS').value = ''; pintarItems(); };
       $('dAddR').onclick = () => { items.push({ nombre: '', cant: 1, precio: 0 }); pintarItems(); const ins = $('dItems').querySelectorAll('[data-k=nombre]'); ins[ins.length - 1].focus(); };
       $('dGuardar').onclick = () => guardarTrabajo(false);
@@ -556,6 +572,8 @@
     const el = $('dFotos');
     let fotos = [];
     try { fotos = await rpc('taller_fotos', { p_reserva: id }); } catch (e) { el.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    if (detalle && detalle.id === id) { fotosR = fotos; if ($('dItems') && items.some((it) => it.foto)) pintarItems(); }  // G91 📸 las del daño van en su ítem
+    fotos = fotos.filter((f) => f.tipo !== 'dano');
     const n = (t) => fotos.filter((f) => f.tipo === t).length;
     el.innerHTML = '<p class="sub" style="margin-top:0">Hasta 2 al llegar y 2 al entregar. Te cuidan si hay reclamos y el cliente las ve en su enlace.</p>' +
       (fotos.length ? '<div class="fotos">' + fotos.map((f) => '<figure><img alt="Foto ' + f.tipo + '" src="' + f.imagen + '"><figcaption>' + (f.tipo === 'antes' ? 'Llegada' : 'Entrega') + '</figcaption>' +
@@ -581,9 +599,14 @@
   function pintarItems() {
     $('dItems').innerHTML = items.length ? items.map((it, i) => '<div class="it"><input data-i="' + i + '" data-k="nombre" value="' + esc(it.nombre) + '" placeholder="Elige o escribe" aria-label="Descripción" list="' + (ST ? 'stRep' : 'fabRep') + '">' +
       '<input data-i="' + i + '" data-k="cant" value="' + it.cant + '" inputmode="numeric" aria-label="Cantidad"><input data-i="' + i + '" data-k="precio" value="' + it.precio + '" inputmode="numeric" aria-label="Precio">' +
-      '<button class="danger" data-x="' + i + '" aria-label="Quitar">✕</button>' + (APROB[it.aprob] ? '<div class="ap ' + it.aprob + '">' + APROB[it.aprob] + '</div>' : '') + stockDe(it) + '</div>').join('') : '<p class="sub" style="margin:0">Agrega lo que se hizo y los repuestos.</p>';
+      '<button class="danger" data-x="' + i + '" aria-label="Quitar">✕</button>' + fotoItem(it, i) + (APROB[it.aprob] ? '<div class="ap ' + it.aprob + '">' + APROB[it.aprob] + '</div>' : '') + stockDe(it) + '</div>').join('') : '<p class="sub" style="margin:0">Agrega lo que se hizo y los repuestos.</p>';
     totalItems();
   }
+  // G91 📸 Foto del daño por ítem (el cliente la ve al aprobar el presupuesto).
+  let fotosR = [];
+  const fotoItem = (it, i) => { const f = it.foto && fotosR.find((x) => x.id === it.foto);
+    return '<div class="fd">' + (f ? '<img src="' + f.imagen + '" alt="Daño: ' + esc(it.nombre || 'ítem') + '" data-fver><button type="button" class="small ghost" data-fq="' + i + '" data-sin-atras>✕ Quitar foto</button>'
+      : it.foto ? '<span class="sub">📸 Foto guardada</span>' : '<label>📷 Foto del daño<input type="file" accept="image/*" capture="environment" data-fi="' + i + '" hidden></label>') + '</div>'; };
   // G59d 📦 Debajo del ítem: cuántos quedan (baja al entregar).
   const stockDe = (it) => { const x = repDe(it.nombre); return x ? '<div class="ap ' + (x.stock < (+it.cant || 1) ? 'no' : x.minimo > 0 && x.stock <= x.minimo ? 'pend' : 'si') + '">📦 ' + (x.stock ? 'Quedan ' + x.stock + ' en stock' : 'Sin stock: pídelo') + '</div>' : ''; };
   const APROB = { pend: '⏳ Esperando al cliente', si: '✅ Aprobado por el cliente', no: '❌ Rechazado: no se cobra' };
@@ -608,7 +631,7 @@
   }
   async function guardarTrabajo(callado) {
     const limpios = items.filter((it) => String(it.nombre || '').trim()).map((it) => Object.assign({ nombre: String(it.nombre).trim().slice(0, 100), cant: Math.max(+it.cant || 1, 0), precio: Math.max(Math.round(+it.precio || 0), 0) },
-      APROB[it.aprob] ? { aprob: it.aprob } : {}));
+      APROB[it.aprob] ? { aprob: it.aprob } : {}, /^[0-9a-f-]{36}$/.test(it.foto || '') ? { foto: it.foto } : {}));
     try {
       await rpc('taller_trabajo', { p_id: detalle.id, p_items: limpios, p_diagnostico: $('dDiag').value, p_notas: $('dNotas').value, p_mecanico: $('dMec').value || null, p_proxima: $('dProx').value || null });
       if (!callado) toast('💾 Guardado');

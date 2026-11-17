@@ -25,6 +25,7 @@
   .check .ck.cambio { border-color: var(--bad); } .check .ck.ajuste { border-color: var(--warn); }
   .pres .pi { border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin-bottom: 8px; }
   .pres .pi .fila { display: flex; justify-content: space-between; gap: 8px; }
+  .pres .pi img.fdi { display: block; width: 100%; max-height: 220px; object-fit: cover; border-radius: 10px; margin-top: 8px; cursor: zoom-in; background: var(--line); min-height: 60px; }
   .pres .pi .sn { display: flex; gap: 6px; margin-top: 8px; } .pres .pi .sn button { flex: 1; min-height: 42px; }
   .pres .pi .sn button.on { outline: 3px solid var(--brand); }
   tr.no td { text-decoration: line-through; opacity: .6; }
@@ -86,7 +87,7 @@
   };
   const PASOS = [['confirmada', '✅ Confirmada'], ['recibida', '🚲 Recibida en el taller'], ['en_reparacion', '🔧 En reparación'], ['lista', '✅ Lista para retirar'], ['completada', '🎉 Entregada']];
   const ORDEN = { confirmada: 0, recibida: 1, en_reparacion: 2, esperando_repuesto: 2, lista: 3, completada: 4 };
-  let r = null, reloj = null, sondeo = null, imagen = null, fotosN = -1;
+  let r = null, reloj = null, sondeo = null, imagen = null, fotosN = -1; const FOTOS = {};
 
   let resp = {};  // G59 respuestas del presupuesto (posición del ítem → si/no)
   async function cargar() {
@@ -211,12 +212,13 @@
       const totPres = () => { const x = (r.items || []).reduce((s, it, i) => s + ((it.aprob === 'si' || (it.aprob === 'pend' && resp[i] === 'si')) ? it.cant * it.precio : 0), 0); $('presTot').textContent = plata(x - Math.floor(x * (r.plan_desc || 0) / 100)); };  // G59i 🔁 menos el plan
       const pintarPres = () => {
         $('presItems').innerHTML = pend.map(([it, i]) => '<div class="pi"><div class="fila"><b>' + esc(it.nombre) + (Number(it.cant) !== 1 ? ' × ' + esc(it.cant) : '') + '</b><b>' + plata(it.cant * it.precio) + '</b></div>' +
+          (it.foto ? '<img class="fdi" data-foto="' + esc(it.foto) + '" alt="📸 Foto del daño: ' + esc(it.nombre) + '"' + (FOTOS[it.foto] ? ' src="' + FOTOS[it.foto] + '"' : '') + '>' : '') +
           '<div class="sn"><button type="button" class="' + (resp[i] === 'si' ? 'on' : 'alt') + '" data-r="si" data-i="' + i + '">✅ Sí</button>' +
           '<button type="button" class="' + (resp[i] === 'no' ? 'on danger' : 'ghost') + '" data-r="no" data-i="' + i + '">❌ No</button></div></div>').join('');
         totPres();
       };
       pintarPres();
-      $('presItems').onclick = (ev) => { const b = ev.target.closest('[data-r]'); if (!b) return; resp[b.dataset.i] = b.dataset.r; pintarPres(); };
+      $('presItems').onclick = (ev) => { const im = ev.target.closest('img[data-foto]'); if (im && im.src) { App.verImagen(im.src, im.alt, 'dano.jpg'); return; } const b = ev.target.closest('[data-r]'); if (!b) return; resp[b.dataset.i] = b.dataset.r; pintarPres(); };
       $('presEnviar').onclick = async () => {
         if (pend.some(([, i]) => !resp[i])) { App.toast('Elige Sí o No en cada arreglo'); return; }
         $('presEnviar').disabled = true;
@@ -240,8 +242,11 @@
     } else if (r.fotos_n && r.fotos_n !== fotosN) {
       fotosN = r.fotos_n;
       App.rpc('reserva_fotos', { p_token: token }).then((l) => {
-        $('fotos').innerHTML = '<div class="fotos">' + l.map((f) => '<figure><img alt="Foto ' + (f.tipo === 'antes' ? 'de llegada' : 'de entrega') + '" src="' + f.imagen + '"><figcaption>' +
-          (f.tipo === 'antes' ? 'Llegada' : 'Entrega') + '</figcaption></figure>').join('') + '</div>';
+        l.forEach((f) => { if (f.id) FOTOS[f.id] = f.imagen; });  // G91 📸 fotos del daño → en su ítem del presupuesto
+        document.querySelectorAll('img[data-foto]').forEach((im) => { if (FOTOS[im.dataset.foto]) im.src = FOTOS[im.dataset.foto]; });
+        const TF = { antes: ['de llegada', 'Llegada'], despues: ['de entrega', 'Entrega'], dano: ['del daño', '🔍 Daño'] };
+        $('fotos').innerHTML = '<div class="fotos">' + l.map((f) => '<figure><img alt="Foto ' + (TF[f.tipo] || TF.antes)[0] + '" src="' + f.imagen + '"><figcaption>' +
+          (TF[f.tipo] || TF.antes)[1] + '</figcaption></figure>').join('') + '</div>';
       }).catch(() => { fotosN = -1; });
     }
     $('fotos').onclick = (ev) => { const i = ev.target.closest('img'); if (i) App.verImagen(i.src, i.alt, 'bici.jpg'); };
