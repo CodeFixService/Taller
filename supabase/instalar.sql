@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.52'::text $$;
+language sql immutable as $$ select '2.53'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -2971,8 +2971,15 @@ language sql stable security definer set search_path = '' as $$
   select coalesce((select public.taller_es_premium(t.id) from public.talleres t where t.owner_id = n), false)
 $$;
 create or replace function public.cfx_modulos_app() returns text[]
-language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock', 'certificadas', 'tradein', 'pasaporte', 'domicilio', 'garantias', 'plan_mant', 'resenas'] $$;
+language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock', 'certificadas', 'tradein', 'pasaporte', 'domicilio', 'garantias', 'plan_mant', 'resenas', 'promos'] $$;  -- G96 b: + 📣 promos
 revoke all on function public.cfx_negocio_de_cuenta(uuid), public.cfx_es_premium(uuid), public.cfx_modulos_app() from public, anon, authenticated;
+-- G96 b 📣 Promos en la app (núcleo anuncios.sql): el cliente ve las del taller al que pertenece (perfiles.taller_id).
+create or replace function public.cfx_promo_negocios_app(u uuid) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select coalesce((select jsonb_agg(jsonb_build_object('n', t.owner_id, 'nombre', t.nombre)) from public.perfiles p join public.talleres t on t.id = p.taller_id
+    where p.id = u and p.rol = 'cliente' and t.owner_id is not null), '[]')
+$$;
+revoke all on function public.cfx_promo_negocios_app(uuid) from public, anon, authenticated;
 create or replace function public.taller_tiene(p_modulo text) returns boolean
 language plpgsql stable security definer set search_path = '' as $$ begin return public.cfx_modulo_de(p_modulo, public.cfx_negocio_de_cuenta(auth.uid())); end $$;
 revoke all on function public.taller_tiene(text) from public, anon, authenticated;
@@ -6382,7 +6389,10 @@ language sql immutable as $$
          ('ganancias', '📊 Ganancias y ocupación', 'Cuánto ganaste por mes, ocupación de cada lugar, mejores días y planilla para Excel.'),
          -- G96: módulos de tienda (Despega primero).
          ('suscripciones', '🔁 Compras recurrentes', 'Tu cliente recibe su pedido solo cada semana o cada mes (café, alimento, agua…): venta segura sin tener que pedirla.'),
-         ('proveedores', '📦 Stock mínimo y proveedores', 'Te avisa cuando un producto baja de su mínimo y arma el pedido a tu proveedor por WhatsApp con un toque.')
+         ('proveedores', '📦 Stock mínimo y proveedores', 'Te avisa cuando un producto baja de su mínimo y arma el pedido a tu proveedor por WhatsApp con un toque.'),
+         -- G96 b: 🏬 sucursales (Despega) y 📣 promos en la app de tus clientes (Despega, Barbería, BiciTaller).
+         ('sucursales', '🏬 Sucursales y bodegas', 'Stock separado por local o bodega: vendes en la Caja desde cada sucursal y mueves mercadería entre ellas.'),
+         ('promos', '📣 Promo destacada', 'Al abrir la app, tus clientes ven tu oferta en una tarjeta con foto y botón (además de tus ofertas de siempre). Ves cuántos la vieron y la tocaron.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb
@@ -8022,6 +8032,9 @@ create index if not exists cfx_anuncios_campana_idx on public.cfx_anuncios (camp
 create table if not exists public.cfx_anuncio_vistos (
   anuncio uuid not null references public.cfx_anuncios (id) on delete cascade, cuenta uuid not null,
   visto timestamptz not null default now(), clic timestamptz, cerrado timestamptz, primary key (anuncio, cuenta));
+-- G96 b 📣 Promos del negocio a SUS clientes: misma tabla, con negocio (null = de CodeFix). Solo las ven sus clientes (gancho de la app).
+alter table public.cfx_anuncios add column if not exists negocio uuid;
+create index if not exists cfx_anuncios_negocio_idx on public.cfx_anuncios (negocio) where negocio is not null;
 alter table public.cfx_anuncios enable row level security;
 alter table public.cfx_anuncio_vistos enable row level security;
 revoke all on public.cfx_anuncios, public.cfx_anuncio_vistos from anon, authenticated;
@@ -8069,8 +8082,76 @@ begin
   return coalesce((select jsonb_agg(jsonb_build_object('id', a.id, 'campana', a.campana, 'titulo', a.titulo, 'activo', a.activo,
     'vistas', (select count(*) from public.cfx_anuncio_vistos v where v.anuncio = a.id),
     'clics', (select count(*) from public.cfx_anuncio_vistos v where v.anuncio = a.id and v.clic is not null),
-    'cierres', (select count(*) from public.cfx_anuncio_vistos v where v.anuncio = a.id and v.cerrado is not null)) order by a.creado) from public.cfx_anuncios a), '[]');
+    'cierres', (select count(*) from public.cfx_anuncio_vistos v where v.anuncio = a.id and v.cerrado is not null)) order by a.creado) from public.cfx_anuncios a where a.negocio is null), '[]');
 end $$;
+
+-- G96 b 📣 PROMOS DEL NEGOCIO. Gancho de cada app que tiene clientes con cuenta (y 'promos' en cfx_modulos_app()):
+--   cfx_promo_negocios_app(u) jsonb   [{"n": negocio, "nombre": "Barbería Juan"}] de los que u es cliente (sin gancho: ninguno).
+-- Módulo 'promos' (con la venta de módulos apagada: Premium). Máx. 3 activas y 10 guardadas por negocio. Validado aquí.
+create or replace function public.cfx_promo_negocios(u uuid) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare r jsonb;
+begin
+  if u is null or to_regprocedure('public.cfx_promo_negocios_app(uuid)') is null then return '[]'; end if;
+  execute 'select public.cfx_promo_negocios_app($1)' into r using u;
+  return case when jsonb_typeof(r) = 'array' then r else '[]' end;
+end $$;
+create or replace function public.cfx_promos_puede(n uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select n is not null and case when public.cfx_venta_on() and 'promos' = any (public.cfx_modulos_de_app()) then public.cfx_modulo_de('promos', n)
+    else public.cfx_negocio_premium(n) end
+$$;
+-- El negocio de quien llama, solo si es el dueño (null si no).
+create or replace function public.cfx_promo_mi_negocio() returns uuid
+language sql stable security definer set search_path = '' as $$
+  select n from (select public.cfx_negocio_cuenta(auth.uid()) n) x where n is not null and public.cfx_negocio_dueno(n) = auth.uid()
+$$;
+create or replace function public.cfx_promos_mias() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare n uuid := public.cfx_promo_mi_negocio();
+begin
+  if n is null then raise exception 'Solo el dueño del negocio'; end if;
+  return jsonb_build_object('puede', public.cfx_promos_puede(n), 'lista', coalesce((select jsonb_agg(jsonb_build_object('id', a.id, 'titulo', a.titulo, 'texto', a.texto,
+    'imagen', a.imagen, 'boton', a.boton, 'link', a.link, 'desde', a.desde, 'hasta', a.hasta, 'activo', a.activo,
+    'vistas', (select count(*) from public.cfx_anuncio_vistos v where v.anuncio = a.id),
+    'clics', (select count(*) from public.cfx_anuncio_vistos v where v.anuncio = a.id and v.clic is not null),
+    'cierres', (select count(*) from public.cfx_anuncio_vistos v where v.anuncio = a.id and v.cerrado is not null)) order by a.creado desc)
+    from public.cfx_anuncios a where a.negocio = n), '[]'));
+end $$;
+create or replace function public.cfx_promo_guardar(p jsonb) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare n uuid := public.cfx_promo_mi_negocio(); i uuid := nullif(p ->> 'id', '')::uuid; r uuid; act boolean := coalesce((p ->> 'activo')::boolean, true);
+  lk text := trim(coalesce(p ->> 'link', '')); de date := nullif(p ->> 'desde', '')::date; ha date := nullif(p ->> 'hasta', '')::date;
+begin
+  if n is null then raise exception 'Solo el dueño del negocio'; end if;
+  if not public.cfx_promos_puede(n) then raise exception '📣 Promo destacada es un módulo 🧩: actívalo en Mi plan y módulos'; end if;
+  if length(trim(coalesce(p ->> 'titulo', ''))) = 0 then raise exception 'Escribe el título de la promo'; end if;
+  if lk <> '' and lk !~ '^https://' then raise exception 'El link debe partir con https://'; end if;
+  if ha is not null and de is not null and ha < de then raise exception 'La fecha de término es antes del inicio'; end if;
+  if i is null and (select count(*) from public.cfx_anuncios where negocio = n) >= 10 then raise exception 'Máximo 10 promos guardadas: borra alguna'; end if;
+  if act and (select count(*) from public.cfx_anuncios where negocio = n and activo and id is distinct from i) >= 3 then raise exception 'Máximo 3 promos activas a la vez: pausa alguna'; end if;
+  if i is null then
+    insert into public.cfx_anuncios (id, campana, negocio, publico, titulo, texto, imagen, boton, link, desde, hasta, activo)
+    values (gen_random_uuid(), gen_random_uuid(), n, 'clientes', left(trim(p ->> 'titulo'), 80), left(trim(coalesce(p ->> 'texto', '')), 240), trim(coalesce(p ->> 'imagen', '')),
+            case when lk = '' then '' else left(trim(coalesce(nullif(p ->> 'boton', ''), 'Ver')), 30) end, lk, de, ha, act) returning id into r;
+  else
+    update public.cfx_anuncios set titulo = left(trim(p ->> 'titulo'), 80), texto = left(trim(coalesce(p ->> 'texto', '')), 240), imagen = trim(coalesce(p ->> 'imagen', '')),
+      boton = case when lk = '' then '' else left(trim(coalesce(nullif(p ->> 'boton', ''), 'Ver')), 30) end, link = lk, desde = de, hasta = ha, activo = act
+    where id = i and negocio = n returning id into r;
+    if r is null then raise exception 'Promo no encontrada'; end if;
+  end if;
+  return r;
+end $$;
+create or replace function public.cfx_promo_borrar(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare n uuid := public.cfx_promo_mi_negocio();
+begin
+  if n is null then raise exception 'Solo el dueño del negocio'; end if;
+  delete from public.cfx_anuncios where id = p_id and negocio = n;
+end $$;
+revoke all on function public.cfx_promo_negocios(uuid), public.cfx_promos_puede(uuid), public.cfx_promo_mi_negocio() from public, anon, authenticated;
+revoke all on function public.cfx_promos_mias(), public.cfx_promo_guardar(jsonb), public.cfx_promo_borrar(uuid) from public, anon;
+grant execute on function public.cfx_promos_mias(), public.cfx_promo_guardar(jsonb), public.cfx_promo_borrar(uuid) to authenticated;
 
 -- Lo que ve la persona: anuncios activos, vigentes, de su público y que no cerró (máx. 3). La app no los pide para admin/socio.
 create or replace function public.cfx_anuncios_ver() returns jsonb
@@ -8078,12 +8159,15 @@ language plpgsql security definer set search_path = '' as $$
 declare u uuid := auth.uid(); hoy date := (now() at time zone 'America/Santiago')::date;
 begin
   if u is null then return '[]'; end if;
-  return coalesce((select jsonb_agg(jsonb_build_object('id', a.id, 'titulo', a.titulo, 'texto', a.texto, 'imagen', a.imagen, 'boton', a.boton, 'link', a.link) order by a.orden, a.creado)
-    from (select * from public.cfx_anuncios a
+  -- G96 b: + 📣 promos de los negocios de los que es cliente (con el nombre del negocio en 'de'), después de las de CodeFix.
+  return coalesce((select jsonb_agg(jsonb_build_object('id', a.id, 'titulo', a.titulo, 'texto', a.texto, 'imagen', a.imagen, 'boton', a.boton, 'link', a.link, 'de', a.de) order by a.k, a.orden, a.creado)
+    from (select a.*, case when a.negocio is null then 0 else 1 end k, (select x ->> 'nombre' from jsonb_array_elements(ng) x where x ->> 'n' = a.negocio::text limit 1) de
+          from public.cfx_anuncios a, (select public.cfx_promo_negocios(u) ng) g
           where a.activo and (a.desde is null or a.desde <= hoy) and (a.hasta is null or a.hasta >= hoy)
             and not exists (select 1 from public.cfx_anuncio_vistos v where v.anuncio = a.id and v.cuenta = u and v.cerrado is not null)
-            and (a.publico = 'todos' or u in (select d from public.cfx_destinatarios(a.publico) d))
-          order by a.orden, a.creado limit 3) a), '[]');
+            and (case when a.negocio is null then a.publico = 'todos' or u in (select d from public.cfx_destinatarios(a.publico) d)
+                      else exists (select 1 from jsonb_array_elements(ng) x where x ->> 'n' = a.negocio::text) and public.cfx_promos_puede(a.negocio) end)
+          order by case when a.negocio is null then 0 else 1 end, a.orden, a.creado limit 3) a), '[]');
 end $$;
 
 -- Marca vista / clic / cierre (una fila por persona y anuncio: no se infla contando de nuevo).
