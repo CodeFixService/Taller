@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.43'::text $$;
+language sql immutable as $$ select '2.44'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -2794,6 +2794,32 @@ create or replace function public.cfx_avisar(p_cuenta uuid, p_titulo text, p_cue
 language sql security definer set search_path = '' as $$ select public.avisar(p_cuenta, p_titulo, p_cuerpo, '') $$;
 create or replace function public.cfx_avisar_admin(p_titulo text, p_cuerpo text) returns void
 language sql security definer set search_path = '' as $$ select public.avisar_admin(p_titulo, p_cuerpo, '/admin/#pagos') $$;
+
+-- G87 A · Lista de cuentas para el Centro de Mando → Control → Negocios (antes decía "aún no tiene la lista de negocios").
+-- Negocio = cada taller (con el correo de su dueño) · Cliente = clientes con cuenta. Solo la llama cfx_negocios (admin).
+create or replace function public.cfx_cuentas_app(p_rol text, p_q text) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select case when p_rol = 'cliente' then
+    (select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'email', p.email, 'nombre', p.nombre, 'rol', 'cliente',
+        'premium_hasta', case when p.premium_hasta > now() then p.premium_hasta end, 'creado', p.created_at, 'suspendido', p.suspendido) order by p.created_at desc), '[]'::jsonb)
+     from (select x.* from public.perfiles x where x.rol = 'cliente'
+             and (coalesce(p_q, '') = '' or x.email ilike '%' || p_q || '%' or x.nombre ilike '%' || p_q || '%')
+           order by x.created_at desc limit 300) p)
+  else
+    (select coalesce(jsonb_agg(jsonb_build_object('id', t.owner_id, 'email', coalesce(t.correo, ''), 'nombre', t.nombre, 'rol', 'negocio',
+        'premium_hasta', case when t.premium_hasta > now() then t.premium_hasta end, 'creado', t.created_at, 'suspendido', t.suspendido) order by t.created_at desc), '[]'::jsonb)
+     from (select x.*, d.email as correo from public.talleres x left join public.perfiles d on d.id = x.owner_id
+           where coalesce(p_q, '') = '' or x.nombre ilike '%' || p_q || '%' or coalesce(d.email, '') ilike '%' || p_q || '%'
+           order by x.created_at desc limit 300) t)
+  end
+$$;
+create or replace function public.cfx_quitar_premium(p_cuenta uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  update public.talleres set premium_hasta = null where owner_id = p_cuenta;
+  update public.perfiles set premium_hasta = null where id = p_cuenta and rol = 'cliente';
+end $$;
+revoke all on function public.cfx_cuentas_app(text, text), public.cfx_quitar_premium(uuid) from public, anon, authenticated;
 
 -- Ganchos de administración para el núcleo (planes, textos, a quién avisar y verificación).
 create or replace function public.cfx_planes_app() returns jsonb
