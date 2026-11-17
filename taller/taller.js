@@ -115,7 +115,7 @@
     if (P.dueno) {
       if (!t.logo) falta.push(['perfil', 'Sube tu logo y elige tus colores']);
       if (!servicios.length) falta.push(['servicios', 'Agrega tus servicios y precios (así apareces en el directorio de talleres)']);
-      if (!(P.links || []).some((l) => l.activo && l.url)) falta.push(['abono', 'Configura el link de pago del abono (sin esto no recibes reservas online)']);
+      if ('abono_ok' in P ? !P.abono_ok : !(P.links || []).some((l) => l.activo && l.url)) falta.push(['abono', 'Configura el cobro del abono: link o ⚡ Mercado Pago (sin esto no recibes reservas online)']);
       if (!t.direccion) falta.push(['perfil', 'Escribe tu dirección']);
     }
     $('bienvenida').innerHTML = falta.length ? '<div class="card"><h2>👋 ' + esc(App.txt('bienvenida_taller') ? 'Para empezar' : '') + '</h2><p class="muted" style="margin-top:0">' +
@@ -912,13 +912,13 @@
   // ---- Abono: 2 links de pago, uno activo
   function verAbono() {
     const links = [1, 2].map((n) => (P.links || []).find((l) => l.slot === n) || { slot: n, monto: 0, url: '', texto: '', activo: false });
-    body().innerHTML = '<div class="card"><h2>💳 Abono de la reserva</h2><p class="muted" style="margin-top:0">El cliente paga este abono con tu link de Mercado Pago y sube el comprobante. ' +
+    body().innerHTML = '<div class="card"><h2>💳 Abono de la reserva</h2><p class="muted" style="margin-top:0">El cliente paga este abono con tu link y sube el comprobante, o con ⚡ Mercado Pago (abajo) y se confirma solo: con Mercado Pago conectado el link es opcional. ' +
       'Tienes 2 espacios: deja activo el que quieras usar (por ejemplo, para cambiar el monto sin perder el otro). El dinero te llega a ti; solo tú ves estos links.</p>' +
       links.map((l) => '<div class="slotpago' + (l.activo ? ' on' : '') + '"><label class="check" style="margin:0"><input type="radio" name="act" value="' + l.slot + '"' + (l.activo ? ' checked' : '') + '> <b>Espacio ' + l.slot + '</b>' +
         (l.activo ? ' <span class="pill ok">Activo</span>' : '') + '</label>' +
         '<div class="row"><div><label>Monto del abono</label><input data-k="monto" data-s="' + l.slot + '" inputmode="numeric" value="' + (l.monto || '') + '" placeholder="10000"></div>' +
         '<div><label>Texto (opcional)</label><input data-k="texto" data-s="' + l.slot + '" maxlength="300" value="' + esc(l.texto) + '" placeholder="Abono mantención"></div></div>' +
-        '<label>Link de pago (Mercado Pago)</label><input data-k="url" data-s="' + l.slot + '" value="' + esc(l.url) + '" placeholder="https://mpago.la/…"></div>').join('') +
+        '<label>Link de pago (opcional con ⚡ Mercado Pago)</label><input data-k="url" data-s="' + l.slot + '" value="' + esc(l.url) + '" placeholder="https://mpago.la/…"></div>').join('') +
       '<div class="btns"><button id="aGuardar">💾 Guardar</button></div><p class="err" id="aErr"></p></div>' +
       '<div class="card" id="aMp" hidden></div>';  // G98 ⚡ Mercado Pago propio (núcleo pagos.js)
     if (window.CFX_PAGOS && CFX_PAGOS.mpNegocio) CFX_PAGOS.mpNegocio(body().querySelector('#aMp'), { rpc: (n, a) => rpc(n, a), para: 'el abono de su reserva' });

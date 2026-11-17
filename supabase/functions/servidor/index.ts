@@ -36,7 +36,7 @@ async function reintentarPush(s: Rpc, preparar: () => Promise<boolean>) {
 import postgres from 'npm:postgres@3.4.4';
 import { INSTALAR, DB_VERSION } from './instalar.ts';
 
-const VERSION = '2.2';
+const VERSION = '2.3';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',

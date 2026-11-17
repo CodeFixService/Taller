@@ -120,7 +120,7 @@
         '<div class="stats" style="grid-template-columns:1fr"><div class="card"><span>Abono (se descuenta del total)</span><b>' + plata(r.abono_monto) + '</b></div></div>' +
         (r.mp ? '<button class="block" id="bMp">⚡ Pagar ' + plata(r.abono_monto) + ' con Mercado Pago</button><p class="muted" style="margin:4px 0 10px;text-align:center;font-size:13px">Se confirma solo: sin comprobante.</p>' : '') +
         (r.pagar_url ? '<a class="btn block' + (r.mp ? ' alt' : '') + '" target="_blank" rel="noopener" id="bPagar" href="' + esc(r.pagar_url) + '">1️⃣ Pagar abono ' + (r.mp ? 'con el link' : 'en Mercado Pago') + '</a>' : '') +
-        '<label for="fComp" class="btn alt block" style="margin-top:10px;color:var(--brand)">2️⃣ Subir foto del comprobante</label>' +
+        '<label for="fComp" class="btn alt block" style="margin-top:10px;color:var(--brand)">' + (r.pagar_url ? '2️⃣ Subir foto del comprobante' : '¿Pagaste de otra forma? Sube el comprobante') + '</label>' +
         '<input type="file" id="fComp" accept="image/*" class="hidden">' +
         '<div class="prev" id="prev"></div><button class="block hidden" id="bEnviar" style="margin-top:10px">Enviar comprobante</button><p class="err" id="cErr"></p>' +
         '<div class="btns"><button class="danger small" id="bCancelar">Cancelar reserva</button></div>';

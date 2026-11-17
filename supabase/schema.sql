@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.55'::text $$;
+language sql immutable as $$ select '2.56'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -55,16 +55,21 @@ create table if not exists public.textos (
 insert into public.textos (clave, valor) values
   ('app_nombre', 'BiciTaller'),
   ('app_lema', 'Reserva tu hora en el taller de bicicletas'),
-  ('reserva_pago', 'Para confirmar tu hora paga el abono con el botón "Pagar abono" y sube la foto o captura del comprobante. Tienes {minutos} minutos; si no, la hora se libera.'),
+  ('reserva_pago', 'Para confirmar tu hora paga el abono: con ⚡ Mercado Pago se confirma solo; con el link, sube la foto o captura del comprobante. Tienes {minutos} minutos; si no, la hora se libera.'),
   ('reserva_politica', 'Puedes cancelar sin costo dentro de los primeros {devolucion} minutos (se te devuelve el abono). Después, si cancelas con {horas} horas o más de anticipación, el abono queda como saldo a favor para reagendar. Si cancelas con menos de {horas} horas o no llegas, pierdes el abono. El abono se descuenta del total del servicio.'),
   ('premium_taller_titulo', 'BiciTaller Premium'),
   ('premium_taller_texto', 'Más reservas, tu equipo de mecánicos, estadísticas y recordatorios de mantención para que tus clientes vuelvan.'),
   ('premium_cliente_titulo', 'Cliente Premium'),
   ('premium_cliente_texto', 'Historial completo de tu bici, recordatorios de mantención y reserva con más anticipación.'),
   ('pago_instrucciones', 'Toca "Pagar", paga en Mercado Pago, toma una captura del comprobante y súbela aquí. Te avisamos apenas se apruebe.'),
-  ('bienvenida_taller', '¡Bienvenido! Completa tu perfil, tu horario, tus servicios y el link de pago del abono para empezar a recibir reservas.'),
+  ('bienvenida_taller', '¡Bienvenido! Completa tu perfil, tu horario, tus servicios y el cobro del abono (link o ⚡ Mercado Pago) para empezar a recibir reservas.'),
   ('terminos', 'Al usar BiciTaller aceptas que tus datos (nombre, teléfono y correo) se usen solo para gestionar tus reservas con el taller.')
 on conflict (clave) do nothing;
+-- G100 ⚡ Textos que pedían el link: se actualizan solo si el admin no los cambió.
+update public.textos set valor = '¡Bienvenido! Completa tu perfil, tu horario, tus servicios y el cobro del abono (link o ⚡ Mercado Pago) para empezar a recibir reservas.'
+where clave = 'bienvenida_taller' and valor = '¡Bienvenido! Completa tu perfil, tu horario, tus servicios y el link de pago del abono para empezar a recibir reservas.';
+update public.textos set valor = 'Para confirmar tu hora paga el abono: con ⚡ Mercado Pago se confirma solo; con el link, sube la foto o captura del comprobante. Tienes {minutos} minutos; si no, la hora se libera.'
+where clave = 'reserva_pago' and valor = 'Para confirmar tu hora paga el abono con el botón "Pagar abono" y sube la foto o captura del comprobante. Tienes {minutos} minutos; si no, la hora se libera.';
 alter table public.textos enable row level security;
 
 -- Planes: límites y beneficios (todo editable por el administrador).
@@ -540,13 +545,20 @@ from (values ('premium_taller', 1::smallint), ('premium_taller', 2::smallint),
 where not exists (select 1 from public.links_pago l where l.taller_id is null and l.tipo = x.tipo and l.slot = x.slot);
 
 -- Abono del taller: el espacio activo. Premium (admin): la promoción vigente (espacio 2) o, si no, el precio normal (espacio 1).
+-- G100 ⚡ El abono sirve SIN link si el taller tiene su Mercado Pago conectado (plpgsql: cfx_mp_neg_activo es del núcleo, más abajo).
 create or replace function public.link_activo(p_taller uuid, p_tipo text) returns public.links_pago
-language sql stable security definer set search_path = '' as $$
-  select * from public.links_pago
-  where tipo = p_tipo and taller_id is not distinct from p_taller and activo and url <> '' and monto > 0
+language plpgsql stable security definer set search_path = '' as $$
+declare l public.links_pago; mp boolean := false;
+begin
+  if p_taller is not null then
+    select public.cfx_mp_neg_activo(t.owner_id) into mp from public.talleres t where t.id = p_taller;
+  end if;
+  select * into l from public.links_pago
+  where tipo = p_tipo and taller_id is not distinct from p_taller and activo and (url <> '' or coalesce(mp, false)) and monto > 0
     and (hasta is null or hasta >= (now() at time zone 'America/Santiago')::date)
-  order by case when p_taller is null then -slot else slot end limit 1
-$$;
+  order by case when p_taller is null then -slot else slot end limit 1;
+  return l;
+end $$;
 
 -- Lo que ve la gente de un precio Premium (con el precio normal tachado si hay promoción).
 create or replace function public.link_publico(p_tipo text) returns jsonb
@@ -1335,6 +1347,7 @@ begin
                from public.perfiles p where p.taller_id = tid and p.rol in ('taller', 'equipo')),
     'links', case when dueno then (select coalesce(jsonb_agg(jsonb_build_object('slot', l.slot, 'monto', l.monto, 'url', l.url,
                  'texto', l.texto, 'activo', l.activo) order by l.slot), '[]') from public.links_pago l where l.taller_id = tid and l.tipo = 'abono') end,
+    'abono_ok', (public.link_activo(tid, 'abono')).id is not null,  -- G100 ⚡ con link o con Mercado Pago conectado
     'pago_pendiente', (select jsonb_build_object('id', id, 'monto', monto, 'created_at', created_at) from public.pagos
                        where taller_id = tid and tipo = 'premium_taller' and estado = 'en_revision' order by created_at desc limit 1),
     'modulos', public.cfx_modulos(), 'venta', public.cfx_venta_on(),  -- G59 🧩 qué módulos puede usar y si se venden
@@ -1420,7 +1433,10 @@ begin
   else raise exception 'Tipo no válido'; end if;
   if p_slot not in (1, 2) then raise exception 'Espacio no válido'; end if;
   if coalesce(p_url, '') <> '' and p_url !~ '^https://' then raise exception 'El link debe empezar con https://'; end if;
-  if p_activar and (coalesce(p_url, '') = '' or coalesce(p_monto, 0) <= 0) then raise exception 'Para activarlo pon el monto y el link'; end if;
+  if p_activar and coalesce(p_monto, 0) <= 0 then raise exception 'Para activarlo pon el monto'; end if;
+  -- G100 ⚡ Abono sin link: vale si el taller tiene su Mercado Pago conectado.
+  if p_activar and coalesce(p_url, '') = '' and (tid is null or not exists (select 1 from public.talleres t where t.id = tid and public.cfx_mp_neg_activo(t.owner_id))) then
+    raise exception 'Para activarlo pon el link (o conecta ⚡ Mercado Pago abajo)'; end if;
   insert into public.links_pago (taller_id, tipo, slot, monto, url, texto, activo, hasta)
   values (tid, p_tipo, p_slot, greatest(coalesce(p_monto, 0), 0), coalesce(p_url, ''), left(coalesce(p_texto, ''), 300), coalesce(p_activar, false),
           case when tid is null and p_slot = 2 then p_hasta end)
@@ -2937,8 +2953,8 @@ language sql stable security definer set search_path = '' as $$
     jsonb_build_object('k', 'servicios', 't', 'Servicios y precios', 'd', 'Mantención, ajuste de cambios, frenos… con precio y duración.', 'ir', 'taller/#mas/servicios',
       'ok', exists (select 1 from public.servicios s where s.taller_id = t.id)),
     jsonb_build_object('k', 'horario', 't', 'Horario de atención', 'd', 'Los días y horas en que recibes bicicletas.', 'ir', 'taller/#mas/horario', 'ok', t.horarios <> '{}'::jsonb),
-    jsonb_build_object('k', 'abono', 't', 'Link de pago del abono', 'd', 'Tu link de pago para cobrar el abono previo de cada reserva.', 'ir', 'taller/#mas/abono',
-      'ok', exists (select 1 from public.links_pago l where l.taller_id = t.id and l.tipo = 'abono' and l.activo and l.url <> '')))
+    jsonb_build_object('k', 'abono', 't', 'Cobro del abono', 'd', 'Tu link de pago o ⚡ Mercado Pago para cobrar el abono previo de cada reserva.', 'ir', 'taller/#mas/abono',
+      'ok', (public.link_activo(t.id, 'abono')).id is not null))
   from public.talleres t where t.owner_id = auth.uid()), '[]'::jsonb)
 $$;
 
