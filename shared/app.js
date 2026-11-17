@@ -41,8 +41,9 @@
     const n = (v) => Number(v).toFixed(6), mapa = (x) => 'https://www.google.com/maps?q=' + n(x.lat) + ',' + n(x.lng);
     const u = L.find((x) => x.lat != null);
     const hora = (x) => new Date(x.at).toLocaleString('es-CL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    return (u ? '<iframe title="Mapa del último punto" loading="lazy" referrerpolicy="no-referrer" style="width:100%;height:220px;border:0;border-radius:12px;background:var(--cfx-borde,#e2e8f0)" src="https://www.openstreetmap.org/export/embed.html?bbox=' +
-        n(u.lng - 0.004) + '%2C' + n(u.lat - 0.003) + '%2C' + n(u.lng + 0.004) + '%2C' + n(u.lat + 0.003) + '&amp;layer=mapnik&amp;marker=' + n(u.lat) + '%2C' + n(u.lng) + '"></iframe>' +
+    // G91 📍 Rastreo v2: el mismo mapa gratis de Estaciona (Leaflet + OpenStreetMap) con el recorrido; App.mapas(raíz) lo dibuja.
+    const pts = L.filter((x) => x.lat != null).slice(0, 60).map((x) => [+n(x.lat), +n(x.lng), x.prec != null ? Number(x.prec) : null, x.at]);
+    return (u ? '<div class="bt-mapa" role="img" aria-label="Mapa con el recorrido de la bici" data-pts="' + esc(JSON.stringify(pts)) + '" style="width:100%;height:240px;border-radius:12px;background:var(--cfx-borde,#e2e8f0);overflow:hidden;position:relative;z-index:0"></div>' +
         '<p style="margin:8px 0"><b>📍 Última ubicación: ' + esc(hace(u.at)) + '</b>' + (u.prec != null ? ' <span class="sub">(±' + Number(u.prec) + ' m)</span>' : '') + '</p>' +
         '<div class="btns"><a class="btn" target="_blank" rel="noopener noreferrer" href="' + mapa(u) + '">🗺️ Abrir en el mapa</a></div>'
       : '<p class="sub">👀 La escanearon, pero todavía no comparten la ubicación.</p>') +
@@ -50,6 +51,32 @@
         (x.lat != null ? 'Con ubicación' + (x.prec != null ? ' · ±' + Number(x.prec) + ' m' : '') : 'Solo la escanearon') + ' · teléfono ' + esc(String(x.disp || '').slice(0, 4)) + '</div></div>' +
         (x.lat != null ? '<a class="btn small ghost" target="_blank" rel="noopener noreferrer" href="' + mapa(x) + '">Ver</a>' : '') + '</li>').join('') + '</ul>' +
       (L.length > 12 ? '<p class="sub">y ' + (L.length - 12) + ' puntos anteriores.</p>' : '');
+  };
+  // G91 📍 Dibuja los .bt-mapa (carga Leaflet la primera vez). Línea = recorrido; punto grande = última ubicación; círculo = precisión.
+  let leaflet = null;
+  const cargarLeaflet = () => leaflet || (leaflet = new Promise((ok, mal) => {
+    if (window.L && window.L.map) { ok(window.L); return; }
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = ROOT + 'shared/vendor/leaflet.css'; document.head.appendChild(css);
+    const s = document.createElement('script'); s.src = ROOT + 'shared/vendor/leaflet.js'; s.onload = () => ok(window.L); s.onerror = () => { leaflet = null; mal(new Error('Sin mapa')); }; document.head.appendChild(s);
+  }));
+  const mapas = async (raiz) => {
+    const els = [...(raiz || document).querySelectorAll('.bt-mapa:not([data-listo])')]; if (!els.length) return;
+    let Lf; try { Lf = await cargarLeaflet(); } catch (e) { els.forEach((el) => { el.innerHTML = '<p class="sub" style="padding:12px">No se pudo cargar el mapa: usa "Abrir en el mapa".</p>'; }); return; }
+    els.forEach((el) => {
+      if (el.dataset.listo || !el.isConnected) return; el.dataset.listo = '1';
+      let P = []; try { P = JSON.parse(el.dataset.pts || '[]'); } catch (e) { P = []; }
+      if (!P.length) return;
+      const m = Lf.map(el, { zoomControl: true, attributionControl: true, scrollWheelZoom: false, tap: true });
+      Lf.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' }).addTo(m);
+      const col = getComputedStyle(document.documentElement).getPropertyValue('--cfx-bad').trim() || '#dc2626';
+      if (P.length > 1) Lf.polyline(P.map((x) => [x[0], x[1]]).reverse(), { color: col, weight: 3, opacity: .6, dashArray: '6 6' }).addTo(m);
+      P.slice(1).forEach((x) => Lf.circleMarker([x[0], x[1]], { radius: 4, color: col, weight: 1, fillOpacity: .5 }).addTo(m));
+      const u = P[0];
+      if (u[2]) Lf.circle([u[0], u[1]], { radius: Math.min(u[2], 2000), color: col, weight: 1, fillOpacity: .08 }).addTo(m);
+      Lf.circleMarker([u[0], u[1]], { radius: 9, color: '#fff', weight: 3, fillColor: col, fillOpacity: 1 }).addTo(m).bindTooltip('📍 Última: ' + hace(u[3]), { permanent: false });
+      if (P.length > 1) m.fitBounds(Lf.latLngBounds(P.map((x) => [x[0], x[1]])).pad(0.25), { maxZoom: 17 }); else m.setView([u[0], u[1]], 16);
+      setTimeout(() => m.invalidateSize(), 200);
+    });
   };
   const telNorm = (t) => { let d = String(t || '').replace(/\D/g, ''); if (d.length === 9 && d[0] === '9') d = '56' + d; if (d.length === 8) d = '569' + d; return d; };
   const wa = (tel, txt) => 'https://wa.me/' + telNorm(tel) + (txt ? '?text=' + encodeURIComponent(txt) : '');
@@ -622,7 +649,7 @@
   }
 
   global.App = {
-    sb, ROOT, $, esc, plata, numero, iso, fechaDe, sumarDias, hoy, fCorta, fLarga, fHora, hace, rastros, DIAS, telNorm, wa, estrellas, nota,
+    sb, ROOT, $, esc, plata, numero, iso, fechaDe, sumarDias, hoy, fCorta, fLarga, fHora, hace, rastros, mapas, DIAS, telNorm, wa, estrellas, nota,
     toast, modal, confirmar, tema, selectorModo, colorApp, COLORES, pintarLogo, friendly, rpc, q, cargarPublica, txt, refrescar, requerir, entrar, salir, crearCuenta,
     clave, mensajeAcceso, comprimirComprobante, comprimirLogo, comprimirFoto, descargar, verImagen, compartir, verQR, afiche, campana, irA, activarPush, ofrecerPush,
     pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino, revisarVersion, actualizar, mayor, chatBoton, abrirChat, borrarCuenta, horarioTxt,

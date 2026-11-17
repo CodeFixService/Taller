@@ -35,6 +35,9 @@
     </div>
     <div id="promos"></div>
     <div class="card"><h2>📅 Mis reservas</h2><div class="grid" id="activas"></div></div>
+    <div class="card" id="cBicis"><h2>🚲 Mis bicis <span class="pill ok">🪪 Seguridad gratis</span></h2>
+      <p class="sub" style="margin-top:0">Pega el QR en el cuadro. Si te la roban, la reportas aquí: quien la escanee nos manda su ubicación y la sigues en el mapa.</p>
+      <ul class="list" id="bicis"></ul><div class="btns"><button type="button" class="alt" id="bNuevaBici">➕ Registrar mi bici</button></div></div>
     <div class="card"><h2>📣 Invita a tus amigos ciclistas</h2><p class="muted" style="margin-top:0">Comparte el link o el QR de tu taller: tus amigos reservan su hora y se crean su cuenta gratis.</p>
       <div class="btns"><button type="button" id="invCompartir">📤 Compartir</button><button class="alt" type="button" id="invQR">QR</button></div></div>
     <a class="card aviso clic" id="otros" href="../d/" style="text-decoration:none;color:inherit;display:flex"></a>
@@ -113,6 +116,7 @@
       (r.diagnostico ? '<div class="sub">🔍 ' + esc(r.diagnostico) + '</div>' : '') + (r.total ? '<div class="sub">Total ' + plata(r.total) + '</div>' : '') +
       (r.proxima_mantencion ? '<div class="sub">🔔 Próxima mantención: ' + App.fCorta(r.proxima_mantencion) + '</div>' : '') +
       (r.estado === 'completada' && !r.calificada ? '<div class="sub" style="color:var(--brand)">⭐ Toca para calificar al taller</div>' : '') + '</a>').join('') : '<p class="muted" style="margin:0">Aún no tienes visitas completadas.</p>';
+    pintarBicis();
     $('cEmail').textContent = yo.email; $('cNota').innerHTML = App.nota(D.mi_nota);
     if (window.CFX_MENU && !$('cPerfil').dataset.pf) { $('cPerfil').dataset.pf = '1'; window.CFX_MENU.montar($('cPerfil'), [
       { k: 'calif', ico: '⭐', t: 'Mi calificación como cliente', d: 'Puntualidad y trato', grupo: 'Tu cuenta', nodo: $('cCalif') },
@@ -147,6 +151,25 @@
   App.chatBoton($('ayuda'), '❓');
   const linkTaller = () => App.ROOT + 't/?s=' + encodeURIComponent(D.taller.slug);
   $('invCompartir').onclick = () => App.compartir(linkTaller(), '🚲 Yo llevo mi bici a ' + D.taller.nombre + '. Reserva tu hora aquí y sigue tu bici desde el celular', D.taller.nombre);
+  // G91 📍 Mis bicis: el QR de seguridad se activa SOLO cuando el dueño la reporta (en su ficha con clave: ../p/?t=…&c=…).
+  async function pintarBicis() {
+    let L = []; try { L = await rpc('cliente_bicis'); } catch (e) { $('bicis').innerHTML = '<li class="err">' + esc(e.message) + '</li>'; return; }
+    $('bicis').innerHTML = L.length ? L.map((b) => '<li style="flex-wrap:wrap"><div class="grow"><b>' + esc(b.bici) + '</b>' + (b.color ? ' <span class="sub">· ' + esc(b.color) + '</span>' : '') +
+      '<div class="sub">' + (b.robada ? '🚨 Reportada como robada' + (b.visto_at ? ' · 📍 la escanearon ' + esc(App.hace(b.visto_at)) : '') : '✅ Sin reporte · el QR no rastrea') + '</div></div>' +
+      '<div class="btns" style="margin:6px 0 0;width:100%"><a class="btn small ' + (b.robada ? '' : 'danger') + '" href="../p/?t=' + encodeURIComponent(b.token) + '&c=' + encodeURIComponent(b.clave) + '">' + (b.robada ? '📍 Ver dónde está' : '🚨 Me la robaron') + '</a>' +
+      '<button type="button" class="small ghost" data-bqr="' + esc(b.token) + '" data-bn="' + esc(b.bici) + '">🖨️ QR</button></div></li>').join('')
+      : '<li class="muted">Aún no registras tu bici.</li>';
+  }
+  $('bicis').onclick = (e) => { const q = e.target.closest('[data-bqr]'); if (q) App.verQR({ url: App.ROOT + 'p/?t=' + q.dataset.bqr, titulo: '🪪 QR de seguridad · ' + q.dataset.bn, archivo: 'qr-bici.gif' }); };
+  $('bNuevaBici').onclick = () => {
+    const d = App.modal('<h2>🚲 Registrar mi bici</h2><label for="nbB">Marca y modelo</label><input id="nbB" maxlength="120" placeholder="Ej: Trek Marlin 7 aro 29">' +
+      '<div class="row"><div><label for="nbC">Color</label><input id="nbC" maxlength="40"></div><div><label for="nbS">Nº de serie</label><input id="nbS" maxlength="60" placeholder="Bajo el pedalier"></div></div>' +
+      '<div class="btns"><button type="button" class="ghost" data-cerrar>Cancelar</button><button type="button" id="nbG">💾 Registrar</button></div>');
+    d.querySelector('#nbG').onclick = async () => {
+      try { await rpc('cliente_bici_guardar', { p: { bici: d.querySelector('#nbB').value, color: d.querySelector('#nbC').value, serie: d.querySelector('#nbS').value } }); d.close(); App.toast('🚲 Bici registrada: imprime su QR'); pintarBicis(); }
+      catch (err) { App.toast(err.message); }
+    };
+  };
   $('invQR').onclick = () => App.verQR({ url: linkTaller(), titulo: 'Invita a tus amigos', archivo: 'qr-' + D.taller.slug + '.gif' });
   App.pie();
 })();

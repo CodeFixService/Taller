@@ -45,8 +45,9 @@
       <h2>📍 Dónde está</h2>
       <div id="ras"></div>
     </div>
-    <div class="card">
+    <div class="card hidden" id="cHist">
       <h2>🔧 Historial de mantenciones</h2>
+      <p class="sub" style="margin-top:0">🔐 Solo lo ves tú (y tu taller).</p>
       <ul class="list" id="hist"></ul>
     </div>
     <div class="card">
@@ -83,17 +84,18 @@
     $('estado').innerHTML = b.robada
       ? '<div class="p-robada">🚨 REPORTADA COMO ROBADA' + (b.robada_at ? '<div class="sub">el ' + esc(App.fLarga(b.robada_at.slice(0, 10))) + '</div>' : '') + (b.robada_nota ? '<div class="sub">' + esc(b.robada_nota) + '</div>' : '') + '</div>' +
         '<p class="sub">¿La viste o te la quieren vender? No la compres y avisa al taller.</p>'
-      : '<div class="aviso" style="display:block">✅ Sin reporte de robo</div>';
+      : '<div class="aviso" style="display:block">✅ Sin reporte de robo · bici registrada</div>' + (b.es_dueno ? '' : '<p class="sub">🪪 Este QR es de seguridad: si su dueño la reporta, sirve para encontrarla.</p>');
     $('acc').innerHTML = b.robada && t.telefono && !b.es_dueno ? '<a class="btn danger" target="_blank" rel="noopener" href="' + App.wa(t.telefono, 'Hola ' + t.nombre + ' 👋 Vi la ' + b.bici +
       ' que está reportada como robada (pasaporte ' + location.href.split('?')[0] + '?t=' + token + '). Está en: ') + '">📲 La vi: avisar al taller</a>' : '';
     $('cDueno').classList.toggle('hidden', !b.es_dueno);
-    $('cUbi').classList.toggle('hidden', !!b.es_dueno);
+    $('cUbi').classList.toggle('hidden', !!b.es_dueno || !b.rastrear);  // G91: sin reporte el QR no rastrea
+    $('cHist').classList.toggle('hidden', !b.es_dueno);
     $('cRas').classList.toggle('hidden', !(b.es_dueno && (b.robada || (b.rastros || []).length)));
     if (b.es_dueno) {
       $('dTxt').textContent = b.robada ? (b.silencio ? '🕵️ Rastreo silencioso activo: quien la escanee no ve el aviso. ' : '') + 'Si ya la recuperaste, quita el aviso.'
         : 'Si te la roban, repórtala: cuando alguien escanee el QR te avisamos a ti y al taller, con su ubicación.';
       $('lSil').classList.toggle('hidden', !!b.robada); $('lSil').style.display = b.robada ? 'none' : 'flex';
-      $('ras').innerHTML = App.rastros(b.rastros);
+      $('ras').innerHTML = App.rastros(b.rastros); App.mapas($('ras'));
       $('bRobo').textContent = b.robada ? '✅ La recuperé' : '🚨 Me la robaron';
       $('bRobo').className = b.robada ? 'okb' : 'danger';
     }
@@ -128,10 +130,11 @@
   if (b.es_dueno) {
     setInterval(async () => {
       if (document.hidden || !b.robada || document.querySelector('dialog[open]')) return;
-      try { const x = await App.rpc('pasaporte_ver', { p_token: token, p_clave: clave }); if (x) { b = x; $('ras').innerHTML = App.rastros(b.rastros); $('cRas').classList.remove('hidden'); } } catch (e) { /* sin señal: reintenta */ }
+      try { const x = await App.rpc('pasaporte_ver', { p_token: token, p_clave: clave }); if (x) { b = x; $('ras').innerHTML = App.rastros(b.rastros); App.mapas($('ras')); $('cRas').classList.remove('hidden'); } } catch (e) { /* sin señal: reintenta */ }
     }, 15000);
     return;
   }
+  if (!b.rastrear) return;  // G91: solo con la bici reportada se pide la ubicación
   // G86 📍 Quien escanea: el navegador le pide la ubicación y se manda mientras tenga la página abierta (máx. 2 h).
   // La base solo la guarda si la bici está reportada como robada, y responde siempre igual.
   let ses = ''; try { ses = sessionStorage.getItem('bt-ras') || ''; } catch (e) { ses = ''; }

@@ -1358,12 +1358,13 @@
         ' 👋 Te escribimos de ' + P.taller.nombre + ': este es el 🪪 pasaporte de tu ' + x.bici + '. Ahí ves su historial y, si te la roban, la reportas en 1 toque 👉 ' + linkPas(x, true)) + '">📲 Enviar al dueño</a>' : '') +
         '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(linkPas(x)) + '">👀 Ver ficha</a></div>' : ''));
     const q1 = (s) => d.querySelector(s);
+    App.mapas(d);  // G91 📍 mapa Leaflet con el recorrido
     if (window.CFX_FABRICA) CFX_FABRICA.bici(q1('#paB'));
     const datos = (robada, nota, sil) => ({ id: id || null, bici: q1('#paB').value, serie: q1('#paS').value, color: q1('#paC').value, dueno: q1('#paD').value, telefono: q1('#paT').value,
       reserva: x.reserva || null, robada, robada_nota: nota, silencio: sil === undefined ? !!x.silencio : sil });
     // G86 📍 con el pasaporte abierto y la bici robada, la ubicación se actualiza sola cada 15 s
     if (id && x.robada) { const tic = setInterval(async () => { if (!d.open) { clearInterval(tic); return; } if (document.hidden) return;
-      try { const y = await rpc('taller_pasaporte', { p_id: id }), c = q1('#paRas'); if (c && d.open) c.innerHTML = App.rastros(y.rastros); } catch (e) { /* sin señal: reintenta */ } }, 15000); d.addEventListener('close', () => clearInterval(tic)); }
+      try { const y = await rpc('taller_pasaporte', { p_id: id }), c = q1('#paRas'); if (c && d.open) { c.innerHTML = App.rastros(y.rastros); App.mapas(c); } } catch (e) { /* sin señal: reintenta */ } }, 15000); d.addEventListener('close', () => clearInterval(tic)); }
     const guardar = async (robada, nota, msg, sil) => {
       try {
         const nid = await rpc('taller_pasaporte_guardar', { p: datos(robada, nota, sil) });

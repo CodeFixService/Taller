@@ -3285,6 +3285,9 @@ create table if not exists public.pasaportes (
 );
 create index if not exists pasaportes_t_idx on public.pasaportes (taller_id, tel_norm);
 create unique index if not exists pasaportes_serie_idx on public.pasaportes (taller_id, lower(serie)) where serie <> '';
+-- G91 📍 Rastreo v2: el cliente registra su bici desde su app (GRATIS). La seguridad (reportar, rastrear) no depende del módulo.
+alter table public.pasaportes add column if not exists cliente_id uuid references auth.users (id) on delete set null;
+create index if not exists pasaportes_c_idx on public.pasaportes (cliente_id) where cliente_id is not null;
 alter table public.pasaportes enable row level security;
 -- G86 📍 Rastreo de la bici robada: quien escanea el QR comparte su ubicación (el navegador le pide permiso) y, si la bici está reportada,
 -- el dueño, el taller y CodeFix la reciben en vivo. silencio = quien escanea NO ve "REPORTADA COMO ROBADA" (para que no sospeche).
@@ -3408,14 +3411,15 @@ begin
   select * into p from public.pasaportes where token = p_token and length(p_token) >= 20;
   if p.id is null then return null; end if;
   select * into t from public.talleres where id = p.taller_id;
-  if not public.cfx_modulo_de('pasaporte', t.owner_id) then return null; end if;
+  -- G91: la seguridad (reporte y rastreo) sirve siempre; el historial de mantenciones solo lo ve el dueño (con su clave) y con el módulo.
   du := length(coalesce(p_clave, '')) >= 20 and p_clave = p.clave;
   ve := p.robada and (du or not p.silencio);  -- G86: en silencio, quien escanea no sabe que está reportada
   return jsonb_build_object('bici', p.bici, 'color', p.color, 'dueno', split_part(p.dueno, ' ', 1), 'robada', ve, 'robada_at', case when ve then p.robada_at end,
     'robada_nota', case when ve then p.robada_nota else '' end, 'creado', p.created_at, 'es_dueno', du,
     'silencio', du and p.silencio, 'rastros', case when du then public.pasaporte_rastros_json(p.id) else '[]'::jsonb end,
     'serie', case when du or length(p.serie) <= 4 then p.serie else repeat('•', least(length(p.serie) - 4, 8)) || right(p.serie, 4) end,
-    'historial', public.pasaporte_historial(p.id),
+    'historial', case when du and public.cfx_modulo_de('pasaporte', t.owner_id) then public.pasaporte_historial(p.id) else '[]'::jsonb end,
+    'rastrear', p.robada and not du,  -- G91: sin reporte el QR no pide la ubicación
     'taller', jsonb_build_object('nombre', t.nombre, 'slug', t.slug, 'telefono', t.telefono, 'logo', t.logo, 'color', t.color, 'icono', t.icono,
       'comuna', t.comuna, 'direccion', t.direccion));
 end $$;
@@ -3443,7 +3447,7 @@ begin
   select * into p from public.pasaportes where token = p_token and length(p_token) >= 20 and clave = p_clave and length(coalesce(p_clave, '')) >= 20 for update;
   if p.id is null then return jsonb_build_object('ok', false, 'error', 'Este link no es del dueño de la bici'); end if;
   select * into t from public.talleres where id = p.taller_id;
-  if not public.cfx_modulo_de('pasaporte', t.owner_id) then return jsonb_build_object('ok', false, 'error', 'El taller ya no tiene el pasaporte activo'); end if;
+  -- G91: reportar un robo NO depende de que el taller pague el módulo.
   if p.robada = rob then
     if rob and p.silencio is distinct from coalesce(p_silencio, true) then update public.pasaportes set silencio = coalesce(p_silencio, true), updated_at = now() where id = p.id; end if;
     return jsonb_build_object('ok', true);
@@ -3466,7 +3470,6 @@ begin
   if coalesce(p_token, '') !~ '^[a-zA-Z0-9]{20,64}$' or coalesce(p_sesion, '') !~ '^[a-f0-9]{16,40}$' then return si; end if;
   select * into p from public.pasaportes where token = p_token;
   if p.id is null or not p.robada then return si; end if;
-  if not public.cfx_modulo_de('pasaporte', (select t.owner_id from public.talleres t where t.id = p.taller_id)) then return si; end if;
   perform pg_advisory_xact_lock(hashtext('rastro:' || p.id::text));
   select * into p from public.pasaportes where id = p.id;
   if not p.robada then return si; end if;
@@ -3495,6 +3498,37 @@ revoke all on function public.pasaporte_enlazar(), public.pasaporte_historial(uu
 grant execute on function public.taller_pasaportes(), public.taller_pasaporte(uuid), public.taller_pasaporte_guardar(jsonb), public.taller_pasaporte_borrar(uuid) to authenticated;
 grant execute on function public.pasaporte_ver(text, text), public.pasaporte_reportar(text, text, boolean, text, boolean),
   public.pasaporte_rastro(text, text, double precision, double precision, double precision) to anon, authenticated;
+
+-- G91 📍 Mis bicis (app del cliente, GRATIS): las que registró él + las de sus órdenes + las de su teléfono en su taller.
+create or replace function public.cliente_bicis() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare f public.perfiles;
+begin
+  select * into f from public.perfiles where id = auth.uid() and rol = 'cliente';
+  if f.id is null then return '[]'::jsonb; end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'bici', p.bici, 'color', p.color, 'serie', p.serie, 'robada', p.robada, 'silencio', p.silencio,
+      'token', p.token, 'clave', p.clave, 'propia', p.cliente_id = f.id,
+      'visto_at', (select max(x.created_at) from public.pasaporte_rastros x where x.pasaporte_id = p.id)) order by p.robada desc, p.created_at), '[]')
+    from public.pasaportes p
+    where p.cliente_id = f.id or p.id in (select r.pasaporte_id from public.reservas r where r.cliente_id = f.id and r.pasaporte_id is not null)
+      or (p.taller_id = f.taller_id and p.tel_norm <> '' and p.tel_norm = public.tel_norm(f.telefono)));
+end $$;
+create or replace function public.cliente_bici_guardar(p jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare f public.perfiles; b text := trim(coalesce(p ->> 'bici', '')); se text := trim(coalesce(p ->> 'serie', ''));
+begin
+  select * into f from public.perfiles where id = auth.uid() and rol = 'cliente' and not suspendido;
+  if f.id is null or f.taller_id is null then raise exception 'Solo para clientes de un taller'; end if;
+  if b = '' then raise exception 'Escribe qué bici es (marca y modelo)'; end if;
+  if (select count(*) from public.pasaportes where cliente_id = f.id) >= 5 then raise exception 'Máximo 5 bicis'; end if;
+  if se <> '' and exists (select 1 from public.pasaportes where taller_id = f.taller_id and lower(serie) = lower(se)) then
+    raise exception 'Ese nº de serie ya está registrado: pídele al taller tu pasaporte'; end if;
+  insert into public.pasaportes (taller_id, bici, serie, color, dueno, telefono, tel_norm, cliente_id)
+  values (f.taller_id, left(b, 120), left(se, 60), left(trim(coalesce(p ->> 'color', '')), 40), left(f.nombre, 80), left(f.telefono, 30), public.tel_norm(f.telefono), f.id);
+  return public.cliente_bicis();
+end $$;
+revoke all on function public.cliente_bicis(), public.cliente_bici_guardar(jsonb) from public, anon, authenticated;
+grant execute on function public.cliente_bicis(), public.cliente_bici_guardar(jsonb) to authenticated;
 
 -- =====================================================================
 -- G59g 🧩 🚐 Mecánico a domicilio: el cliente reserva con su dirección (+ recargo de visita), el taller arma la ruta del día
