@@ -919,7 +919,9 @@
         '<div class="row"><div><label>Monto del abono</label><input data-k="monto" data-s="' + l.slot + '" inputmode="numeric" value="' + (l.monto || '') + '" placeholder="10000"></div>' +
         '<div><label>Texto (opcional)</label><input data-k="texto" data-s="' + l.slot + '" maxlength="300" value="' + esc(l.texto) + '" placeholder="Abono mantención"></div></div>' +
         '<label>Link de pago (Mercado Pago)</label><input data-k="url" data-s="' + l.slot + '" value="' + esc(l.url) + '" placeholder="https://mpago.la/…"></div>').join('') +
-      '<div class="btns"><button id="aGuardar">💾 Guardar</button></div><p class="err" id="aErr"></p></div>';
+      '<div class="btns"><button id="aGuardar">💾 Guardar</button></div><p class="err" id="aErr"></p></div>' +
+      '<div class="card" id="aMp" hidden></div>';  // G98 ⚡ Mercado Pago propio (núcleo pagos.js)
+    if (window.CFX_PAGOS && CFX_PAGOS.mpNegocio) CFX_PAGOS.mpNegocio(body().querySelector('#aMp'), { rpc: (n, a) => rpc(n, a), para: 'el abono de su reserva' });
     $('aGuardar').onclick = async () => {
       $('aErr').textContent = '';
       const act = +((body().querySelector('input[name=act]:checked') || {}).value || 0);
