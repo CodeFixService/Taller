@@ -49,6 +49,10 @@ exception when others then
   raise notice 'Actualización automática no activada (%). Activa pg_cron en Supabase y vuelve a correr este archivo.', sqlerrm;
 end $$;
 
+-- G99 a ⚡ Dónde avisa Mercado Pago (núcleo cfx_mp_notif): esta misma función "servidor".
+create or replace function public.cfx_mp_aviso_url_app() returns text language sql immutable as $f$ select 'https://iwvjthcmufirbnotgixi.supabase.co/functions/v1/servidor' $f$;
+revoke all on function public.cfx_mp_aviso_url_app() from public, anon, authenticated;
+
 select cron.schedule('bt-push', '* * * * *', $$
   select net.http_post(
     url := 'https://iwvjthcmufirbnotgixi.supabase.co/functions/v1/servidor',
