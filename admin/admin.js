@@ -137,7 +137,7 @@
     try {
       await App.crearCuenta(d);
       const msg = App.mensajeAcceso({ nombre: d.nombre.split(' ')[0], email: d.email, password: d.password, lugar: 'BiciTaller (' + d.taller_nombre + ')' }) +
-        '\n\nTienes ' + ((pub.config || {}).dias_regalo_taller || 30) + ' días de Premium de regalo 🎁';
+        '\n\n🎁 Puedes probar Premium gratis una vez desde Mi plan.';  // G95: ya no hay regalo al crear
       modal('<h2>✅ Taller creado</h2><p class="muted">Envíale sus datos de acceso:</p><pre class="link" style="white-space:pre-wrap;font:inherit">' + esc(msg) + '</pre><div class="btns"><button class="ghost" data-cerrar>Cerrar</button>' +
         (d.telefono ? '<a class="btn" target="_blank" rel="noopener" href="' + App.wa(d.telefono, msg) + '">📲 Enviar por WhatsApp</a>' : '') + '</div>');
       ['nTaller', 'nDueno', 'nEmail', 'nTel'].forEach((k) => { $(k).value = ''; }); $('nPass').value = App.clave();
@@ -226,7 +226,7 @@
     const c = pub.config || {};
     const campos = [['minutos_pago', 'Minutos para pagar el abono y subir el comprobante'], ['minutos_devolucion', 'Minutos para cancelar con devolución del abono'],
       ['horas_cancelacion', 'Horas mínimas para cancelar/reagendar con saldo a favor'], ['dias_saldo', 'Días que dura el saldo a favor'],
-      ['dias_regalo_taller', 'Días de Premium de regalo al crear un taller (también si se registra solo)'], ['dias_aviso_vencimiento', 'Días antes del vencimiento para avisar'],
+      ['dias_regalo_taller', 'Días de Premium de regalo al crear un taller (G95: ya no se usa; la prueba es con el botón 🎁)'], ['dias_aviso_vencimiento', 'Días antes del vencimiento para avisar'],
       ['dias_comprobantes', 'Días que se guardan los comprobantes'], ['dias_referido', 'Días de Premium para el taller que invita (cuando el invitado paga su primer Premium; 0 = sin premio)'],
       ['horas_libera_premium', 'Horas antes de la cita en que una hora exclusiva Premium se abre a todos'], ['dias_fotos', 'Días que se guardan las fotos antes/después']];
     aBody().innerHTML = '<div class="card"><h2>⚖️ Reglas</h2>' +

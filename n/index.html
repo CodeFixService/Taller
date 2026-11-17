@@ -78,7 +78,7 @@
   if (pub.textos.app_nombre) { $('nombreApp').textContent = pub.textos.app_nombre; document.title = 'Únete a ' + pub.textos.app_nombre; }
   $('terminos').textContent = App.txt('terminos') || 'Acepto los términos de uso';
   const plan = (pub.planes || {}).taller_free;
-  $('gratis').innerHTML = '<div class="aviso"><div class="grow"><b>Gratis para siempre' + (info.dias_regalo ? ' + 🎁 ' + info.dias_regalo + ' días de Premium de regalo' : '') + '</b>' +
+  $('gratis').innerHTML = '<div class="aviso"><div class="grow"><b>Gratis para siempre' + (info.dias_regalo ? ' + 🎁 ' + info.dias_regalo + ' días de Premium de regalo' : info.prueba ? ' · 🎁 prueba Premium gratis cuando quieras' : '') + '</b>' +
     (plan ? '<div class="sub">' + esc(plan.beneficios.join(' · ')) + '</div>' : '') + '</div></div>';
   if (info.ref) {
     App.tema(info.ref.color);

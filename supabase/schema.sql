@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.50'::text $$;
+language sql immutable as $$ select '2.51'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -305,7 +305,7 @@ begin
       end loop;
       insert into public.talleres (owner_id, nombre, slug, telefono, premium_hasta)
       values (new.id, left(inv.taller_nombre, 80), sl, inv.telefono,
-              now() + make_interval(days => coalesce(public.cfg_int('dias_regalo_taller'), 30)))
+              null)  -- G95: parte FREE; la prueba Premium es con el botón 🎁 (antes: dias_regalo_taller)
       returning id into tid;
       insert into public.perfiles (id, email, nombre, telefono, rol, taller_id, created_by)
       values (new.id, em, left(inv.nombre, 80), inv.telefono, 'taller', tid, inv.created_by);
@@ -332,7 +332,7 @@ begin
     end loop;
     insert into public.talleres (owner_id, nombre, slug, telefono, comuna, premium_hasta, autoregistro, referido_por)
     values (new.id, nom, sl, left(trim(coalesce(meta ->> 'telefono', '')), 30), left(trim(coalesce(meta ->> 'comuna', '')), 60),
-            now() + make_interval(days => coalesce(public.cfg_int('dias_regalo_taller'), 30)), true, ref.id)
+            null, true, ref.id)  -- G95: parte FREE; la prueba Premium es con el botón 🎁 (antes: dias_regalo_taller)
     returning id into tid;
     insert into public.perfiles (id, email, nombre, telefono, rol, taller_id)
     values (new.id, em, left(trim(coalesce(meta ->> 'nombre', '')), 80), left(trim(coalesce(meta ->> 'telefono', '')), 30), 'taller', tid);
@@ -2555,7 +2555,8 @@ create or replace function public.registro_info(p_ref text default null) returns
 language sql stable security definer set search_path = '' as $$
   select jsonb_build_object(
     'abierto', coalesce(public.cfg_int('registro_talleres'), 1) > 0,
-    'dias_regalo', coalesce(public.cfg_int('dias_regalo_taller'), 30),
+    'dias_regalo', 0,  -- G95: ya no hay regalo al registrarse (prueba con botón 🎁); 'prueba' = sí hay botón
+    'prueba', true,
     'ref', (select jsonb_build_object('nombre', t.nombre, 'slug', t.slug, 'logo', t.logo, 'icono', t.icono, 'color', t.color)
             from public.talleres t where t.slug = lower(trim(coalesce(p_ref, ''))) and t.activo and not t.suspendido))
 $$;
@@ -4249,6 +4250,7 @@ begin
   bloq := debe and y ->> 'rol' = 'negocio';
   return jsonb_build_object('config', c - 'inicio_desde', 'yo', y, 'pagado', pagado, 'bloqueado', bloq, 'debe_inicio', debe,
     'liberado_hasta', case when lh > now() then lh end, 'mp', public.cfx_mp_on(),
+    'prueba_pro', public.cfx_pro_prueba(y),  -- G95
     'ultimo', (select to_jsonb(x) from (select id, periodo, monto, medio, estado, dias, motivo, creado, resuelto, hasta, producto, regalo from public.cfx_pagos
                where cuenta = (y ->> 'id')::uuid order by creado desc limit 1) x),
     -- G87 K: 🔑 keys que compré (🎁 regalo o respaldo), con si ya se usaron.
@@ -4705,6 +4707,82 @@ end $$;
 revoke all on function public.cfx_ingresos_cero(boolean) from public, anon;
 grant execute on function public.cfx_ingresos_desde() to anon, authenticated;
 grant execute on function public.cfx_ingresos_cero(boolean) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- G95 🎁 PRUEBA 7 DÍAS POR BOTÓN: todos parten FREE. "🎁 Probar Pro 7 días" (hoja ⭐ Premium) y "🎁 Probar 7 días" en cada módulo,
+--   UNA vez por correo. cfx_pruebas_usadas guarda el hash del correo (no el correo) y NO se borra al eliminar la cuenta ni en la limpieza:
+--   si la persona se borra y vuelve con el mismo correo, ya no ve el botón y el servidor lo rechaza. item: 'pro', la clave del módulo o 'pack'.
+--   Días: cfx_config 'pagos' → 'prueba_pro_dias' (si no está, los de 🧩 Módulos 'prueba_dias'; 7). 0 = sin prueba.
+--   Gancho opcional de la app: cfx_pro_prueba_app(uuid, text, int) → timestamptz (si no está, usa cfx_dar_premium).
+-- ---------------------------------------------------------------------
+create table if not exists public.cfx_pruebas_usadas (
+  hash   text not null,
+  item   text not null check (item ~ '^[a-z_:]{2,40}$'),
+  creado timestamptz not null default now(),
+  primary key (hash, item)
+);
+alter table public.cfx_pruebas_usadas enable row level security;
+revoke all on public.cfx_pruebas_usadas from anon, authenticated;
+create or replace function public.cfx_hash_correo(p_email text) returns text
+language sql immutable as $$ select encode(sha256(convert_to(lower(btrim(p_email)), 'UTF8')), 'hex') $$;
+create or replace function public.cfx_prueba_hash(p_cuenta uuid) returns text
+language sql stable security definer set search_path = '' as $$
+  select case when nullif(btrim(u.email), '') is not null then public.cfx_hash_correo(u.email) else public.cfx_hash_correo('id:' || u.id::text) end
+  from auth.users u where u.id = p_cuenta
+$$;
+create or replace function public.cfx_prueba_usada(p_cuenta uuid, p_item text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.cfx_pruebas_usadas where hash = public.cfx_prueba_hash(p_cuenta) and item = p_item)
+$$;
+create or replace function public.cfx_prueba_marcar(p_cuenta uuid, p_item text) returns void
+language sql security definer set search_path = '' as $$
+  insert into public.cfx_pruebas_usadas (hash, item) select h, p_item from (select public.cfx_prueba_hash(p_cuenta) h) x where h is not null
+  on conflict do nothing
+$$;
+create or replace function public.cfx_pro_prueba_dias() returns int
+language sql stable security definer set search_path = '' as $$
+  select greatest(0, least(30, coalesce((select (valor ->> 'prueba_pro_dias')::int from public.cfx_config where clave = 'pagos'),
+    (select (valor ->> 'prueba_dias')::int from public.cfx_config where clave = 'modulos_venta'), 7)))
+$$;
+-- ¿Esta cuenta puede tocar 🎁 Probar Pro? (para la hoja ⭐ Premium)
+create or replace function public.cfx_pro_prueba(y jsonb) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('dias', d, 'usada', u, 'puede', d > 0 and not u and coalesce(y ->> 'rol', '') in ('negocio', 'cliente')
+    and not coalesce((y ->> 'premium_hasta')::timestamptz > now(), false))
+  from (select public.cfx_pro_prueba_dias() d, public.cfx_prueba_usada((y ->> 'id')::uuid, 'pro') u) x
+$$;
+create or replace function public.cfx_pro_probar() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare y jsonb := public.cfx_yo(); u uuid := (y ->> 'id')::uuid; d int := public.cfx_pro_prueba_dias(); h timestamptz;
+begin
+  if u is null or u <> auth.uid() then raise exception 'Inicia sesión'; end if;
+  if coalesce(y ->> 'rol', '') not in ('negocio', 'cliente') then raise exception 'Esta cuenta no puede probar Premium'; end if;
+  if d <= 0 then raise exception 'La prueba gratis no está disponible ahora'; end if;
+  if coalesce((y ->> 'premium_hasta')::timestamptz > now(), false) then raise exception 'Ya tienes Premium activo'; end if;
+  if public.cfx_prueba_usada(u, 'pro') then raise exception 'Ya usaste tu prueba gratis de Premium con este correo'; end if;
+  perform public.cfx_prueba_marcar(u, 'pro');
+  if to_regprocedure('public.cfx_pro_prueba_app(uuid,text,integer)') is not null then
+    execute 'select public.cfx_pro_prueba_app($1, $2, $3)' into h using u, y ->> 'rol', d;
+  else h := public.cfx_dar_premium(u, y ->> 'rol', d); end if;
+  if h is null then raise exception 'No se pudo activar la prueba'; end if;
+  perform public.cfx_anotar('premium', 'prueba gratis ' || d || ' días · ' || u);
+  return jsonb_build_object('ok', true, 'hasta', h, 'dias', d);
+end $$;
+-- Centro de Mando → Control → 🎁 Pruebas: quién probó qué y cuándo (correo solo si la cuenta sigue existiendo).
+create or replace function public.cfx_pruebas_admin() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  perform public.admin_check();
+  return jsonb_build_object('total', (select count(*) from public.cfx_pruebas_usadas),
+    'items', (select coalesce(jsonb_object_agg(item, n), '{}') from (select item, count(*) n from public.cfx_pruebas_usadas group by item) x),
+    'ultimas', (select coalesce(jsonb_agg(jsonb_build_object('item', p.item, 'creado', p.creado, 'email', coalesce(u.email, '')) order by p.creado desc), '[]')
+      from (select * from public.cfx_pruebas_usadas order by creado desc limit 200) p
+      left join (select distinct on (h) h, email from (select public.cfx_hash_correo(x.email) h, x.email from auth.users x where nullif(btrim(x.email), '') is not null) y) u on u.h = p.hash));
+end $$;
+revoke all on function public.cfx_hash_correo(text), public.cfx_prueba_hash(uuid), public.cfx_prueba_usada(uuid, text), public.cfx_prueba_marcar(uuid, text),
+  public.cfx_pro_prueba_dias(), public.cfx_pro_prueba(jsonb) from public, anon, authenticated;
+revoke all on function public.cfx_pro_probar(), public.cfx_pruebas_admin() from public, anon;
+grant execute on function public.cfx_pro_probar(), public.cfx_pruebas_admin() to authenticated;
 -- ---------------------------------------------------------------------
 -- CodeFix · Administración común (igual en las 6 apps; se maneja desde el Centro de Mando → Control).
 --   Planes (interruptores sí/no y límites), textos, aviso a todos, keys de Premium, cupones de descuento,
@@ -5982,7 +6060,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bicis_usadas', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_anuncio_vistos', 'public.cfx_anuncios', 'public.cfx_bloqueos', 'public.cfx_boleta_cuentas', 'public.cfx_boletas', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_clave_temporal', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.garantias', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.pasaporte_rastros', 'public.pasaportes', 'public.perfiles', 'public.plan_cobros', 'public.plan_socios', 'public.plan_usos', 'public.planes', 'public.planes_mant', 'public.promos', 'public.proveedores', 'public.push_subs', 'public.repuestos', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.auditoria', 'public.bicis_usadas', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_anuncio_vistos', 'public.cfx_anuncios', 'public.cfx_bloqueos', 'public.cfx_boleta_cuentas', 'public.cfx_boletas', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_clave_temporal', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_pruebas_usadas', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.comprobantes', 'public.config', 'public.fotos_trabajo', 'public.garantias', 'public.invitaciones', 'public.links_pago', 'public.mensajes', 'public.notificaciones', 'public.pagos', 'public.pasaporte_rastros', 'public.pasaportes', 'public.perfiles', 'public.plan_cobros', 'public.plan_socios', 'public.plan_usos', 'public.planes', 'public.planes_mant', 'public.promos', 'public.proveedores', 'public.push_subs', 'public.repuestos', 'public.reservas', 'public.secretos', 'public.servicios', 'public.talleres', 'public.textos'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
@@ -6347,6 +6425,15 @@ begin
   else n := p_cuenta; end if;
   return n;
 end $$;
+-- G95: la cuenta del dueño de un negocio. Gancho opcional de la app: cfx_negocio_dueno_app(uuid) → uuid (Billetera: el negocio no es la cuenta).
+create or replace function public.cfx_negocio_dueno(p_negocio uuid) returns uuid
+language plpgsql stable security definer set search_path = '' as $$
+declare d uuid;
+begin
+  if p_negocio is null then return null; end if;
+  if to_regprocedure('public.cfx_negocio_dueno_app(uuid)') is not null then execute 'select public.cfx_negocio_dueno_app($1)' into d using p_negocio; return d; end if;
+  return p_negocio;
+end $$;
 create or replace function public.cfx_negocio_premium(p_negocio uuid) returns boolean
 language plpgsql stable security definer set search_path = '' as $$
 declare r boolean;
@@ -6410,7 +6497,7 @@ $$;
 -- Pantalla 🧩 Módulos del negocio: catálogo, precios (con su descuento Premium), lo que tiene y hasta cuándo.
 create or replace function public.cfx_modulos_tienda() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
-declare v jsonb := public.cfx_venta(); n uuid := public.cfx_negocio_cuenta(auth.uid()); pre boolean; d int; am int;
+declare v jsonb := public.cfx_venta(); n uuid := public.cfx_negocio_cuenta(auth.uid()); dn uuid := public.cfx_negocio_dueno(public.cfx_negocio_cuenta(auth.uid())); pre boolean; d int; am int;
 begin
   if n is null then raise exception 'Solo para negocios'; end if;
   pre := public.cfx_negocio_premium(n);
@@ -6418,13 +6505,13 @@ begin
   am := greatest(1, least(12, coalesce((v ->> 'anual_meses')::int, 10)));
   return jsonb_build_object('activo', coalesce((v ->> 'activo')::boolean, false), 'premium', pre, 'descuento', d, 'anual_meses', am,
     'descuento_pro', case when pre then 0 else greatest(0, least(90, coalesce((v ->> 'descuento_premium')::int, 0))) end,
-    'prueba_dias', coalesce((v ->> 'prueba_dias')::int, 7), 'dueno', n = auth.uid(),
+    'prueba_dias', coalesce((v ->> 'prueba_dias')::int, 7), 'dueno', dn = auth.uid(),
     'campana', (select jsonb_build_object('meses', (c ->> 'meses')::int, 'hasta', c ->> 'hasta') from (select public.cfx_campana() c) x where c is not null),
-    'prueba_pack', exists (select 1 from public.cfx_modulos_pruebas p where p.negocio = n and p.item like 'pack:%'),
+    'prueba_pack', exists (select 1 from public.cfx_modulos_pruebas p where p.negocio = n and p.item like 'pack:%') or public.cfx_prueba_usada(dn, 'pack'),  -- G95: por correo
     'modulos', coalesce((select jsonb_agg(jsonb_build_object('clave', k, 'nombre', coalesce(c.nombre, k), 'detalle', coalesce(c.detalle, ''),
         'precio', round(public.cfx_venta_precio(k) * (100 - d) / 100.0)::int, 'lista', public.cfx_venta_precio(k),
         'vende', public.cfx_venta_activa(k), 'activo', public.cfx_modulo_de(k, n) or public.cfx_modulo_plan(k, n), 'plan', public.cfx_modulo_plan(k, n),
-        'hasta', m.hasta, 'origen', m.origen, 'regalo', public.cfx_campana_puede(k, n), 'prueba_usada', exists (select 1 from public.cfx_modulos_pruebas p where p.negocio = n and p.item = k),
+        'hasta', m.hasta, 'origen', m.origen, 'regalo', public.cfx_campana_puede(k, n), 'prueba_usada', exists (select 1 from public.cfx_modulos_pruebas p where p.negocio = n and p.item = k) or public.cfx_prueba_usada(dn, k),
         'links', v #> array['links', k]) order by o)
       from unnest(public.cfx_modulos_de_app()) with ordinality u(k, o)
       left join public.cfx_modulos_catalogo() c on c.clave = k
@@ -6438,18 +6525,23 @@ begin
       from jsonb_each(coalesce(v -> 'packs', '{}')) p where cardinality(public.cfx_venta_modulos(p.key)) > 0), '[]'));
 end $$;
 
--- Probar gratis: cada módulo una vez, y un solo pack por negocio. Solo el dueño.
+-- Probar gratis: cada módulo una vez, y un solo pack por negocio. Solo el dueño. G95: también una vez por CORREO (cfx_pruebas_usadas, no se borra).
+-- prueba_dias = 0 → sin prueba gratis.
 create or replace function public.cfx_modulo_probar(p_item text) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare v jsonb := public.cfx_venta(); n uuid := public.cfx_negocio_cuenta(auth.uid()); pack boolean := (public.cfx_venta() #> array['packs', p_item]) is not null;
-        dias int := greatest(1, least(30, coalesce((v ->> 'prueba_dias')::int, 7))); h timestamptz;
+        dias int := least(30, coalesce((v ->> 'prueba_dias')::int, 7)); h timestamptz;
 begin
-  if n is null or n <> auth.uid() then raise exception 'Solo el dueño del negocio'; end if;
+  if n is null or public.cfx_negocio_dueno(n) is distinct from auth.uid() then raise exception 'Solo el dueño del negocio'; end if;
+  if dias <= 0 then raise exception 'La prueba gratis no está disponible ahora'; end if;
   if not coalesce((v ->> 'activo')::boolean, false) or cardinality(public.cfx_venta_modulos(p_item)) = 0 then raise exception 'Módulo no válido'; end if;
   if pack and exists (select 1 from public.cfx_modulos_pruebas where negocio = n and item like 'pack:%') then raise exception 'Ya usaste la prueba gratis de un pack'; end if;
   if not pack and exists (select 1 from public.cfx_modulos_pruebas where negocio = n and item = p_item) then raise exception 'Ya usaste la prueba gratis de este módulo'; end if;
+  if public.cfx_prueba_usada(auth.uid(), case when pack then 'pack' else p_item end) then
+    raise exception '%', case when pack then 'Ya usaste la prueba gratis de un pack con este correo' else 'Ya usaste la prueba gratis de este módulo con este correo' end; end if;
   if not pack and public.cfx_modulo_de(p_item, n) then raise exception 'Ya tienes este módulo activo'; end if;
   insert into public.cfx_modulos_pruebas (negocio, item) values (n, case when pack then 'pack:' || p_item else p_item end);
+  perform public.cfx_prueba_marcar(auth.uid(), case when pack then 'pack' else p_item end);
   -- La prueba no alarga lo que ya está pagado: solo prende lo que no tiene.
   insert into public.cfx_modulos_negocio as m (negocio, modulo, hasta, origen)
   select n, k, now() + make_interval(days => dias), 'prueba' from unnest(public.cfx_venta_modulos(p_item)) k
@@ -6464,7 +6556,7 @@ create or replace function public.cfx_modulo_campana(p_modulo text) returns json
 language plpgsql security definer set search_path = '' as $$
 declare n uuid := public.cfx_negocio_cuenta(auth.uid()); c jsonb := public.cfx_campana(); h timestamptz;
 begin
-  if n is null or n <> auth.uid() then raise exception 'Solo el dueño del negocio'; end if;
+  if n is null or public.cfx_negocio_dueno(n) is distinct from auth.uid() then raise exception 'Solo el dueño del negocio'; end if;
   if c is null then raise exception 'La campaña ya terminó'; end if;
   if not public.cfx_campana_puede(p_modulo, n) then
     raise exception '%', case when exists (select 1 from public.cfx_modulos_pruebas p where p.negocio = n and p.item = 'campana:' || p_modulo)
@@ -6584,7 +6676,7 @@ begin
 end $$;
 
 revoke all on function public.cfx_modulos_catalogo(), public.cfx_venta(), public.cfx_venta_on(), public.cfx_venta_precio(text), public.cfx_venta_activa(text), public.cfx_venta_modulos(text),
-  public.cfx_negocio_cuenta(uuid), public.cfx_negocio_premium(uuid), public.cfx_modulo_plan(text, uuid), public.cfx_modulo_de(text, uuid), public.cfx_modulo_mio(text),
+  public.cfx_negocio_cuenta(uuid), public.cfx_negocio_dueno(uuid), public.cfx_negocio_premium(uuid), public.cfx_modulo_plan(text, uuid), public.cfx_modulo_de(text, uuid), public.cfx_modulo_mio(text),
   public.cfx_modulos_dar(uuid, text, int, text), public.cfx_modulos_avisar(), public.cfx_modulos_borrar(uuid),
   public.cfx_campana(), public.cfx_campana_puede(text, uuid) from public, anon, authenticated;
 revoke all on function public.cfx_modulos_de(uuid), public.cfx_modulos_tienda(), public.cfx_modulo_probar(text), public.cfx_modulo_campana(text), public.cfx_venta_admin(),
@@ -7972,6 +8064,18 @@ end $$;
 revoke all on function public.cfx_anuncios_publicar(uuid, text, jsonb), public.cfx_anuncios_quitar(uuid), public.cfx_anuncios_admin(), public.cfx_anuncios_ver(), public.cfx_anuncio_marcar(uuid, text) from public, anon;
 grant execute on function public.cfx_anuncios_publicar(uuid, text, jsonb), public.cfx_anuncios_quitar(uuid), public.cfx_anuncios_admin(), public.cfx_anuncios_ver(), public.cfx_anuncio_marcar(uuid, text) to authenticated;
 -- <<< CFX núcleo
+
+-- G95 🎁 Prueba por botón: los talleres de antes ya partieron con días de Premium de regalo → su correo queda anotado (no se borra).
+-- Una sola vez (al actualizar la base): después, cada taller nuevo parte FREE con su botón.
+do $$ begin
+  if not exists (select 1 from public.cfx_config where clave = 'g95_pruebas') then
+    insert into public.cfx_pruebas_usadas (hash, item)
+    select public.cfx_hash_correo(p.email), 'pro' from public.perfiles p join public.talleres t on t.owner_id = p.id
+    where p.rol = 'taller' and nullif(btrim(p.email), '') is not null
+    on conflict do nothing;
+    insert into public.cfx_config (clave, valor) values ('g95_pruebas', 'true'::jsonb) on conflict do nothing;
+  end if;
+end $$;
 
 -- G59 🧩 Packs de BiciTaller: los de fábrica del núcleo son de tienda (aquí saldrían más caros que sueltos) → sin packs por ahora.
 -- Solo si siguen los de fábrica: si Josué ya los cambió en el Centro de Mando, no se tocan.
