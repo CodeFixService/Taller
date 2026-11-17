@@ -70,7 +70,7 @@
 
   /* ---------- Navegación ---------- */
   // #plan y #mas/<sección> (perfil, horario, servicios, abono…): abren esa parte de Más (la guía para partir los usa).
-  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock|usadas|tradein|pasaporte|domicilio|garantias|planes|caja)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
+  window.addEventListener('hashchange', () => { if (location.hash === '#mas') { subMas = null; show('mas'); return; } const m = /^#(?:mas\/)?(plan|perfil|horario|servicios|abono|promos|equipo|stats|recordar|cuenta|compartir|modulos|stock|usadas|tradein|pasaporte|domicilio|garantias|planes|caja|boleta)$/.exec(location.hash); if (m && (m[1] === 'plan' || /^#mas\//.test(location.hash))) { subMas = m[1]; show('mas'); } });
   const show = App.pestanas((v) => {
     vista = v;
     if (v === 'hoy') pintarHoy();
@@ -682,15 +682,15 @@
   let subMas = null;
   $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); } };
   // Más = menú común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (body() dibuja dentro de ella).
-  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller', caja: 'Ventas y clientes', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes', pasaporte: 'Ventas y clientes', domicilio: 'Tu taller', garantias: 'Ventas y clientes', planes: 'Ventas y clientes',
+  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', equipo: 'Tu taller', stock: 'Tu taller', caja: 'Ventas y clientes', boleta: 'Ventas y clientes', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes', pasaporte: 'Ventas y clientes', domicilio: 'Tu taller', garantias: 'Ventas y clientes', planes: 'Ventas y clientes',
     stats: 'Ventas y clientes', recordar: 'Ventas y clientes', plan: 'Tu plan', modulos: 'Tu plan', cuenta: 'Configuración' };
   const K2 = { plan: 'premium', cuenta: 'micuenta', chat: 'mensajes' };
-  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', caja: '💵', usadas: '🏷️', tradein: '🔄', pasaporte: '🪪', domicilio: '🚐', garantias: '🛡️', planes: '🔁', cuenta: '👤' };
+  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', caja: '💵', boleta: '🧾', usadas: '🏷️', tradein: '🔄', pasaporte: '🪪', domicilio: '🚐', garantias: '🛡️', planes: '🔁', cuenta: '👤' };
   let hojaMas = null;
   function abrirSec(m) {
     if (m === 'chat') { $('chatBtn').click(); return; }
     const b = $('mSeg').querySelector('[data-m="' + m + '"]'); if (!b || b.classList.contains('hidden')) return;
-    const F = { perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, caja: verCaja, usadas: verUsadas, tradein: verTradein, pasaporte: verPasaportes, domicilio: verDomicilio, garantias: verGarantias, planes: verPlanes };
+    const F = { boleta: verBoleta, perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, caja: verCaja, usadas: verUsadas, tradein: verTradein, pasaporte: verPasaportes, domicilio: verDomicilio, garantias: verGarantias, planes: verPlanes };
     if (!hojaMas || hojaMas.m !== m || !hojaMas.h.d.isConnected) {
       const h = window.CFX_MENU.hoja((ICO[m] || '') + ' ' + esc(b.textContent.replace(/\d+$/, '').replace(/^[^\p{L}]+/u, '').trim()), () => { if (hojaMas && hojaMas.h === h) { hojaMas = null; subMas = null; } });
       hojaMas = { m, h };
@@ -1036,12 +1036,29 @@
   const cargarComprobante = () => window.CFX_COMPROBANTE ? Promise.resolve(window.CFX_COMPROBANTE) : new Promise((ok) => {
     const sc = document.createElement('script'); sc.src = App.ROOT + 'shared/comprobante.js'; sc.onload = () => ok(window.CFX_COMPROBANTE || null); sc.onerror = () => ok(null); document.head.appendChild(sc); });
   window.CFX_COMPROBANTE_DATOS = window.CFX_COMPROBANTE_DATOS || (async () => ({ logo: P.taller.logo || '', firma: { razon: P.taller.nombre, direccion: P.taller.direccion || '', comuna: P.taller.comuna || '' } }));
-  function boletaCobro(k) {
+  // G92 🧾 Boleta SII del núcleo (boleta.js a pedido): Más → 🧾 Boleta SII (datos del emisor; ⚡ OpenFactura = automática al cobrar).
+  const cargarBoleta = () => window.CFX_BOLETA ? Promise.resolve(window.CFX_BOLETA) : new Promise((ok) => {
+    const sc = document.createElement('script'); sc.src = App.ROOT + 'shared/boleta.js'; sc.onload = () => ok(window.CFX_BOLETA || null); sc.onerror = () => ok(null); document.head.appendChild(sc); });
+  async function verBoleta() {
+    body().innerHTML = '<div class="card"><div data-bol-z><p class="empty">Cargando…</p></div></div>';
+    const B = await cargarBoleta(); if (!B) { body().innerHTML = '<p class="err">No se pudo abrir. Revisa tu conexión.</p>'; return; }
+    B.ajustes(body().querySelector('[data-bol-z]'), { rpc });
+  }
+  async function boletaCobro(k) {
     if (!k) return;
+    const B = await cargarBoleta(), E = B ? await B.estado(rpc) : {}, OF = E.modo === 'openfactura' && E.conectado;
     const d = modal('<h2>🧾 Boleta · ' + plata(k.total) + '</h2><p class="sub" style="margin-top:0">' + esc(k.hora + ' · ' + (k.nombre || (k.reserva ? 'Orden' : 'Venta de mostrador')) + ' · ' + medioDe(k.medio)) + '</p>' +
+      (OF && !k.boleta ? '<div class="btns" style="margin-top:0"><button type="button" class="okb" id="boE">⚡ Emitir boleta SII</button></div><p class="sub">Con OpenFactura: sale sola y queda en el cierre. Si prefieres, anota el N° abajo.</p>' : '') +
+      (k.boleta_url ? '<p><a class="btn small ghost" target="_blank" rel="noopener" href="' + esc(window.CFX_URL ? CFX_URL(k.boleta_url) : k.boleta_url) + '">📄 Ver boleta N° ' + esc(k.boleta || '') + '</a></p>' : '') +
       '<label for="boF">N° de la boleta del SII</label><input id="boF" inputmode="numeric" maxlength="10" value="' + esc(k.boleta || '') + '" placeholder="Ej: 1234">' +
       '<p class="sub">Emítela en la app o el sitio del SII (gratis) y anota aquí su número: queda en el cierre y en el comprobante.</p>' +
       '<div class="btns"><button type="button" class="alt" id="boC">🧾 Comprobante</button><button type="button" id="boG">💾 Guardar N°</button></div>');
+    if (d.querySelector('#boE')) d.querySelector('#boE').onclick = async (ev) => {
+      ev.currentTarget.disabled = true;
+      try { const x = await B.emitir(rpc, 'taller_caja_boleta_sii', { p_id: k.id }, { monto: plata(k.total) }); if (!x) { ev.currentTarget.disabled = false; return; }
+        if (x.ok) { d.close(); toast('🧾 Boleta N° ' + x.folio + ' emitida'); verCaja(); } else { toast('⚠️ ' + x.error); ev.currentTarget.disabled = false; } }
+      catch (err) { toast(err.message); ev.currentTarget.disabled = false; }
+    };
     d.querySelector('#boG').onclick = async () => {
       try { const x = await rpc('taller_caja_boleta', { p_id: k.id, p_folio: d.querySelector('#boF').value }); k.boleta = x.boleta; d.close(); toast(x.boleta ? '🧾 Boleta N° ' + x.boleta + ' anotada' : 'N° de boleta quitado'); verCaja(); }
       catch (err) { toast(err.message); }
