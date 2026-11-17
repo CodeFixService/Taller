@@ -189,7 +189,7 @@ nav.tabs .badge { top: 0; right: calc(50% - 22px); }
 dialog { border: 0; border-radius: var(--r); padding: 0; width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 40px);
   background: var(--card); color: var(--text); box-shadow: 0 20px 60px rgba(0, 0, 0, .35); }
 dialog::backdrop { background: rgba(15, 23, 42, .55); }
-dialog .card { margin: 0; border: 0; box-shadow: none; }
+dialog .card { margin: 0 0 12px; border: 0; box-shadow: none; } /* G81 a: espacio entre cards */
 #toast { position: fixed; left: 50%; bottom: calc(92px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(14px);
   background: var(--text); color: var(--card); padding: 12px 18px; border-radius: 14px; font-weight: 500; opacity: 0;
   pointer-events: none; transition: .22s; max-width: 92vw; z-index: 100; text-align: center; }
