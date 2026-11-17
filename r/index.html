@@ -256,7 +256,7 @@
       $('est').onclick = (ev) => { const x = ev.target.closest('[data-n]'); if (!x) return; n = +x.dataset.n; $('est').querySelectorAll('button').forEach((y) => y.classList.toggle('on', +y.dataset.n <= n)); };
       $('bCal').onclick = async () => {
         if (!n) { App.toast('Elige las estrellas'); return; }
-        try { const x = await App.rpc('reserva_calificar', { p_token: token, p_estrellas: n, p_comentario: $('calTxt').value }); if (!x.ok) throw new Error(x.error); App.toast('¡Gracias! ⭐'); cargar(); }
+        try { const x = await App.rpc('reserva_calificar', { p_token: token, p_estrellas: n, p_comentario: $('calTxt').value }); if (!x.ok) throw new Error(x.error); App.toast('¡Gracias! ⭐'); cargar(); pedirGoogle(x.google); }
         catch (err) { App.toast(err.message); }
       };
     }
@@ -271,6 +271,15 @@
         try { const n = await App.rpc('reserva_ver', { p_token: token }); if (n && (n.estado !== r.estado || n.abono_estado !== r.abono_estado || n.total !== r.total || n.fotos_n !== r.fotos_n || JSON.stringify(n.checklist) !== JSON.stringify(r.checklist) || JSON.stringify(n.items) !== JSON.stringify(r.items))) { r = n; pintar(); } } catch (e) { /* sin red */ }
       }, 20000);
     }
+  }
+
+  // G74c ⭐ Reseñas en Google: si calificó con 4-5 ★ y el taller tiene el módulo, la base devuelve su link.
+  function pedirGoogle(link) {
+    const u = link ? CFX_URL(link) : '';
+    if (!/^https:/.test(u)) return;
+    const d = App.modal('<h2>⭐ ¡Gracias!</h2><p>¿Nos ayudas con una reseña en Google? Así más ciclistas encuentran el taller. Es 1 minuto.</p>' +
+      '<div class="btns"><button class="ghost" data-cerrar>Ahora no</button><a class="btn" id="bGoogle" target="_blank" rel="noopener" href="' + esc(u) + '">⭐ Dejar reseña en Google</a></div>');
+    d.querySelector('#bGoogle').addEventListener('click', () => setTimeout(() => d.close(), 400));
   }
 
   async function cancelar() {

@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.39'::text $$;
+language sql immutable as $$ select '2.40'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -626,6 +626,7 @@ alter table public.reservas add column if not exists plan_desc int not null defa
 alter table public.reservas drop constraint if exists reservas_plan_desc_chk;
 alter table public.reservas add constraint reservas_plan_desc_chk check (plan_desc between 0 and 50);
 alter table public.talleres add column if not exists domicilio jsonb not null default '{}'::jsonb;
+alter table public.talleres add column if not exists google_resenas text;  -- G74c ⭐ link para dejar reseña en Google (https://)
 
 -- Fotos antes/después del trabajo (v1.6, taller Premium). Livianas y se borran solas después de N días.
 create table if not exists public.fotos_trabajo (
@@ -1252,7 +1253,9 @@ begin
   values (r.id, r.taller_id, 'cliente', p_estrellas, left(trim(coalesce(p_comentario, '')), 300))
   on conflict (reserva_id, autor) do update set estrellas = excluded.estrellas, comentario = excluded.comentario, created_at = now();
   perform public.avisar_taller(r.taller_id, '⭐ Nueva calificación', r.nombre || ' te calificó con ' || p_estrellas || ' estrellas', '/taller/#mas');
-  return jsonb_build_object('ok', true);
+  -- G74c ⭐ módulo Reseñas en Google: al cliente feliz (4-5 ★) le pasamos el link de Google del taller.
+  return jsonb_build_object('ok', true, 'google', case when p_estrellas >= 4 then
+    (select t.google_resenas from public.talleres t where t.id = r.taller_id and public.cfx_modulo_de('resenas', t.owner_id)) end);
 end $$;
 
 -- App del cliente con cuenta.
@@ -2878,7 +2881,7 @@ language sql stable security definer set search_path = '' as $$
   select coalesce((select public.taller_es_premium(t.id) from public.talleres t where t.owner_id = n), false)
 $$;
 create or replace function public.cfx_modulos_app() returns text[]
-language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock', 'certificadas', 'tradein', 'pasaporte', 'domicilio', 'garantias', 'plan_mant'] $$;
+language sql immutable as $$ select array['presupuesto', 'aviso_lista', 'mantencion', 'stock', 'certificadas', 'tradein', 'pasaporte', 'domicilio', 'garantias', 'plan_mant', 'resenas'] $$;
 revoke all on function public.cfx_negocio_de_cuenta(uuid), public.cfx_es_premium(uuid), public.cfx_modulos_app() from public, anon, authenticated;
 create or replace function public.taller_tiene(p_modulo text) returns boolean
 language plpgsql stable security definer set search_path = '' as $$ begin return public.cfx_modulo_de(p_modulo, public.cfx_negocio_de_cuenta(auth.uid())); end $$;
@@ -7242,3 +7245,18 @@ begin
 end $$;
 revoke all on function public.taller_caja_vender(jsonb, text, text), public.taller_caja_cobrar(uuid, text), public.taller_caja(date), public.taller_caja_anular(uuid) from public, anon;
 grant execute on function public.taller_caja_vender(jsonb, text, text), public.taller_caja_cobrar(uuid, text), public.taller_caja(date), public.taller_caja_anular(uuid) to authenticated;
+
+-- ============ G74c ⭐ Módulo Reseñas en Google ============
+-- El dueño pega el link de Google (Maps → tu negocio → Pedir reseñas). Se puede guardar siempre (para no perderlo),
+-- pero solo se le muestra al cliente si el taller tiene el módulo 'resenas' (reserva_calificar).
+create or replace function public.taller_google_guardar(p_link text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); l text := nullif(trim(coalesce(p_link, '')), '');
+begin
+  if tid is null or not public.es_dueno(tid) then raise exception 'Solo el dueño del taller puede cambiar esto'; end if;
+  if l is not null and l !~ '^https://[^ <>"]+$' then raise exception 'El link de Google debe empezar con https://'; end if;
+  update public.talleres set google_resenas = left(l, 300) where id = tid;
+  return jsonb_build_object('ok', true, 'google_resenas', left(l, 300));
+end $$;
+revoke all on function public.taller_google_guardar(text) from public, anon;
+grant execute on function public.taller_google_guardar(text) to authenticated;

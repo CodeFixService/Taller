@@ -79,3 +79,9 @@
 - Orden: sin módulo presupuesto → #dPresWa "📲 Enviar presupuesto" (WhatsApp con ítems y total, gratis) · lista → #dCobrar 💵 Cobrar y entregar · recibida/en reparación sin abono → ❌ Anular (cancelada).
 - Tabla caja (taller, fecha, medio efectivo|transferencia|tarjeta, total, items, nombre, reserva_id único, stock). RPC: taller_caja_vender(items, medio, nombre) (baja stock si tiene 📦) · taller_caja_cobrar(reserva, medio) (a pagar = total − abono; lista → completada; no cobra 2 veces) · taller_caja(fecha) {cobros, medios, por_cobrar (lista o entregadas ≤3 días sin cobro)} · taller_caja_anular(id) (solo dueño; devuelve stock).
 - Pantalla: Más → 💵 Caja (verCaja, ventaMostrador, elegirMedio, cobrarOrden; constante CAJA_M porque MEDIOS ya existe).
+
+## ⭐ G74c · Módulo Reseñas en Google (2.99, bd 2.40 · núcleo 2.94) — prueba SaaS/pruebas/g74c_resenas.js
+- cfx_modulos_app() suma 'resenas' (misma clave, catálogo y demo que Barbería; la demo ahora dice "calificó su atención").
+- talleres.google_resenas (https://, ≤300) · RPC taller_google_guardar(p_link) = solo dueño (se puede guardar sin módulo, pero solo se usa con él).
+- reserva_calificar devuelve { ok, google }: google = link solo si 4-5 ★ y cfx_modulo_de('resenas', owner_id).
+- Pantalla: Más → 🏪 Perfil → card #pGoo (#pGLink + #pGGuardar; sin módulo: data-ofrecer="resenas") · orden completada con teléfono → #dGoo ⭐ Pedir reseña (WhatsApp con el link) · /r/ pedirGoogle(link): ventana con #bGoogle.

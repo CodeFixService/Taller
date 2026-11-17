@@ -446,7 +446,7 @@
       (r.motivo ? '<div class="sub">Motivo: ' + esc(r.motivo) + '</div>' : '') +
       '<div class="btns">' + (r.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(r.telefono, 'Hola ' + r.nombre.split(' ')[0] + ' 👋 Te escribimos de ' + P.taller.nombre + ': ' +
         (msgCliente || '') + '\nTu reserva: ' + link) + '">📲 WhatsApp</a>' : '') +
-      '<button class="small ghost" id="dLink">🔗 Enlace del cliente</button>' + (tiene('domicilio') && !['completada', 'rechazada', 'expirada', 'cancelada', 'no_asistio'].includes(r.estado) ? '<button class="small ghost" id="dDom" type="button">🚐 ' + (r.domicilio ? 'Domicilio' : 'A domicilio') + '</button>' : '') + (tiene('pasaporte') ? '<button class="small ghost" id="dPas">🪪 Pasaporte</button>' : P.venta && r.bici ? '<button class="small ghost" type="button" data-sin-atras data-ofrecer="pasaporte">🪪 Pasaporte</button>' : '') + (['lista', 'completada'].includes(r.estado) ? (tiene('garantias') ? '<button class="small ghost" id="dGar" type="button">🛡️ Garantía</button>' : P.venta ? '<button class="small ghost" type="button" data-sin-atras data-ofrecer="garantias">🛡️ Garantía</button>' : '') : '') + (r.tiene_comprobante ? '<button class="small ghost" data-comp="' + r.id + '">👁️ Comprobante</button>' : '') + '</div>' +
+      '<button class="small ghost" id="dLink">🔗 Enlace del cliente</button>' + (tiene('domicilio') && !['completada', 'rechazada', 'expirada', 'cancelada', 'no_asistio'].includes(r.estado) ? '<button class="small ghost" id="dDom" type="button">🚐 ' + (r.domicilio ? 'Domicilio' : 'A domicilio') + '</button>' : '') + (tiene('pasaporte') ? '<button class="small ghost" id="dPas">🪪 Pasaporte</button>' : P.venta && r.bici ? '<button class="small ghost" type="button" data-sin-atras data-ofrecer="pasaporte">🪪 Pasaporte</button>' : '') + (r.estado === 'completada' && r.telefono && tiene('resenas') && P.taller.google_resenas ? '<a class="btn small ghost" id="dGoo" target="_blank" rel="noopener" href="' + esc(App.wa(r.telefono, 'Hola ' + String(r.nombre || '').split(' ')[0] + ' 👋 Gracias por confiar en ' + P.taller.nombre + ' 🚲 ¿Nos ayudas con una reseña en Google? Es 1 minuto: ' + P.taller.google_resenas)) + '">⭐ Pedir reseña</a>' : '') + (['lista', 'completada'].includes(r.estado) ? (tiene('garantias') ? '<button class="small ghost" id="dGar" type="button">🛡️ Garantía</button>' : P.venta ? '<button class="small ghost" type="button" data-sin-atras data-ofrecer="garantias">🛡️ Garantía</button>' : '') : '') + (r.tiene_comprobante ? '<button class="small ghost" data-comp="' + r.id + '">👁️ Comprobante</button>' : '') + '</div>' +
       (r.estado === 'en_revision' ? botonesRevisar(r) : '') +
       (r.estado === 'lista' && !tiene('aviso_lista') && P.venta ? '<div class="aviso" style="margin-top:12px"><div class="grow">🔔 Avísale solo con el total y el link, y recuérdale si no la retira.</div><button class="small" type="button" data-sin-atras data-ofrecer="aviso_lista">🧩 Ver</button></div>' : '') +
       (r.abono_estado === 'devolver' ? '<div class="aviso warn" style="margin-top:12px"><div class="grow">Devuelve el abono de ' + plata(r.abono_monto) + ' al cliente.</div><button class="small okb" data-devuelto="' + r.id + '">✓ Ya lo devolví</button></div>' : '') +
@@ -712,7 +712,12 @@
       '<label>Ícono (si no tienes logo)</label><div class="swatches iconos" id="pIco">' + ICONOS.map((i) => '<button type="button" data-i="' + i + '">' + i + '</button>').join('') + '</div>' +
       '<label class="check"><input type="checkbox" id="pDirec"' + (t.en_directorio !== false ? ' checked' : '') + '> Aparecer en el <a href="' + App.ROOT + 'd/" target="_blank" rel="noopener">directorio de talleres</a>' +
       (P.premium ? ' (⭐ como Premium sales primero)' : ' (los Premium salen primero)') + '</label>' +
-      '<div class="btns"><button id="pGuardar">💾 Guardar perfil</button></div><p class="err" id="pErr"></p></div>';
+      '<div class="btns"><button id="pGuardar">💾 Guardar perfil</button></div><p class="err" id="pErr"></p></div>' +
+      // G74c ⭐ Reseñas en Google (módulo): el link se le muestra al cliente que califica con 4-5 ★.
+      '<div class="card" id="pGoo"><h2>⭐ Reseñas en Google</h2><p class="sub" style="margin-top:0">Al cliente que te pone 4 o 5 ★ le pedimos su reseña en Google: más gente te encuentra en Maps.</p>' +
+      (tiene('resenas') ? '<label for="pGLink">Link para dejar reseña</label><input id="pGLink" inputmode="url" maxlength="300" placeholder="https://g.page/r/…/review" value="' + esc(t.google_resenas || '') + '">' +
+        '<p class="sub">Dónde está: Google Maps → tu taller → <b>Pedir reseñas</b> → Copiar link.</p><div class="btns"><button id="pGGuardar" type="button">💾 Guardar link</button></div><p class="err" id="pGErr"></p>'
+        : P.venta ? '<div class="btns"><button type="button" data-sin-atras data-ofrecer="resenas">🧩 Ver el módulo</button></div>' : '') + '</div>';
     const prev = () => {
       App.pintarLogo($('pLogo'), { logo, icono });
       $('pLogo').style.backgroundColor = color;
@@ -726,6 +731,11 @@
     $('pCol').onclick = (e) => { const b = e.target.closest('[data-c]'); if (b) { color = b.dataset.c; $('pColor').value = color; prev(); } };
     $('pColor').oninput = () => { color = $('pColor').value; prev(); };
     $('pIco').onclick = (e) => { const b = e.target.closest('[data-i]'); if (b) { icono = b.dataset.i; prev(); } };
+    if ($('pGGuardar')) $('pGGuardar').onclick = async () => {
+      $('pGErr').textContent = '';
+      try { await rpc('taller_google_guardar', { p_link: $('pGLink').value }); await cargarPanel(); toast('⭐ Link guardado'); }
+      catch (e) { $('pGErr').textContent = e.message; }
+    };
     $('pGuardar').onclick = async () => {
       $('pErr').textContent = '';
       try {
