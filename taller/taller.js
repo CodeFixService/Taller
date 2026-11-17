@@ -1119,7 +1119,8 @@
     ST = s;
     const bajos = porPedir(), f = (body().querySelector('#rBuscar') || {}).value || '';
     body().innerHTML = (bajos.length ? '<div class="aviso warn"><div class="grow">⚠️ ' + bajos.length + ' repuesto' + (bajos.length === 1 ? '' : 's') + ' por pedir.</div><button class="small" id="rPedido" type="button">🛒 Armar pedido</button></div>' : '') +
-      '<div class="card"><h2>📦 Repuestos <span class="pill">' + s.repuestos.length + '</span></h2><p class="sub" style="margin-top:0">Baja solo al entregar la orden (si el nombre es igual). Usa ➖ ➕ para corregir.</p>' +
+      '<div class="card"><h2>📦 Repuestos <span class="pill">' + s.repuestos.length + '</span></h2><p class="sub" style="margin-top:0">Baja solo al entregar la orden (si el nombre es igual). Usa ➖ ➕ para corregir. ✏️ → 🛒 para mostrarlo en tu tienda.</p>' +
+      (s.repuestos.some((x) => x.tienda) ? '<div class="aviso" style="margin-bottom:10px"><div class="grow">🛒 ' + s.repuestos.filter((x) => x.tienda).length + ' en tu tienda (tu página de reservas).</div><a class="btn small alt" target="_blank" rel="noopener" href="' + esc(App.ROOT + 't/?s=' + encodeURIComponent(P.taller.slug) + '#tienda') + '">👀 Ver</a></div>' : '') +
       (s.repuestos.length > 8 ? '<input id="rBuscar" placeholder="🔎 Buscar repuesto" value="' + esc(f) + '">' : '') + '<ul class="list" id="rLista"></ul>' +
       '<div class="btns">' + (P.dueno ? '<button id="rNuevo" type="button">＋ Nuevo repuesto</button><button class="alt" id="rFab" type="button">✨ Repuestos de fábrica</button>' : '') +
       '<button class="ghost" id="rProv" type="button">🚚 Proveedores (' + s.proveedores.length + ')</button></div></div>';
@@ -1128,7 +1129,7 @@
       const l = s.repuestos.filter((x) => !t || x.nombre.toLowerCase().includes(t));
       body().querySelector('#rLista').innerHTML = l.length ? l.map((x) => {
         const bajo = x.minimo > 0 && x.stock <= x.minimo, pv = s.proveedores.find((p) => p.id === x.proveedor_id);
-        return '<li><div class="grow"><b>' + esc(x.nombre) + '</b> <span class="pill ' + (x.stock === 0 ? 'bad' : bajo ? 'warn' : 'ok') + '">' + x.stock + '</span>' +
+        return '<li><div class="grow"><b>' + esc(x.nombre) + '</b> <span class="pill ' + (x.stock === 0 ? 'bad' : bajo ? 'warn' : 'ok') + '">' + x.stock + '</span>' + (x.tienda ? ' <span class="pill info" title="En tu tienda">🛒</span>' : '') +
           '<div class="sub">' + (P.dueno ? plata(x.precio) + ' · ' : '') + (x.minimo ? 'mínimo ' + x.minimo : 'sin mínimo') + (pv ? ' · 🚚 ' + esc(pv.nombre) : '') + '</div></div>' +
           '<button class="small ghost" data-mas="' + x.id + '" data-n="-1" aria-label="Restar uno">➖</button><button class="small ghost" data-mas="' + x.id + '" data-n="1" aria-label="Sumar uno">➕</button>' +
           (P.dueno ? '<button class="small ghost" data-ed="' + x.id + '" aria-label="Editar">✏️</button>' : '') + '</li>';
@@ -1159,13 +1160,27 @@
       '<div class="row"><div><label for="rP">Precio de venta</label><input id="rP" inputmode="numeric" value="' + (x ? x.precio : '') + '"></div><div><label for="rS">Stock hoy</label><input id="rS" inputmode="numeric" value="' + (x ? x.stock : 0) + '"></div></div>' +
       '<div class="row"><div><label for="rM">Pedir cuando queden</label><input id="rM" inputmode="numeric" value="' + (x ? x.minimo : 2) + '"></div><div><label for="rV">Proveedor</label><select id="rV"><option value="">Sin proveedor</option>' +
         pv.map((p) => '<option value="' + p.id + '"' + (x && x.proveedor_id === p.id ? ' selected' : '') + '>' + esc(p.nombre) + '</option>').join('') + '</select></div></div>' +
+      // G91 🛒 Tienda: lo marcado sale en tu página de reservas y te lo piden por WhatsApp
+      '<label class="check" style="margin-top:12px"><input type="checkbox" id="rT"' + (x && x.tienda ? ' checked' : '') + '> 🛒 Mostrar en mi tienda</label>' +
+      '<div id="rTi"' + (x && x.tienda ? '' : ' class="hidden"') + '><label for="rTp">Tipo</label><select id="rTp">' + [['accesorio', '🎒 Accesorio'], ['repuesto', '🔩 Repuesto'], ['bici', '🚲 Bici nueva']]
+        .map((o) => '<option value="' + o[0] + '"' + ((x ? x.tipo : 'accesorio') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
+        '<label for="rDe">Descripción (opcional)</label><textarea id="rDe" maxlength="300" rows="2">' + esc(x ? x.descripcion || '' : '') + '</textarea>' +
+        '<div class="row" style="align-items:center;margin-top:8px"><div id="rFo" style="flex:0 0 72px;height:72px;border-radius:12px;background:var(--field);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:28px">📦</div>' +
+        '<div><label class="btn alt" style="margin:0;color:var(--brand)">📷 Foto<input type="file" accept="image/*" id="rFi" hidden></label> <button type="button" class="small ghost hidden" id="rFx">✕ Quitar</button></div></div></div>' +
       '<div class="btns">' + (x ? '<button class="danger" id="rB" type="button">🗑️ Borrar</button>' : '') + '<button class="ghost" data-cerrar>Cancelar</button><button id="rG" type="button">💾 Guardar</button></div>');
     if (window.CFX_FABRICA) CFX_FABRICA.repuestos(d.querySelector('#rN'));
+    let foto;  // undefined = no se tocó
+    const verFoto = (f) => { d.querySelector('#rFo').innerHTML = f ? '<img alt="Foto" src="' + f + '" style="width:100%;height:100%;object-fit:cover">' : '📦'; d.querySelector('#rFx').classList.toggle('hidden', !f); };
+    if (x && x.con_foto) rpc('taller_repuesto_foto', { p_id: x.id }).then((f) => { if (foto === undefined) verFoto(f); }).catch(() => {});
+    d.querySelector('#rT').onchange = () => d.querySelector('#rTi').classList.toggle('hidden', !d.querySelector('#rT').checked);
+    d.querySelector('#rFi').onchange = async (e) => { const fi = e.target.files[0]; e.target.value = ''; if (!fi) return; try { foto = await App.comprimirLogo(fi); verFoto(foto); } catch (err) { toast(err.message); } };
+    d.querySelector('#rFx').onclick = () => { foto = ''; verFoto(''); };
     d.querySelector('#rN').oninput = () => { const pf = window.CFX_FABRICA && CFX_FABRICA.precio(d.querySelector('#rN').value); if (pf && !+d.querySelector('#rP').value) d.querySelector('#rP').value = pf; };
     d.querySelector('#rG').onclick = async () => {
       try {
         await rpc('taller_repuesto_guardar', { p: { id: x ? x.id : null, nombre: d.querySelector('#rN').value, precio: App.numero(d.querySelector('#rP').value), stock: App.numero(d.querySelector('#rS').value),
-          minimo: App.numero(d.querySelector('#rM').value), proveedor_id: d.querySelector('#rV').value || null } });
+          minimo: App.numero(d.querySelector('#rM').value), proveedor_id: d.querySelector('#rV').value || null,
+          tienda: d.querySelector('#rT').checked, tipo: d.querySelector('#rTp').value, descripcion: d.querySelector('#rDe').value, foto: foto === undefined ? undefined : foto || '' } });
         d.close(); toast('💾 Guardado'); verStock();
       } catch (e) { toast(e.message); }
     };

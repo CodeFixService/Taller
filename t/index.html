@@ -14,6 +14,17 @@
 <style>
   .paso { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--brand); color: var(--brand-ink); font-size: 13px; }
   .promo { border-left: 4px solid var(--brand); }
+  .tnd { display: grid; grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); gap: 10px; }
+  .tnd .pr { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; background: var(--card); min-width: 0; }
+  .tnd .pr .im { aspect-ratio: 1; background: var(--field); display: flex; align-items: center; justify-content: center; font-size: 40px; overflow: hidden; }
+  .tnd .pr .im img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
+  .tnd .pr .tx { padding: 8px; display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+  .tnd .pr .tx b { overflow-wrap: anywhere; } .tnd .pr .ct { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 6px; }
+  .tnd .pr .ct button { min-height: 36px; padding: 4px 10px; } .tnd .pr .ct span { min-width: 18px; text-align: center; font-weight: 700; }
+  .tnd .pr.agot { opacity: .6; }
+  .carro { position: sticky; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 5; margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    background: var(--card); border: 2px solid var(--brand); border-radius: 14px; padding: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+  .carro .grow { flex: 1 1 100%; min-width: 0; } .carro .btn { flex: 1 1 100%; text-align: center; justify-content: center; }
   .info-linea { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
   .horas button.vip { border-color: var(--gold); }
   .horas button.vip.lock { opacity: .75; background: color-mix(in srgb, var(--gold) 10%, var(--field)); }
@@ -58,6 +69,7 @@
     </div>
 
     <div id="promos"></div>
+    <div id="tienda"></div>
     <div id="usadas"></div>
     <div id="planes"></div>
 
@@ -151,6 +163,31 @@
       l.map((p) => '<li style="display:flex;align-items:center;gap:12px"><span style="font-size:28px;flex:none">🔁</span><div class="grow" style="min-width:0"><b>' + esc(p.nombre) + '</b><div><b style="white-space:nowrap">' + plata(p.precio) + '</b> al mes</div>' +
         '<div class="sub">' + p.visitas + (p.visitas === 1 ? ' visita' : ' visitas') + ' al mes' + (p.descuento ? ' · ' + p.descuento + '% de descuento' : '') + '</div>' + (p.incluye ? '<div class="sub">' + esc(p.incluye) + '</div>' : '') + '</div>' +
         (t.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" style="flex:none" href="' + App.wa(t.telefono, 'Hola ' + t.nombre + ' 👋 Quiero el plan de mantención ' + p.nombre + ' (' + plata(p.precio) + '/mes) 🔁') + '">📲 Lo quiero</a>' : '') + '</li>').join('') + '</ul></div>';
+  }).catch(() => {});
+  // G91 🛒 Tienda del taller (módulo 📦): accesorios, repuestos y bicis nuevas → carrito → 📲 pedido por WhatsApp.
+  App.rpc('tienda_publica', { p_slug: slug }).then((l) => {
+    if (!l || !l.length) return;
+    const carro = {}, TIPO = { accesorio: '🎒', repuesto: '🔩', bici: '🚲' };
+    const pintar = () => {
+      const sel = l.filter((x) => carro[x.id]), n = sel.reduce((a, x) => a + carro[x.id], 0), tot = sel.reduce((a, x) => a + carro[x.id] * x.precio, 0);
+      $('tienda').innerHTML = '<div class="card"><h2>🛒 Tienda</h2><p class="sub" style="margin-top:0">Elige y pídelo por WhatsApp: el taller te confirma y lo retiras.</p><div class="tnd">' +
+        l.map((x) => '<div class="pr' + (x.hay ? '' : ' agot') + '"><div class="im">' + (x.foto ? '<img alt="' + esc(x.nombre) + '" src="' + esc(x.foto) + '" loading="lazy">' : (TIPO[x.tipo] || '📦')) + '</div>' +
+          '<div class="tx"><b>' + esc(x.nombre) + '</b><span class="precio">' + plata(x.precio) + '</span>' + (x.descripcion ? '<span class="sub">' + esc(x.descripcion) + '</span>' : '') +
+          '<span class="sub">' + (!x.hay ? '⛔ Agotado' : x.quedan ? '⚡ Quedan ' + x.quedan : '✅ Disponible') + '</span>' +
+          (x.hay && t.telefono ? '<div class="ct">' + (carro[x.id] ? '<button type="button" class="ghost" data-tq="' + x.id + '" aria-label="Quitar uno">−</button><span>' + carro[x.id] + '</span>' : '') +
+            '<button type="button" class="' + (carro[x.id] ? 'alt' : '') + '" data-ta="' + x.id + '" aria-label="Agregar ' + esc(x.nombre) + '">' + (carro[x.id] ? '+' : '🛒 Agregar') + '</button></div>' : '') + '</div></div>').join('') + '</div>' +
+        (n ? '<div class="carro"><div class="grow"><b>🛒 ' + n + (n === 1 ? ' producto' : ' productos') + '</b> · <b>' + plata(tot) + '</b></div><a class="btn okb" id="tPedir" target="_blank" rel="noopener" href="' +
+          esc(App.wa(t.telefono, 'Hola ' + t.nombre + ' 👋 Quiero pedir de su tienda:\n' + sel.map((x) => '• ' + carro[x.id] + ' × ' + x.nombre + ' (' + plata(x.precio * carro[x.id]) + ')').join('\n') +
+          '\nTotal: ' + plata(tot) + '\n¿Lo tienen para retirar? 🙌')) + '">📲 Pedir por WhatsApp</a></div>' : '') + '</div>';
+    };
+    pintar();
+    $('tienda').onclick = (e) => {
+      const a = e.target.closest('[data-ta]'), q = e.target.closest('[data-tq]'), im = e.target.closest('.im img');
+      if (im) { App.verImagen(im.src, im.alt, 'producto.jpg'); return; }
+      if (a) { carro[a.dataset.ta] = Math.min((carro[a.dataset.ta] || 0) + 1, 20); pintar(); }
+      if (q) { carro[q.dataset.tq] = (carro[q.dataset.tq] || 0) - 1; if (carro[q.dataset.tq] <= 0) delete carro[q.dataset.tq]; pintar(); }
+    };
+    if (location.hash === '#tienda') setTimeout(() => $('tienda').scrollIntoView({ behavior: 'smooth' }), 300);
   }).catch(() => {});
   // G59e 🏷️ Bicis usadas certificadas del taller (solo si tiene el módulo y hay publicadas).
   App.rpc('usadas_publicas', { p_slug: slug }).then((l) => {

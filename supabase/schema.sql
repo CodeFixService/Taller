@@ -3012,6 +3012,14 @@ create table if not exists public.repuestos (
 );
 create unique index if not exists repuestos_nombre_idx on public.repuestos (taller_id, lower(trim(nombre)));
 alter table public.repuestos enable row level security;
+-- G91 🛒 Tienda (va con el módulo 📦 Repuestos y stock): lo publicado sale en la página del taller (/t/) y se pide por WhatsApp.
+alter table public.repuestos add column if not exists tienda boolean not null default false;
+alter table public.repuestos add column if not exists tipo text not null default 'repuesto';
+alter table public.repuestos add column if not exists descripcion text not null default '';
+alter table public.repuestos add column if not exists foto text;
+alter table public.repuestos drop constraint if exists repuestos_tienda_chk;
+alter table public.repuestos add constraint repuestos_tienda_chk check (tipo in ('repuesto', 'accesorio', 'bici') and length(descripcion) <= 300
+  and (foto is null or (foto ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' and length(foto) <= 120000)));
 alter table public.reservas add column if not exists stock_at timestamptz;
 
 create or replace function public.taller_stock() returns jsonb
@@ -3022,7 +3030,8 @@ begin
   if not public.taller_tiene('stock') then return jsonb_build_object('bloqueado', true); end if;
   return jsonb_build_object(
     'repuestos', (select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'nombre', r.nombre, 'precio', r.precio, 'stock', r.stock, 'minimo', r.minimo,
-                   'proveedor_id', r.proveedor_id) order by lower(r.nombre)), '[]') from public.repuestos r where r.taller_id = tid),
+                   'proveedor_id', r.proveedor_id, 'tienda', r.tienda, 'tipo', r.tipo, 'descripcion', r.descripcion, 'con_foto', r.foto is not null) order by lower(r.nombre)), '[]')
+                  from public.repuestos r where r.taller_id = tid),
     'proveedores', (select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'nombre', p.nombre, 'telefono', p.telefono, 'email', p.email, 'nota', p.nota)
                    order by lower(p.nombre)), '[]') from public.proveedores p where p.taller_id = tid));
 end $$;
@@ -3047,9 +3056,34 @@ begin
     where id = rid and taller_id = tid;
     if not found then raise exception 'Repuesto no encontrado'; end if;
   end if;
+  -- G91 🛒 lo de la tienda (solo si viene; si no, queda como estaba)
+  if p ? 'tienda' and coalesce((p ->> 'tienda')::boolean, false) and not (select r.tienda from public.repuestos r where r.id = rid)
+     and (select count(*) from public.repuestos where taller_id = tid and tienda) >= 40 then raise exception 'Máximo 40 productos en la tienda'; end if;
+  update public.repuestos set
+    tienda = case when p ? 'tienda' then coalesce((p ->> 'tienda')::boolean, false) else tienda end,
+    tipo = case when p ->> 'tipo' in ('repuesto', 'accesorio', 'bici') then p ->> 'tipo' else tipo end,
+    descripcion = case when p ? 'descripcion' then left(trim(coalesce(p ->> 'descripcion', '')), 300) else descripcion end,
+    foto = case when p ? 'foto' then nullif(p ->> 'foto', '') else foto end
+  where id = rid;
   return rid;
 end $$;
 
+create or replace function public.taller_repuesto_foto(p_id uuid) returns text
+language sql stable security definer set search_path = '' as $$
+  select r.foto from public.repuestos r where r.id = p_id and r.taller_id = public.taller_de(auth.uid())
+$$;
+-- G91 🛒 Tienda pública del taller (solo con el módulo 📦 y lo marcado "en mi tienda").
+create or replace function public.tienda_publica(p_slug text) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  return coalesce((select jsonb_agg(jsonb_build_object('id', r.id, 'nombre', r.nombre, 'precio', r.precio, 'tipo', r.tipo, 'descripcion', r.descripcion, 'foto', r.foto,
+           'hay', r.stock > 0, 'quedan', case when r.stock between 1 and 3 then r.stock end) order by r.tipo = 'bici' desc, r.stock > 0 desc, lower(r.nombre))
+    from public.talleres t join public.repuestos r on r.taller_id = t.id and r.tienda
+    where t.slug = lower(p_slug) and t.activo and not t.suspendido and public.cfx_modulo_de('stock', t.owner_id)), '[]');
+end $$;
+revoke all on function public.taller_repuesto_foto(uuid), public.tienda_publica(text) from public, anon, authenticated;
+grant execute on function public.taller_repuesto_foto(uuid) to authenticated;
+grant execute on function public.tienda_publica(text) to anon, authenticated;
 create or replace function public.taller_repuesto_borrar(p_id uuid) returns void
 language plpgsql security definer set search_path = '' as $$
 declare tid uuid := public.taller_de(auth.uid());
