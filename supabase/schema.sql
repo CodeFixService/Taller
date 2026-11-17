@@ -7755,6 +7755,10 @@ create table if not exists public.caja (
 create index if not exists caja_taller_fecha_idx on public.caja (taller_id, fecha);
 create unique index if not exists caja_reserva_idx on public.caja (reserva_id) where reserva_id is not null;
 alter table public.caja enable row level security;
+-- G91 🧾 N° (folio) de la boleta del SII de cada cobro (la boleta automática con OpenFactura llega con el núcleo, Bloque 2).
+alter table public.caja add column if not exists boleta text;
+alter table public.caja drop constraint if exists caja_boleta_chk;
+alter table public.caja add constraint caja_boleta_chk check (boleta is null or boleta ~ '^[0-9]{1,10}$');
 
 create or replace function public.caja_hoy(tid uuid) returns date
 language sql stable security definer set search_path = '' as $$ select (now() at time zone t.zona)::date from public.talleres t where t.id = tid $$;
@@ -7818,7 +7822,8 @@ begin
   f := coalesce(p_fecha, public.caja_hoy(tid));
   return jsonb_build_object('fecha', f, 'hoy', public.caja_hoy(tid),
     'cobros', (select coalesce(jsonb_agg(jsonb_build_object('id', k.id, 'medio', k.medio, 'total', k.total, 'items', k.items, 'nombre', k.nombre,
-        'reserva', k.reserva_id, 'hora', to_char(k.created_at at time zone t.zona, 'HH24:MI')) order by k.created_at desc), '[]')
+        'reserva', k.reserva_id, 'hora', to_char(k.created_at at time zone t.zona, 'HH24:MI'), 'at', k.created_at, 'boleta', k.boleta,
+        'tel', (select r.telefono from public.reservas r where r.id = k.reserva_id)) order by k.created_at desc), '[]')
       from public.caja k join public.talleres t on t.id = k.taller_id where k.taller_id = tid and k.fecha = f),
     'medios', (select jsonb_build_object('efectivo', coalesce(sum(total) filter (where medio = 'efectivo'), 0),
         'transferencia', coalesce(sum(total) filter (where medio = 'transferencia'), 0), 'tarjeta', coalesce(sum(total) filter (where medio = 'tarjeta'), 0),
@@ -7844,6 +7849,19 @@ begin
     where p.taller_id = tid and lower(trim(p.nombre)) = u.n;
   end if;
 end $$;
+-- G91 🧾 Anotar (o quitar, con '') el N° de la boleta del SII de un cobro: todo el equipo.
+create or replace function public.taller_caja_boleta(p_id uuid, p_folio text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); f text := nullif(regexp_replace(coalesce(p_folio, ''), '\D', '', 'g'), '');
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if f is not null and length(f) > 10 then raise exception 'El N° de boleta tiene hasta 10 dígitos'; end if;
+  update public.caja set boleta = f where id = p_id and taller_id = tid;
+  if not found then raise exception 'Cobro no encontrado'; end if;
+  return jsonb_build_object('ok', true, 'boleta', f);
+end $$;
+revoke all on function public.taller_caja_boleta(uuid, text) from public, anon;
+grant execute on function public.taller_caja_boleta(uuid, text) to authenticated;
 revoke all on function public.taller_caja_vender(jsonb, text, text), public.taller_caja_cobrar(uuid, text), public.taller_caja(date), public.taller_caja_anular(uuid) from public, anon;
 grant execute on function public.taller_caja_vender(jsonb, text, text), public.taller_caja_cobrar(uuid, text), public.taller_caja(date), public.taller_caja_anular(uuid) to authenticated;
 

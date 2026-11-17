@@ -1013,7 +1013,9 @@
         '<div class="stats" style="margin-top:10px;grid-template-columns:1fr 1fr">' + CAJA_M.map((x) => '<div class="card"><span>' + x[1] + '</span><b>' + plata(m[x[0]]) + '</b></div>').join('') +
         '<div class="card"><span>🧾 Total (' + m.n + ')</span><b>' + plata(m.total) + '</b></div></div>' +
         (c.cobros.length ? '<ul class="list" id="kLista">' + c.cobros.map((k) => '<li><div class="grow"><b>' + plata(k.total) + '</b> · ' + medioDe(k.medio) +
-          '<div class="sub">' + k.hora + ' · ' + esc(k.nombre || (k.reserva ? 'Orden' : 'Venta de mostrador')) + (k.reserva ? '' : ' · ' + esc(k.items.map((i) => i.nombre + (i.cant > 1 ? ' x' + i.cant : '')).join(', ').slice(0, 90))) + '</div></div>' +
+          '<div class="sub">' + k.hora + ' · ' + esc(k.nombre || (k.reserva ? 'Orden' : 'Venta de mostrador')) + (k.reserva ? '' : ' · ' + esc(k.items.map((i) => i.nombre + (i.cant > 1 ? ' x' + i.cant : '')).join(', ').slice(0, 90))) + '</div>' +
+          (k.boleta ? '<div class="sub">🧾 Boleta N° ' + esc(k.boleta) + '</div>' : '') + '</div>' +
+          '<button class="small ' + (k.boleta ? 'ghost' : 'alt') + '" type="button" data-bol="' + k.id + '" aria-label="Boleta y comprobante">🧾</button>' +
           (P.dueno ? '<button class="small ghost" type="button" data-anular="' + k.id + '" aria-label="Anular cobro">✕</button>' : '') + '</li>').join('') + '</ul>'
           : '<p class="sub">' + (esHoy ? 'Todavía no hay cobros hoy.' : 'Sin cobros ese día.') + '</p>') +
         (c.cobros.length ? '<div class="btns"><button class="ghost" type="button" id="kCopiar">📋 Copiar cierre</button></div>' : '') + '</div>';
@@ -1025,8 +1027,32 @@
     z.onclick = async (e) => {
       const st = e.target.closest('[data-m2]'); if (st) { abrirSec(st.dataset.m2); return; }
       const cb = e.target.closest('[data-cobrar]'); if (cb) { cobrarOrden(cb.dataset.cobrar, verCaja, +cb.dataset.monto); return; }
+      const bo = e.target.closest('[data-bol]'); if (bo) { boletaCobro(c.cobros.find((k) => k.id === bo.dataset.bol)); return; }
       const an = e.target.closest('[data-anular]');
       if (an) { if (!await confirmar('¿Anular este cobro? Se borra del cierre' + (ST ? ' y vuelve el stock' : '') + '.')) return; try { await rpc('taller_caja_anular', { p_id: an.dataset.anular }); toast('Cobro anulado'); verCaja(); } catch (err) { toast(err.message); } }
+    };
+  }
+  // G91 🧾 Boleta y comprobante de un cobro: 🧾 comprobante (imprimir, PDF, WhatsApp) + N° de la boleta del SII (se anota).
+  const cargarComprobante = () => window.CFX_COMPROBANTE ? Promise.resolve(window.CFX_COMPROBANTE) : new Promise((ok) => {
+    const sc = document.createElement('script'); sc.src = App.ROOT + 'shared/comprobante.js'; sc.onload = () => ok(window.CFX_COMPROBANTE || null); sc.onerror = () => ok(null); document.head.appendChild(sc); });
+  window.CFX_COMPROBANTE_DATOS = window.CFX_COMPROBANTE_DATOS || (async () => ({ logo: P.taller.logo || '', firma: { razon: P.taller.nombre, direccion: P.taller.direccion || '', comuna: P.taller.comuna || '' } }));
+  function boletaCobro(k) {
+    if (!k) return;
+    const d = modal('<h2>🧾 Boleta · ' + plata(k.total) + '</h2><p class="sub" style="margin-top:0">' + esc(k.hora + ' · ' + (k.nombre || (k.reserva ? 'Orden' : 'Venta de mostrador')) + ' · ' + medioDe(k.medio)) + '</p>' +
+      '<label for="boF">N° de la boleta del SII</label><input id="boF" inputmode="numeric" maxlength="10" value="' + esc(k.boleta || '') + '" placeholder="Ej: 1234">' +
+      '<p class="sub">Emítela en la app o el sitio del SII (gratis) y anota aquí su número: queda en el cierre y en el comprobante.</p>' +
+      '<div class="btns"><button type="button" class="alt" id="boC">🧾 Comprobante</button><button type="button" id="boG">💾 Guardar N°</button></div>');
+    d.querySelector('#boG').onclick = async () => {
+      try { const x = await rpc('taller_caja_boleta', { p_id: k.id, p_folio: d.querySelector('#boF').value }); k.boleta = x.boleta; d.close(); toast(x.boleta ? '🧾 Boleta N° ' + x.boleta + ' anotada' : 'N° de boleta quitado'); verCaja(); }
+      catch (err) { toast(err.message); }
+    };
+    d.querySelector('#boC').onclick = async () => {
+      const C = await cargarComprobante(); if (!C) { toast('No se pudo abrir el comprobante'); return; }
+      const its = (k.items || []).map((i) => ({ cant: Math.max(+i.cant || 1, 1), nombre: String(i.nombre || 'Ítem'), precio: Math.max(+i.precio || 0, 0) }));
+      const suma = its.reduce((s2, i) => s2 + i.cant * i.precio, 0), folio = d.querySelector('#boF').value.replace(/\D/g, '') || k.boleta;
+      d.close();
+      C.abrir({ negocio: P.taller.nombre, fecha: k.at, numero: String(k.id).slice(0, 6).toUpperCase(), cliente: k.nombre || '', tel: k.tel || '', items: its, total: k.total, medio: k.medio,
+        entrega: suma > k.total ? 'Abono o descuento ya aplicado: −' + plata(suma - k.total) : '', boleta: folio ? { folio } : null });
     };
   }
   // 🛒 Venta sin orden: ítems (mis repuestos/fábrica/servicios) → cobrar.
