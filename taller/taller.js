@@ -1279,7 +1279,7 @@
       const l = L.filter((x) => !f || (x.bici + ' ' + x.serie + ' ' + x.dueno + ' ' + x.telefono).toLowerCase().includes(f));
       body().querySelector('#pLista').innerHTML = l.length ? l.map((x) => '<li class="clic" data-pa="' + x.id + '"><span style="font-size:26px;flex:none">' + (x.robada ? '🚨' : '🚲') + '</span>' +
         '<div class="grow"><b>' + esc(x.bici) + '</b><div class="sub">' + esc([x.dueno, x.serie && 'Nº ' + x.serie].filter(Boolean).join(' · ')) + ' · 🔧 ' + x.servicios + '</div></div>' +
-        (x.robada ? '<span class="pill bad">Robada</span>' : '') + '</li>').join('') : '<li class="muted">' + (L.length ? 'Nada con esa búsqueda.' : 'Toca ＋ o abre una orden → 🪪 Pasaporte.') + '</li>';
+        (x.robada ? '<span class="pill bad">' + 'Robada' + (x.visto_at ? ' · vista ' + esc(App.hace(x.visto_at)) : '') + '</span>' : '') + '</li>').join('') : '<li class="muted">' + (L.length ? 'Nada con esa búsqueda.' : 'Toca ＋ o abre una orden → 🪪 Pasaporte.') + '</li>';
     };
     pintar();
     const bus = body().querySelector('#pBus'); if (bus) bus.oninput = pintar;
@@ -1305,7 +1305,9 @@
     try { x = id ? await rpc('taller_pasaporte', { p_id: id }) : Object.assign({ bici: '', serie: '', color: '', dueno: '', telefono: '', robada: false, robada_nota: '', historial: [] }, base || {}); }
     catch (e) { toast(e.message); return; }
     const d = modal('<h2>' + (id ? '🪪 ' + esc(x.bici) : '🪪 Nuevo pasaporte') + '</h2>' +
-      (x.robada ? '<div class="aviso bad" style="display:block"><b>🚨 Reportada como robada</b>' + (x.robada_at ? ' el ' + App.fCorta(x.robada_at.slice(0, 10)) : '') + (x.robada_nota ? '<div class="sub">' + esc(x.robada_nota) + '</div>' : '') + '</div>' : '') +
+      (x.robada ? '<div class="aviso bad" style="display:block"><b>🚨 Reportada como robada</b>' + (x.robada_at ? ' el ' + App.fCorta(x.robada_at.slice(0, 10)) : '') + (x.robada_nota ? '<div class="sub">' + esc(x.robada_nota) + '</div>' : '') +
+        '<div class="sub">' + (x.silencio ? '🕵️ Rastreo silencioso: quien la escanea no ve el aviso.' : '📢 Quien la escanea ve el aviso de robo.') + '</div></div>' : '') +
+      (id && (x.robada || (x.rastros || []).length) ? '<h3>📍 Dónde está</h3><div id="paRas">' + App.rastros(x.rastros) + '</div>' : '') +
       '<label for="paB">Marca y modelo</label><input id="paB" maxlength="120" value="' + esc(x.bici) + '" placeholder="Ej: Trek Marlin 7 aro 29">' +
       '<div class="row"><div><label for="paS">Nº de serie</label><input id="paS" maxlength="60" value="' + esc(x.serie) + '" placeholder="Bajo el pedalier"></div><div><label for="paC">Color</label><input id="paC" maxlength="40" value="' + esc(x.color) + '"></div></div>' +
       '<div class="row"><div><label for="paD">Dueño</label><input id="paD" maxlength="80" value="' + esc(x.dueno) + '"></div><div><label for="paT">Teléfono</label><input id="paT" maxlength="30" inputmode="tel" value="' + esc(x.telefono) + '"></div></div>' +
@@ -1319,11 +1321,14 @@
         '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(linkPas(x)) + '">👀 Ver ficha</a></div>' : ''));
     const q1 = (s) => d.querySelector(s);
     if (window.CFX_FABRICA) CFX_FABRICA.bici(q1('#paB'));
-    const datos = (robada, nota) => ({ id: id || null, bici: q1('#paB').value, serie: q1('#paS').value, color: q1('#paC').value, dueno: q1('#paD').value, telefono: q1('#paT').value,
-      reserva: x.reserva || null, robada, robada_nota: nota });
-    const guardar = async (robada, nota, msg) => {
+    const datos = (robada, nota, sil) => ({ id: id || null, bici: q1('#paB').value, serie: q1('#paS').value, color: q1('#paC').value, dueno: q1('#paD').value, telefono: q1('#paT').value,
+      reserva: x.reserva || null, robada, robada_nota: nota, silencio: sil === undefined ? !!x.silencio : sil });
+    // G86 📍 con el pasaporte abierto y la bici robada, la ubicación se actualiza sola cada 15 s
+    if (id && x.robada) { const tic = setInterval(async () => { if (!d.open) { clearInterval(tic); return; } if (document.hidden) return;
+      try { const y = await rpc('taller_pasaporte', { p_id: id }), c = q1('#paRas'); if (c && d.open) c.innerHTML = App.rastros(y.rastros); } catch (e) { /* sin señal: reintenta */ } }, 15000); d.addEventListener('close', () => clearInterval(tic)); }
+    const guardar = async (robada, nota, msg, sil) => {
       try {
-        const nid = await rpc('taller_pasaporte_guardar', { p: datos(robada, nota) });
+        const nid = await rpc('taller_pasaporte_guardar', { p: datos(robada, nota, sil) });
         d.close(); toast(msg || '💾 Guardado');
         if (alGuardar) alGuardar(nid); else if (subMas === 'pasaporte') verPasaportes();
         if (!id) editarPasaporte(nid, null, alGuardar);
@@ -1332,8 +1337,12 @@
     q1('#paG').onclick = () => guardar(!!x.robada, x.robada_nota || '', id ? null : '🪪 Pasaporte creado: imprime el sticker');
     const rb = q1('#paR'); if (rb) rb.onclick = async () => {
       if (x.robada) { if (await confirmar('¿' + (x.dueno.split(' ')[0] || 'El dueño') + ' recuperó la ' + x.bici + '? Se quita el aviso de robo.')) guardar(false, '', '✅ Aviso de robo quitado'); return; }
-      const n = await pedirTexto('🚨 Reportar robo', 'Dónde y cuándo (lo ve quien la escanee)', '');
-      if (n !== null) guardar(true, n, '🚨 Reportada como robada');
+      const m = modal('<h2>🚨 Reportar robo</h2><label for="rbN">Dónde y cuándo se la robaron</label><input id="rbN" maxlength="300">' +
+        '<label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;margin-top:10px"><input type="checkbox" id="rbS" checked style="width:auto;flex:none;margin-top:3px">' +
+        '<span>🕵️ Rastreo silencioso: quien la escanee no ve el aviso de robo (así no sospecha) y les llega su ubicación.</span></label>' +
+        '<div class="btns"><button class="ghost" type="button" data-cerrar>Cancelar</button><button class="danger" id="rbOk" type="button">🚨 Reportar</button></div>');
+      m.querySelector('#rbOk').onclick = () => { const n = m.querySelector('#rbN').value, sil = m.querySelector('#rbS').checked; m.close();
+        guardar(true, n, sil ? '🚨 Reportada: rastreo silencioso activo' : '🚨 Reportada como robada', sil); };
     };
     const qb = q1('#paQ'); if (qb) qb.onclick = () => stickerPas(x);
     const xb = q1('#paX'); if (xb) xb.onclick = async () => { if (!await confirmar('¿Borrar el pasaporte de "' + x.bici + '"? El sticker QR deja de funcionar.')) return; try { await rpc('taller_pasaporte_borrar', { p_id: id }); d.close(); verPasaportes(); } catch (e) { toast(e.message); } };

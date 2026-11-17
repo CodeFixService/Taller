@@ -34,6 +34,23 @@
     const d = Math.round(h / 24); return d < 60 ? 'hace ' + d + ' días' : fHora(t);
   };
   const DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  // G86 📍 Rastreo de la bici robada: mapa del último punto + lista (lo usan el taller y la ficha del dueño). L = el más nuevo primero.
+  const rastros = (L) => {
+    L = L || [];
+    if (!L.length) return '<p class="sub" data-rastros="0">Todavía nadie la escanea. Apenas pase, te avisamos con su ubicación.</p>';
+    const n = (v) => Number(v).toFixed(6), mapa = (x) => 'https://www.google.com/maps?q=' + n(x.lat) + ',' + n(x.lng);
+    const u = L.find((x) => x.lat != null);
+    const hora = (x) => new Date(x.at).toLocaleString('es-CL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return (u ? '<iframe title="Mapa del último punto" loading="lazy" referrerpolicy="no-referrer" style="width:100%;height:220px;border:0;border-radius:12px;background:var(--cfx-borde,#e2e8f0)" src="https://www.openstreetmap.org/export/embed.html?bbox=' +
+        n(u.lng - 0.004) + '%2C' + n(u.lat - 0.003) + '%2C' + n(u.lng + 0.004) + '%2C' + n(u.lat + 0.003) + '&amp;layer=mapnik&amp;marker=' + n(u.lat) + '%2C' + n(u.lng) + '"></iframe>' +
+        '<p style="margin:8px 0"><b>📍 Última ubicación: ' + esc(hace(u.at)) + '</b>' + (u.prec != null ? ' <span class="sub">(±' + Number(u.prec) + ' m)</span>' : '') + '</p>' +
+        '<div class="btns"><a class="btn" target="_blank" rel="noopener noreferrer" href="' + mapa(u) + '">🗺️ Abrir en el mapa</a></div>'
+      : '<p class="sub">👀 La escanearon, pero todavía no comparten la ubicación.</p>') +
+      '<ul class="list" data-rastros="' + L.length + '">' + L.slice(0, 12).map((x) => '<li><div class="grow"><b>' + esc(hora(x)) + '</b><div class="sub">' +
+        (x.lat != null ? 'Con ubicación' + (x.prec != null ? ' · ±' + Number(x.prec) + ' m' : '') : 'Solo la escanearon') + ' · teléfono ' + esc(String(x.disp || '').slice(0, 4)) + '</div></div>' +
+        (x.lat != null ? '<a class="btn small ghost" target="_blank" rel="noopener noreferrer" href="' + mapa(x) + '">Ver</a>' : '') + '</li>').join('') + '</ul>' +
+      (L.length > 12 ? '<p class="sub">y ' + (L.length - 12) + ' puntos anteriores.</p>' : '');
+  };
   const telNorm = (t) => { let d = String(t || '').replace(/\D/g, ''); if (d.length === 9 && d[0] === '9') d = '56' + d; if (d.length === 8) d = '569' + d; return d; };
   const wa = (tel, txt) => 'https://wa.me/' + telNorm(tel) + (txt ? '?text=' + encodeURIComponent(txt) : '');
   const estrellas = (n) => { n = Math.round(Number(n) || 0); return '★'.repeat(n) + '☆'.repeat(5 - n); };
@@ -605,7 +622,7 @@
   }
 
   global.App = {
-    sb, ROOT, $, esc, plata, numero, iso, fechaDe, sumarDias, hoy, fCorta, fLarga, fHora, hace, DIAS, telNorm, wa, estrellas, nota,
+    sb, ROOT, $, esc, plata, numero, iso, fechaDe, sumarDias, hoy, fCorta, fLarga, fHora, hace, rastros, DIAS, telNorm, wa, estrellas, nota,
     toast, modal, confirmar, tema, selectorModo, colorApp, COLORES, pintarLogo, friendly, rpc, q, cargarPublica, txt, refrescar, requerir, entrar, salir, crearCuenta,
     clave, mensajeAcceso, comprimirComprobante, comprimirLogo, comprimirFoto, descargar, verImagen, compartir, verQR, afiche, campana, irA, activarPush, ofrecerPush,
     pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino, revisarVersion, actualizar, mayor, chatBoton, abrirChat, borrarCuenta, horarioTxt,
