@@ -1,2 +1,2 @@
-// BiciTaller · función "servidor" v2.1 en una línea (carga index.ts desde GitHub).
-import 'https://raw.githubusercontent.com/CodeFixService/Taller/915f21dc222704c935714ae50b3b60bb44d07d91/supabase/functions/servidor/index.ts';
+// BiciTaller · función "servidor" v2.2 en una línea (carga index.ts desde GitHub).
+import 'https://raw.githubusercontent.com/CodeFixService/Taller/44665a065b4072e21875bd2ffe082731629cc7c4/supabase/functions/servidor/index.ts';
