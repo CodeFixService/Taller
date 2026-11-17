@@ -44,6 +44,7 @@
     <div class="card hidden" id="cRas">
       <h2>📍 Dónde está</h2>
       <div id="ras"></div>
+      <div class="btns"><button type="button" class="alt" id="bConst">📄 Constancia para Carabineros</button></div>
     </div>
     <div class="card hidden" id="cHist">
       <h2>🔧 Historial de mantenciones</h2>
@@ -107,6 +108,7 @@
     $('tVer').href = '../t/?s=' + encodeURIComponent(t.slug);
     $('cargando').classList.add('hidden'); $('todo').classList.remove('hidden');
   };
+  $('bConst').onclick = () => App.constancia(b, b.taller);  // G91 📄 con cada punto y hora (imprimir o PDF)
   $('bRobo').onclick = async () => {
     const D = window.CFX_DIALOGO;
     let nota = '';

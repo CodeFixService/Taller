@@ -78,6 +78,28 @@
       setTimeout(() => m.invalidateSize(), 200);
     });
   };
+  // G91 📄 Constancia para Carabineros: hoja para imprimir o "Guardar como PDF" con la bici, el reporte y cada punto con hora.
+  const constancia = (x, t) => {
+    const w = window.open('', '_blank');
+    if (!w) { toast('Permite las ventanas emergentes para descargar la constancia'); return false; }
+    const n6 = (v) => Number(v).toFixed(6), fh = (a) => new Date(a).toLocaleString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const L = (x.rastros || []).slice().reverse();
+    const fila = (k, v) => v ? '<tr><th>' + esc(k) + '</th><td>' + esc(v) + '</td></tr>' : '';
+    w.document.write('<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Constancia ' + esc(x.bici) + '</title><style>body{font-family:system-ui,sans-serif;margin:24px;color:#0f172a;font-size:13px}' +
+      'h1{font-size:18px;margin:0 0 4px}h2{font-size:14px;margin:18px 0 6px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #cbd5e1;padding:5px 7px;text-align:left;vertical-align:top}' +
+      'th{background:#f1f5f9;width:34%}.l th{width:auto}.sub{color:#475569;font-size:12px}a{color:#0f172a}@media print{.np{display:none}}</style></head><body>' +
+      '<h1>📄 Constancia de bicicleta reportada como robada</h1><div class="sub">Generada el ' + esc(fh(Date.now())) + ' desde el 🪪 pasaporte de la bici (BiciTaller). Los puntos los envía el teléfono de quien escaneó el QR del cuadro.</div>' +
+      '<h2>Bicicleta</h2><table>' + fila('Marca y modelo', x.bici) + fila('Nº de serie', x.serie) + fila('Color', x.color) + fila('Dueño', x.dueno) + fila('Teléfono del dueño', x.telefono) +
+      fila('Reportada el', x.robada_at ? fh(x.robada_at) : '') + fila('Nota del reporte', x.robada_nota) + fila('Taller', t ? [t.nombre, t.direccion, t.comuna, t.telefono].filter(Boolean).join(' · ') : '') + '</table>' +
+      '<h2>Escaneos del QR (' + L.length + ')</h2>' + (L.length ? '<table class="l"><tr><th>#</th><th>Fecha y hora</th><th>Latitud, longitud</th><th>Precisión</th><th>Teléfono</th></tr>' +
+        L.map((p, i) => '<tr><td>' + (i + 1) + '</td><td>' + esc(fh(p.at)) + '</td><td>' + (p.lat != null ? '<a href="https://www.google.com/maps?q=' + n6(p.lat) + ',' + n6(p.lng) + '">' + n6(p.lat) + ', ' + n6(p.lng) + '</a>' : 'Sin ubicación') + '</td>' +
+          '<td>' + (p.prec != null ? '±' + Number(p.prec) + ' m' : '—') + '</td><td>' + esc(String(p.disp || '').slice(0, 4)) + '</td></tr>').join('') + '</table>' : '<p>Todavía nadie la escanea.</p>') +
+      '<p class="sub">Los puntos se guardan 30 días. Este documento no reemplaza la denuncia: llévalo a Carabineros o a la PDI junto con tu carnet y la boleta o fotos de la bici.</p>' +
+      '<p class="np"><button onclick="window.print()">🖨️ Imprimir o guardar como PDF</button></p>' +
+      '<script>window.onload=function(){setTimeout(function(){window.print()},400)}<\/script></body></html>');
+    w.document.close();
+    return true;
+  };
   const telNorm = (t) => { let d = String(t || '').replace(/\D/g, ''); if (d.length === 9 && d[0] === '9') d = '56' + d; if (d.length === 8) d = '569' + d; return d; };
   const wa = (tel, txt) => 'https://wa.me/' + telNorm(tel) + (txt ? '?text=' + encodeURIComponent(txt) : '');
   const estrellas = (n) => { n = Math.round(Number(n) || 0); return '★'.repeat(n) + '☆'.repeat(5 - n); };
@@ -649,7 +671,7 @@
   }
 
   global.App = {
-    sb, ROOT, $, esc, plata, numero, iso, fechaDe, sumarDias, hoy, fCorta, fLarga, fHora, hace, rastros, mapas, DIAS, telNorm, wa, estrellas, nota,
+    sb, ROOT, $, esc, plata, numero, iso, fechaDe, sumarDias, hoy, fCorta, fLarga, fHora, hace, rastros, mapas, constancia, DIAS, telNorm, wa, estrellas, nota,
     toast, modal, confirmar, tema, selectorModo, colorApp, COLORES, pintarLogo, friendly, rpc, q, cargarPublica, txt, refrescar, requerir, entrar, salir, crearCuenta,
     clave, mensajeAcceso, comprimirComprobante, comprimirLogo, comprimirFoto, descargar, verImagen, compartir, verQR, afiche, campana, irA, activarPush, ofrecerPush,
     pushSoportado, registrarSW, pedirInstalar, pie, pestanas, destino, revisarVersion, actualizar, mayor, chatBoton, abrirChat, borrarCuenta, horarioTxt,

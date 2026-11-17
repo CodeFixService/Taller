@@ -1367,7 +1367,7 @@
     const w = window.open('', '_blank');
     if (!w) { toast('Permite las ventanas emergentes para imprimir'); return; }
     let img = ''; try { const qr = window.qrcode(0, 'M'); qr.addData(linkPas(x)); qr.make(); img = qr.createDataURL(8, 4); } catch (e) { img = ''; }
-    const uno = '<div class="s"><b>🪪 PASAPORTE DE LA BICI</b><img alt="QR" src="' + img + '"><span>Escanéame: historial y aviso de robo</span><small>' + esc(P.taller.nombre) + '</small></div>';
+    const uno = '<div class="s"><b>🪪 PASAPORTE DE LA BICI</b><img alt="QR" src="' + img + '"><span>Escanéame: QR de seguridad de la bici</span><small>' + esc(P.taller.nombre) + '</small></div>';
     w.document.write('<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Sticker ' + esc(x.bici) + '</title><style>body{font-family:system-ui,sans-serif;margin:20px;color:#0f172a}' +
       '.s{display:inline-flex;flex-direction:column;align-items:center;gap:4px;width:5cm;padding:8px;margin:6px;border:2px dashed #94a3b8;border-radius:12px;text-align:center}' +
       '.s b{font-size:11px}.s img{width:4cm;height:4cm;image-rendering:pixelated}.s span{font-size:10px}.s small{font-size:9px;color:#475569}</style></head><body>' + uno + uno +
@@ -1381,7 +1381,8 @@
     const d = modal('<h2>' + (id ? '🪪 ' + esc(x.bici) : '🪪 Nuevo pasaporte') + '</h2>' +
       (x.robada ? '<div class="aviso bad" style="display:block"><b>🚨 Reportada como robada</b>' + (x.robada_at ? ' el ' + App.fCorta(x.robada_at.slice(0, 10)) : '') + (x.robada_nota ? '<div class="sub">' + esc(x.robada_nota) + '</div>' : '') +
         '<div class="sub">' + (x.silencio ? '🕵️ Rastreo silencioso: quien la escanea no ve el aviso.' : '📢 Quien la escanea ve el aviso de robo.') + '</div></div>' : '') +
-      (id && (x.robada || (x.rastros || []).length) ? '<h3>📍 Dónde está</h3><div id="paRas">' + App.rastros(x.rastros) + '</div>' : '') +
+      (id && (x.robada || (x.rastros || []).length) ? '<h3>📍 Dónde está</h3><div id="paRas">' + App.rastros(x.rastros) + '</div>' +
+        '<div class="btns"><button type="button" class="alt" id="paK">📄 Constancia para Carabineros</button>' + (x.robada && x.telefono ? '<button type="button" class="alt" id="paAv">📲 Avisar al dueño</button>' : '') + '</div>' : '') +
       '<label for="paB">Marca y modelo</label><input id="paB" maxlength="120" value="' + esc(x.bici) + '" placeholder="Ej: Trek Marlin 7 aro 29">' +
       '<div class="row"><div><label for="paS">Nº de serie</label><input id="paS" maxlength="60" value="' + esc(x.serie) + '" placeholder="Bajo el pedalier"></div><div><label for="paC">Color</label><input id="paC" maxlength="40" value="' + esc(x.color) + '"></div></div>' +
       '<div class="row"><div><label for="paD">Dueño</label><input id="paD" maxlength="80" value="' + esc(x.dueno) + '"></div><div><label for="paT">Teléfono</label><input id="paT" maxlength="30" inputmode="tel" value="' + esc(x.telefono) + '"></div></div>' +
@@ -1395,6 +1396,14 @@
         '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(linkPas(x)) + '">👀 Ver ficha</a></div>' : ''));
     const q1 = (s) => d.querySelector(s);
     App.mapas(d);  // G91 📍 mapa Leaflet con el recorrido
+    const pk = q1('#paK'); if (pk) pk.onclick = () => App.constancia(x, P.taller);  // G91 📄
+    const pav = q1('#paAv'); if (pav) pav.onclick = async () => {  // G91 📲 al dueño sin cuenta: la última ubicación y su link para seguirla
+      let y = x; try { y = await rpc('taller_pasaporte', { p_id: id }); } catch (e) { /* usa lo que ya tenía */ }
+      const u = (y.rastros || []).find((r) => r.lat != null);
+      window.open(App.wa(x.telefono, 'Hola ' + String(x.dueno || '').split(' ')[0] + ' 👋 Te escribimos de ' + P.taller.nombre + ' por tu ' + x.bici + ' reportada como robada. ' +
+        (u ? '📍 La escanearon ' + App.hace(u.at) + ' aquí: https://www.google.com/maps?q=' + Number(u.lat).toFixed(6) + ',' + Number(u.lng).toFixed(6) + ' . ' : (y.rastros || []).length ? '👀 La escanearon, todavía sin ubicación. ' : 'Todavía nadie la escanea. ') +
+        'Síguela en vivo aquí 👉 ' + linkPas(x, true)), '_blank', 'noopener');
+    };
     if (window.CFX_FABRICA) CFX_FABRICA.bici(q1('#paB'));
     const datos = (robada, nota, sil) => ({ id: id || null, bici: q1('#paB').value, serie: q1('#paS').value, color: q1('#paC').value, dueno: q1('#paD').value, telefono: q1('#paT').value,
       reserva: x.reserva || null, robada, robada_nota: nota, silencio: sil === undefined ? !!x.silencio : sil });
