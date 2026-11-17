@@ -937,20 +937,24 @@ language plpgsql stable security definer set search_path = '' as $$
 declare
   c public.talleres;
   paso int; dur int; ini int; fin int; m int; k int; x int;
-  c_ini int; c_fin int; ahora timestamp; ok boolean; n int;
+  c_ini int; c_fin int; ahora timestamp; ok boolean; n int; hd jsonb; cup int; mx int;
 begin
   select * into c from public.talleres where id = p_taller;
   if c.id is null or not c.activo or c.suspendido then return; end if;
   if not (extract(dow from p_fecha)::int = any (c.dias)) then return; end if;
   if exists (select 1 from public.bloqueos b where b.taller_id = p_taller and b.fecha = p_fecha and b.desde is null) then return; end if;
   ahora := now() at time zone c.zona;
-  paso := c.bloque_min;
+  -- G91 🚲 cada día puede tener su intervalo (bloque), bicis a la vez (cupos) y máximo del día (max); si no, los generales.
+  hd := coalesce(c.horarios -> (extract(dow from p_fecha)::int)::text, '{}'::jsonb);
+  paso := coalesce(nullif(hd ->> 'bloque', '')::int, c.bloque_min);
+  cup := coalesce(nullif(hd ->> 'cupos', '')::int, c.cupos);
+  mx := coalesce(nullif(hd ->> 'max', '')::int, c.max_dia);
   dur := (ceil(greatest(coalesce(p_min, paso), 1)::numeric / paso) * paso)::int;
   -- Horario propio del día (si tiene) y cupo máximo de bicis por día.
   ini := (extract(epoch from coalesce((c.horarios -> (extract(dow from p_fecha)::int)::text ->> 'abre')::time, c.abre)) / 60)::int;
   fin := (extract(epoch from coalesce((c.horarios -> (extract(dow from p_fecha)::int)::text ->> 'cierra')::time, c.cierra)) / 60)::int;
-  if c.max_dia > 0 and (select count(*) from public.reservas r where r.taller_id = p_taller and r.fecha = p_fecha
-      and public.ocupa_hora(r) and (p_excluir is null or r.id <> p_excluir)) >= c.max_dia then return; end if;
+  if mx > 0 and (select count(*) from public.reservas r where r.taller_id = p_taller and r.fecha = p_fecha
+      and public.ocupa_hora(r) and (p_excluir is null or r.id <> p_excluir)) >= mx then return; end if;
   c_ini := (extract(epoch from c.colacion_desde) / 60)::int;
   c_fin := (extract(epoch from c.colacion_hasta) / 60)::int;
   m := ini;
@@ -969,7 +973,7 @@ begin
       where r.taller_id = p_taller and r.fecha = p_fecha and public.ocupa_hora(r)
         and (p_excluir is null or r.id <> p_excluir)
         and x < (extract(epoch from r.hora_fin) / 60)::int and x + paso > (extract(epoch from r.hora) / 60)::int;
-      if n >= c.cupos then ok := false; end if;
+      if n >= cup then ok := false; end if;
       k := k + 1;
     end loop;
     if ok then return next to_char(make_time(m / 60, m % 60, 0), 'HH24:MI'); end if;
@@ -1383,6 +1387,13 @@ begin
   if exists (select 1 from public.talleres t, jsonb_each(t.horarios) h where t.id = tid
              and (h.value ->> 'cierra')::time <= (h.value ->> 'abre')::time) then
     raise exception 'Revisa el horario: el cierre debe ser después de la apertura';
+  end if;
+  -- G91 🚲 lo propio de cada día (sábado/domingo): intervalo, bicis a la vez y máximo del día.
+  if exists (select 1 from public.talleres t, jsonb_each(t.horarios) h where t.id = tid and (
+       (h.value ? 'bloque' and coalesce(h.value ->> 'bloque', '') !~ '^(15|20|30|45|60|90|120|180|240)$')
+    or (h.value ? 'cupos' and coalesce(h.value ->> 'cupos', '') !~ '^([1-9]|1[0-9]|20)$')
+    or (h.value ? 'max' and coalesce(h.value ->> 'max', '') !~ '^([0-9]|[1-9][0-9]|1[0-9][0-9]|200)$'))) then
+    raise exception 'Revisa sábado y domingo: intervalo, bicis a la vez (1 a 20) o máximo del día (0 a 200)';
   end if;
   return public.taller_panel();
 end $$;

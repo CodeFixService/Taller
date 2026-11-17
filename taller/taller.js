@@ -796,10 +796,16 @@
   function verHorario() {
     const t = P.taller;
     const hd = (i) => (t.horarios || {})[i] || { abre: t.abre.slice(0, 5), cierra: t.cierra.slice(0, 5) };
-    body().innerHTML = '<div class="card"><h2>⏰ Horario y reservas</h2><label>Días y horario (cada día con su propio horario)</label><div id="hDias">' +
-      [1, 2, 3, 4, 5, 6, 0].map((i) => '<div class="row" style="align-items:center;flex-wrap:nowrap;margin-bottom:6px"><label class="check" style="margin:0;flex:0 0 76px"><input type="checkbox" data-d="' + i + '"' +
-        (t.dias.includes(i) ? ' checked' : '') + '> ' + App.DIAS[i] + '</label><input type="time" data-a="' + i + '" value="' + String(hd(i).abre).slice(0, 5) + '" aria-label="Abre ' + App.DIAS[i] + '">' +
-        '<input type="time" data-c="' + i + '" value="' + String(hd(i).cierra).slice(0, 5) + '" aria-label="Cierra ' + App.DIAS[i] + '"></div>').join('') + '</div>' +
+    // G91 🚲 Lunes a viernes juntos; sábado y domingo aparte con su intervalo, bicis a la vez y máximo propios (vacío = igual que lunes a viernes).
+    const fila = (i) => '<div class="row" style="align-items:center;flex-wrap:nowrap;margin-bottom:6px"><label class="check" style="margin:0;flex:0 0 64px;display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" data-d="' + i + '"' +
+        (t.dias.includes(i) ? ' checked' : '') + '> ' + App.DIAS[i] + '</label><input type="time" class="hora" data-a="' + i + '" value="' + String(hd(i).abre).slice(0, 5) + '" aria-label="Abre ' + App.DIAS[i] + '">' +
+        '<input type="time" class="hora" data-c="' + i + '" value="' + String(hd(i).cierra).slice(0, 5) + '" aria-label="Cierra ' + App.DIAS[i] + '"></div>';
+    const finde = (i) => '<div class="card" style="margin:10px 0 0;padding:10px 6px;box-shadow:none" data-finde="' + i + '"><h3 style="margin:0 0 6px">' + (i === 6 ? '🗓️ Sábado' : '🗓️ Domingo') + '</h3>' + fila(i) +
+      '<div class="row"><div><label for="hB' + i + '">Cada cuánto</label><select id="hB' + i + '" data-fb="' + i + '"><option value="">Igual</option>' + [15, 20, 30, 45, 60, 90, 120, 180, 240].map((m) => '<option' + (+hd(i).bloque === m ? ' selected' : '') + '>' + m + '</option>').join('') + '</select></div>' +
+      '<div><label for="hU' + i + '">Bicis a la vez</label><input id="hU' + i + '" data-fu="' + i + '" inputmode="numeric" placeholder="Igual" value="' + (hd(i).cupos || '') + '"></div>' +
+      '<div><label for="hM' + i + '">Máx. del día</label><input id="hM' + i + '" data-fm="' + i + '" inputmode="numeric" placeholder="Igual" value="' + (hd(i).max != null && hd(i).max !== '' ? hd(i).max : '') + '"></div></div></div>';
+    body().innerHTML = '<div class="card"><h2>⏰ Horario y reservas</h2><label>🗓️ Lunes a viernes (cada día con su horario)</label><div id="hDias">' +
+      [1, 2, 3, 4, 5].map(fila).join('') + finde(6) + finde(0) + '</div>' +
       '<div class="row"><div><label for="hMax">Bicis que recibes por día (0 = sin límite)</label><input id="hMax" inputmode="numeric" value="' + (t.max_dia || 0) + '"></div>' +
       '<div><label for="hCap">Mantenciones que terminas por día (0 = no calcular entrega)</label><input id="hCap" inputmode="numeric" value="' + (t.capacidad_dia || 0) + '"></div></div>' +
       '<label for="hEsp">Máximo de días hasta la entrega (si la cola pasa de esto, ese día se cierra)</label><input id="hEsp" inputmode="numeric" value="' + (t.max_espera_dias || 14) + '">' +
@@ -812,8 +818,27 @@
       '<h3>⭐ Horas exclusivas para clientes Premium</h3><p class="sub" style="margin-top:0">Solo los clientes Premium pueden reservar estas horas (es lo que más los motiva a pagar). ' +
       'Si nadie Premium la toma, se abre para todos ' + ((pub.config || {}).horas_libera_premium || 24) + ' horas antes, así no pierdes la hora.</p>' +
       '<div class="chips" id="hVip">' + horasDelDia().map((h) => '<label><input type="checkbox" data-v="' + h + '"' + ((t.horas_premium || []).includes(h) ? ' checked' : '') + '> ' + h + '</label>').join('') + '</div>' +
-      '<p class="sub">Para bloquear un feriado o unas horas usa ⛔ Bloquear en la Agenda.</p>' +
-      '<div class="btns"><button id="hGuardar">💾 Guardar horario</button></div><p class="err" id="hErr"></p></div>';
+      '<div class="btns"><button id="hGuardar">💾 Guardar horario</button></div><p class="err" id="hErr"></p></div>' +
+      '<div class="card"><h2>⛔ Días cerrados</h2><p class="sub" style="margin-top:0">Feriados, vacaciones o un día que no atiendes: ese día nadie puede reservar. Para cerrar solo unas horas usa ⛔ Bloquear en la Agenda.</p>' +
+      '<ul class="list" id="hCerr"></ul><div class="row"><div><label for="hCd1">Desde</label><input type="date" id="hCd1" min="' + P.hoy + '"></div><div><label for="hCd2">Hasta (opcional)</label><input type="date" id="hCd2" min="' + P.hoy + '"></div></div>' +
+      '<input id="hCm" maxlength="80" placeholder="Motivo (ej: Feriado, vacaciones)" style="margin-top:8px"><div class="btns"><button type="button" class="alt" id="hCerrar">⛔ Cerrar esos días</button></div></div>';
+    pintarCerrados();
+    $('hCerrar').onclick = async () => {  // G91 🚲 bloquear días completos (uno o un rango, máx. 62)
+      const d1 = $('hCd1').value, d2 = $('hCd2').value || d1;
+      if (!d1) { toast('Elige el día'); return; }
+      if (d2 < d1) { toast('"Hasta" debe ser después de "Desde"'); return; }
+      const L = []; for (let d = d1; d <= d2 && L.length < 62; d = App.sumarDias(d, 1)) L.push(d);
+      try {
+        const ya = await q(sb.from('bloqueos').select('fecha').eq('taller_id', T).is('desde', null).gte('fecha', d1).lte('fecha', d2));
+        const nuevos = L.filter((d) => !(ya || []).some((b) => b.fecha === d)).map((d) => ({ taller_id: T, fecha: d, desde: null, hasta: null, motivo: $('hCm').value.trim().slice(0, 80) }));
+        if (nuevos.length) await q(sb.from('bloqueos').insert(nuevos));
+        toast('⛔ ' + L.length + ' día' + (L.length > 1 ? 's' : '') + ' cerrado' + (L.length > 1 ? 's' : '')); $('hCd1').value = $('hCd2').value = $('hCm').value = ''; pintarCerrados();
+      } catch (e) { toast(e.message); }
+    };
+    $('hCerr').onclick = async (e) => {
+      const x = e.target.closest('[data-abrir]'); if (!x) return;
+      try { await q(sb.from('bloqueos').delete().eq('id', x.dataset.abrir)); toast('✅ Día abierto otra vez'); pintarCerrados(); } catch (err) { toast(err.message); }
+    };
     $('hGuardar').onclick = async () => {
       $('hErr').textContent = '';
       const cd = $('hCd').value, ch = $('hCh').value;
@@ -827,6 +852,11 @@
         const normal = Object.keys(cuenta).sort((a, b) => cuenta[b] - cuenta[a])[0].split('-');
         const horarios = {};
         [0, 1, 2, 3, 4, 5, 6].forEach((i) => { const [a, c] = par(i).split('-'); if (a && c && par(i) !== normal.join('-')) horarios[i] = { abre: a, cierra: c }; });
+        [6, 0].forEach((i) => {  // G91 lo propio del fin de semana
+          const q = (k) => $('hDias').querySelector('[data-' + k + '="' + i + '"]').value.trim(), [a, c] = par(i).split('-'), x = {};
+          if (q('fb')) x.bloque = +q('fb'); if (q('fu')) x.cupos = Math.min(Math.max(App.numero(q('fu')) || 1, 1), 20); if (q('fm') !== '') x.max = Math.min(Math.max(App.numero(q('fm')), 0), 200);
+          if (Object.keys(x).length && a && c) horarios[i] = Object.assign({ abre: a, cierra: c }, x);
+        });
         P = await rpc('taller_guardar', { p: { dias, horarios, max_dia: Math.max(App.numero($('hMax').value), 0),
           capacidad_dia: Math.max(App.numero($('hCap').value), 0), max_espera_dias: Math.max(App.numero($('hEsp').value) || 14, 1),
           abre: normal[0], cierra: normal[1], colacion_desde: cd, colacion_hasta: ch, bloque_min: +$('hBl').value,
@@ -838,6 +868,12 @@
     };
   }
 
+  async function pintarCerrados() {
+    const el = $('hCerr'); if (!el) return;
+    let L = []; try { L = await q(sb.from('bloqueos').select('id,fecha,motivo').eq('taller_id', T).is('desde', null).gte('fecha', P.hoy).order('fecha').limit(60)); } catch (e) { el.innerHTML = '<li class="err">' + esc(e.message) + '</li>'; return; }
+    el.innerHTML = (L || []).length ? L.map((b) => '<li><div class="grow"><b>' + esc(App.fLarga(b.fecha)) + '</b>' + (b.motivo ? '<div class="sub">' + esc(b.motivo) + '</div>' : '') + '</div>' +
+      '<button type="button" class="small ghost" data-abrir="' + b.id + '" data-sin-atras>✅ Abrir</button></li>').join('') : '<li class="muted">No tienes días cerrados.</li>';
+  }
   // ---- Servicios
   function verServicios() {
     const lim = P.plan.limites.servicios;
