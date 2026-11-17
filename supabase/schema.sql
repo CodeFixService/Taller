@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.46'::text $$;
+language sql immutable as $$ select '2.47'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -1663,8 +1663,47 @@ begin
                         and updated_at > now() - interval '90 days'),
     'canceladas', (select count(*) from public.reservas where taller_id = tid and estado = 'cancelada' and updated_at > now() - interval '90 days'),
     'online', (select count(*) from public.reservas where taller_id = tid and origen <> 'taller' and created_at > now() - interval '90 days'
-               and estado not in ('expirada', 'rechazada')));
+               and estado not in ('expirada', 'rechazada')),
+    -- G91 📊 Reportes: por mecánico (90 días: trabajos, ingresos y horas promedio de recibida a lista), caja del mes y lo más vendido.
+    'mecanicos', (select coalesce(jsonb_agg(x order by x.trabajos desc), '[]') from (
+       select coalesce((select coalesce(nullif(p.nombre, ''), p.email) from public.perfiles p where p.id = r.mecanico_id), 'Sin asignar') as nombre,
+         count(*) as trabajos, coalesce(sum(r.total), 0) as ingresos,
+         round(avg(extract(epoch from (
+           (select min((h ->> 'at')::timestamptz) from jsonb_array_elements(r.historial) h where h ->> 'estado' = 'lista') -
+           (select min((h ->> 'at')::timestamptz) from jsonb_array_elements(r.historial) h where h ->> 'estado' = 'recibida'))) / 3600)::numeric, 1) as horas
+       from public.reservas r where r.taller_id = tid and r.estado = 'completada' and r.completada_at > now() - interval '90 days'
+       group by r.mecanico_id) x),
+    'caja_mes', (select jsonb_build_object('efectivo', coalesce(sum(total) filter (where medio = 'efectivo'), 0), 'transferencia', coalesce(sum(total) filter (where medio = 'transferencia'), 0),
+        'tarjeta', coalesce(sum(total) filter (where medio = 'tarjeta'), 0), 'mostrador', coalesce(sum(total) filter (where reserva_id is null), 0),
+        'ordenes', coalesce(sum(total) filter (where reserva_id is not null), 0), 'total', coalesce(sum(total), 0), 'n', count(*))
+      from public.caja where taller_id = tid and fecha >= date_trunc('month', public.caja_hoy(tid))::date),
+    'vendidos', (select coalesce(jsonb_agg(x order by x.n desc), '[]') from (
+       select min(trim(i ->> 'nombre')) as nombre, sum(greatest(coalesce((i ->> 'cant')::numeric, 1), 0)) as n from (
+         select i from public.reservas r, jsonb_array_elements(r.items) i where r.taller_id = tid and r.estado = 'completada' and r.completada_at > now() - interval '90 days'
+           and coalesce(i ->> 'aprob', '') <> 'no' and jsonb_typeof(r.items) = 'array'
+         union all
+         select i from public.caja k, jsonb_array_elements(k.items) i where k.taller_id = tid and k.reserva_id is null and k.fecha > current_date - 90) z
+       where trim(coalesce(i ->> 'nombre', '')) <> '' group by lower(trim(i ->> 'nombre')) order by 2 desc limit 8) x));
 end $$;
+
+-- G91 📊 Reporte para descargar (CSV/Excel): cada cobro de la Caja entre 2 fechas (máx. 1 año). Premium (como las estadísticas).
+create or replace function public.taller_reporte(p_desde date, p_hasta date) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null then raise exception 'Sin acceso'; end if;
+  if not coalesce((public.limite_taller(tid, 'estadisticas'))::boolean, false) then raise exception 'Los reportes para descargar son de ⭐ Premium'; end if;
+  if p_desde is null or p_hasta is null or p_hasta < p_desde or p_hasta - p_desde > 366 then raise exception 'Elige un rango de hasta 1 año'; end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('fecha', k.fecha, 'hora', to_char(k.created_at at time zone t.zona, 'HH24:MI'),
+      'tipo', case when k.reserva_id is null then 'Mostrador' else 'Orden' end, 'cliente', coalesce(nullif(k.nombre, ''), r.nombre, ''),
+      'bici', coalesce(r.bici, ''), 'mecanico', coalesce((select coalesce(nullif(p.nombre, ''), p.email) from public.perfiles p where p.id = r.mecanico_id), ''),
+      'detalle', (select coalesce(string_agg(trim(i ->> 'nombre') || case when coalesce((i ->> 'cant')::numeric, 1) <> 1 then ' x' || (i ->> 'cant') else '' end, ', '), '')
+                  from jsonb_array_elements(case when jsonb_typeof(k.items) = 'array' then k.items else '[]'::jsonb end) i),
+      'medio', k.medio, 'total', k.total, 'boleta', coalesce(k.boleta, '')) order by k.created_at), '[]')
+    from public.caja k join public.talleres t on t.id = k.taller_id left join public.reservas r on r.id = k.reserva_id
+    where k.taller_id = tid and k.fecha between p_desde and p_hasta);
+end $$;
+-- (permiso: en la lista de grants de abajo, después del revoke general)
 
 -- Mantenciones por recordar (Premium).
 create or replace function public.taller_recordatorios() returns jsonb
@@ -2186,7 +2225,7 @@ grant execute on function
   public.taller_estado(uuid, text), public.taller_trabajo(uuid, jsonb, text, text, uuid, date),
   public.taller_reserva_manual(date, text, uuid, text, text, text, text, boolean), public.taller_devuelto(uuid),
   public.taller_calificar(uuid, int, text), public.taller_clientes(), public.taller_equipo_suspender(uuid, boolean),
-  public.taller_estadisticas(), public.taller_recordatorios(), public.taller_limpiar_comprobantes(),
+  public.taller_estadisticas(), public.taller_reporte(date, date), public.taller_recordatorios(), public.taller_limpiar_comprobantes(),
   public.premium_pagar(text, text, boolean), public.mi_pago_pendiente(),
   public.admin_resumen(), public.admin_talleres(), public.admin_clientes(), public.admin_premium(text, uuid, int, text),
   public.admin_suspender(text, uuid, boolean, text), public.admin_pagos(text), public.admin_pago_comprobante(uuid),

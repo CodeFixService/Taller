@@ -1802,7 +1802,7 @@
     if (s.bloqueado) {
       body().innerHTML = (s.mes_reservas != null ? '<div class="stats"><div class="card"><span>📅 Reservas este mes</span><b>' + s.mes_reservas + '</b></div>' +
         '<div class="card"><span>💰 Ingresos este mes</span><b>' + plata(s.mes_ingresos) + '</b></div></div>' : '') +
-        bloqueadoPremium('📊 Gráficos y estadísticas', 'Ingresos por mes, días con más trabajo, servicios más pedidos, clientes nuevos y los que vuelven, de dónde llegan tus reservas, ticket promedio y tus estrellas.');
+        bloqueadoPremium('📊 Gráficos y estadísticas', 'Ingresos por mes, días con más trabajo, servicios más pedidos, clientes nuevos y los que vuelven, de dónde llegan tus reservas, ticket promedio, tus estrellas, 🧑‍🔧 cuánto hace cada mecánico, 💵 la caja del mes, 🔩 lo más vendido y 📥 reporte para Excel.');
       return;
     }
     const tot = s.meses.reduce((a, m) => a + (+m.ingresos || 0), 0), trab = s.meses.reduce((a, m) => a + (+m.trabajos || 0), 0);
@@ -1827,7 +1827,31 @@
       '<div class="card"><h2>🛠️ Servicios más pedidos (90 días)</h2>' + (s.servicios.length ? hbarras(s.servicios.map((x) => [x.nombre, +x.n])) : '<p class="muted">Sin datos.</p>') + '</div>' +
       '<div class="card"><h2>📲 ¿De dónde llegan tus reservas? (90 días)</h2>' + (oTot ? hbarras([['🌐 Online sin cuenta', +o.online || 0], ['📱 Clientes con cuenta', +o.cuenta || 0], ['🏪 En el taller / teléfono', +o.taller || 0]], oTot) +
         '<p class="sub">💡 Comparte tu QR: los clientes con cuenta vuelven más y reciben recordatorios.</p>' : '<p class="muted">Sin reservas todavía.</p>') + '</div>' +
-      '<div class="card"><h2>⭐ Tus estrellas</h2>' + (eTot ? hbarras(est.map((x) => ['★'.repeat(x.e), x.n]), eTot) : '<p class="muted">Aún sin calificaciones.</p>') + '</div>';
+      '<div class="card"><h2>⭐ Tus estrellas</h2>' + (eTot ? hbarras(est.map((x) => ['★'.repeat(x.e), x.n]), eTot) : '<p class="muted">Aún sin calificaciones.</p>') + '</div>' +
+      // G91 📊 Reportes
+      (s.mecanicos ? '<div class="card"><h2>🧑‍🔧 Por mecánico (90 días)</h2>' + (s.mecanicos.length ? '<ul class="list">' + s.mecanicos.map((x) => '<li><div class="grow"><b>' + esc(x.nombre) + '</b>' +
+        '<div class="sub">' + x.trabajos + (x.trabajos === 1 ? ' trabajo' : ' trabajos') + ' · ' + plata(x.ingresos) + (x.horas != null ? ' · ⏱️ ' + String(x.horas).replace('.', ',') + ' h de recibida a lista' : '') + '</div></div></li>').join('') + '</ul>'
+        : '<p class="muted">Aún sin trabajos entregados.</p>') + '</div>' : '') +
+      (s.caja_mes ? '<div class="card"><h2>💵 Caja de este mes</h2><div class="stats" style="grid-template-columns:1fr 1fr">' +
+        [['🔧 Órdenes', s.caja_mes.ordenes], ['🛒 Mostrador', s.caja_mes.mostrador]].concat(CAJA_M.map((x) => [x[1], s.caja_mes[x[0]]]))
+          .map((x) => '<div class="card"><span>' + x[0] + '</span><b>' + plata(x[1]) + '</b></div>').join('') + '</div><p class="sub">Total ' + plata(s.caja_mes.total) + ' en ' + s.caja_mes.n + ' cobros.</p></div>' : '') +
+      (s.vendidos ? '<div class="card"><h2>🔩 Lo más vendido (90 días)</h2>' + (s.vendidos.length ? hbarras(s.vendidos.map((x) => [x.nombre, +x.n])) : '<p class="muted">Sin ventas todavía.</p>') + '</div>' : '') +
+      '<div class="card"><h2>📥 Descargar reporte</h2><p class="sub" style="margin-top:0">Cada cobro de la Caja (órdenes y mostrador) en un archivo que abre Excel.</p>' +
+        '<div class="row"><div><label for="rpD">Desde</label><input type="date" id="rpD" value="' + P.hoy.slice(0, 8) + '01"></div><div><label for="rpH">Hasta</label><input type="date" id="rpH" value="' + P.hoy + '"></div></div>' +
+        '<div class="btns"><button type="button" id="rpB">📥 Descargar (Excel)</button></div></div>';
+    body().querySelector('#rpB').onclick = async () => {
+      const d1 = body().querySelector('#rpD').value, d2 = body().querySelector('#rpH').value;
+      try {
+        const L = await rpc('taller_reporte', { p_desde: d1, p_hasta: d2 });
+        if (!L.length) { toast('No hay cobros en esas fechas'); return; }
+        const c = (v) => { const x = String(v == null ? '' : v); return /[;"\n\r]/.test(x) || /^[=+\-@]/.test(x) ? '"' + (/^[=+\-@]/.test(x) ? "'" : '') + x.replace(/"/g, '""') + '"' : x; };
+        const csv = '\ufeff' + [['Fecha', 'Hora', 'Tipo', 'Cliente', 'Bici', 'Mecánico', 'Detalle', 'Medio', 'Total', 'Boleta SII']].concat(L.map((r) => [r.fecha, r.hora, r.tipo, r.cliente, r.bici, r.mecanico, r.detalle, ({ efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta' })[r.medio] || r.medio, r.total, r.boleta]))
+          .map((f) => f.map(c).join(';')).join('\r\n');
+        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+        App.descargar(url, 'reporte-' + (P.taller.slug || 'taller') + '-' + d1 + '-a-' + d2 + '.csv'); setTimeout(() => URL.revokeObjectURL(url), 5000);
+        toast('📥 Reporte con ' + L.length + ' cobros');
+      } catch (e) { toast(e.message); }
+    };
   }
   function bloqueadoPremium(t, d, mod) {
     return '<div class="card plan premium"><h2>' + t + ' <span class="pill pro">PREMIUM</span></h2><p class="muted">' + esc(d) + '</p><div class="btns">' +
