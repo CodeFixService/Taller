@@ -158,10 +158,20 @@
   // G59 🚦 Tablero del taller (FREE): una columna por paso; ‹ › mueve la bici y le avisa al cliente.
   let tabLista = [];
   const diasLista = (r) => r.estado === 'lista' && r.lista_at ? Math.floor((Date.now() - new Date(r.lista_at)) / 864e5) : 0;
+  // G91 🧑‍🔧 Carga por mecánico: cuántas bicis tiene cada uno en el taller; tocar filtra el tablero.
+  let tabMec = ''; try { tabMec = localStorage.getItem('bt-mec') || ''; } catch (e) { /* sin almacenamiento */ }
+  function pintarMecs(lista) {
+    const n = {}; lista.forEach((r) => { const k = r.mecanico_id || 'sin'; n[k] = (n[k] || 0) + 1; });
+    const eq = (P.equipo || []).filter((p) => !p.suspendido || n[p.id]);
+    if (tabMec && !n[tabMec] && !eq.some((p) => p.id === tabMec)) tabMec = '';
+    $('hMecs').innerHTML = eq.length > 1 || (eq.length && n.sin) ? [['', 'Todos', lista.length]].concat(eq.map((p) => [p.id, p.nombre, n[p.id] || 0]), n.sin ? [['sin', 'Sin asignar', n.sin]] : [])
+      .map(([k, nom, c]) => '<button type="button" data-sin-atras data-mec="' + k + '" class="' + (tabMec === k ? 'on' : '') + '" aria-pressed="' + (tabMec === k) + '">' + (k && k !== 'sin' ? '🧑‍🔧 ' : '') + esc(nom) + ' · <b>' + c + '</b></button>').join('') : '';
+  }
   function pintarTablero(lista) {
     tabLista = lista;
+    pintarMecs(lista);
     $('hTablero').innerHTML = EN_TALLER.map((est, i) => {
-      const l = lista.filter((r) => r.estado === est);
+      const l = lista.filter((r) => r.estado === est && (!tabMec || (tabMec === 'sin' ? !r.mecanico_id : r.mecanico_id === tabMec)));
       return '<div class="col" data-col="' + est + '"><h3>' + ESTADOS[est][0] + '<b>' + l.length + '</b></h3>' + (l.length ? l.map((r) =>
         '<div class="tj" data-tj="' + r.id + '"><b>' + esc(r.nombre) + '</b>' + (r.bici ? '<div class="sub">🚲 ' + esc(r.bici) + '</div>' : '') +
         (r.mecanico ? '<div class="sub">🧑‍🔧 ' + esc(r.mecanico) + '</div>' : '') + (diasLista(r) >= 1 ? '<div class="sub" style="color:var(--warn)">⏳ Lista hace ' + diasLista(r) + ' día' + (diasLista(r) > 1 ? 's' : '') + '</div>' : '') + '<div class="btns">' +
@@ -173,6 +183,11 @@
     }).join('');
     $('cTablero').classList.toggle('hidden', !lista.length);
   }
+  $('hMecs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-mec]'); if (!b) return;
+    e.stopPropagation(); tabMec = b.dataset.mec; try { localStorage.setItem('bt-mec', tabMec); } catch (x) { /* sin almacenamiento */ }
+    pintarTablero(tabLista);
+  });
   $('hTablero').addEventListener('click', async (e) => {
     const m = e.target.closest('[data-mover]');
     if (m) {

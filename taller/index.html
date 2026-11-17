@@ -35,6 +35,9 @@
   .tablero .col { flex: 0 0 min(78%, 240px); scroll-snap-align: start; background: var(--field); border: 1px solid var(--line); border-radius: 12px; padding: 8px; min-height: 90px; }
   .tablero .col h3 { margin: 0 0 6px; font-size: 13px; display: flex; gap: 6px; align-items: center; } .tablero .col h3 b { margin-left: auto; color: var(--muted); }
   .tablero .tj { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px; margin-bottom: 6px; cursor: pointer; }
+  .mecs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; } .mecs:empty { display: none; }
+  .mecs button { padding: 4px 10px; min-height: 34px; font-size: 13px; background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 999px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mecs button.on { background: var(--brand-soft); color: var(--brand); border-color: var(--brand); font-weight: 700; }
   .tablero .tj .btns { margin-top: 6px; gap: 6px; } .tablero .tj .btns button { padding: 4px 10px; min-height: 32px; }
   .check { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
   .check button { justify-content: flex-start; text-align: left; background: var(--field); color: var(--text); border: 1px solid var(--line); font-weight: 500; min-height: 40px; }
@@ -75,7 +78,7 @@
       <div class="card clic" data-ir="reservas:taller"><span>🔧 En el taller</span><b id="kTaller">0</b></div>
       <div class="card clic" data-ir="reservas:devolver"><span>💸 Por devolver</span><b id="kDev">0</b></div>
     </div>
-    <div class="card" id="cTablero"><h2>🚦 Tablero del taller</h2><p class="sub" style="margin-top:0">Cada bici en su paso. Toca ‹ › para moverla; tócala para ver la orden.</p><div class="tablero" id="hTablero"></div></div>
+    <div class="card" id="cTablero"><h2>🚦 Tablero del taller</h2><p class="sub" style="margin-top:0">Cada bici en su paso. Toca ‹ › para moverla; tócala para ver la orden.</p><div class="mecs" id="hMecs"></div><div class="tablero" id="hTablero"></div></div>
     <div class="card" id="cRevisar"><h2>🧾 Comprobantes por revisar</h2><div class="grid" id="hRevisar"></div></div>
     <div class="card"><h2>📅 Hoy</h2><div class="grid" id="hHoy"></div></div>
     <div class="card hidden" id="cDevolver"><h2>💸 Abonos por devolver</h2><div class="grid" id="hDevolver"></div></div>
