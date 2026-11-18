@@ -118,7 +118,8 @@
       b.innerHTML = '<div class="aviso warn"><div class="grow">⏳ Te quedan <span class="cuenta-atras" id="cr">--:--</span> para pagar y subir el comprobante. Si no, la hora se libera.</div></div>' +
         '<p style="margin:0 0 8px">' + esc(App.txt('reserva_pago', { minutos: (App.publica.config || {}).minutos_pago || 30 })) + '</p>' +
         '<div class="stats" style="grid-template-columns:1fr"><div class="card"><span>Abono (se descuenta del total)</span><b>' + plata(r.abono_monto) + '</b></div></div>' +
-        (r.mp ? '<button class="block" id="bMp">⚡ Pagar ' + plata(r.abono_monto) + ' con Mercado Pago</button><p class="muted" style="margin:4px 0 10px;text-align:center;font-size:13px">Se confirma solo: sin comprobante.</p>' : '') +
+        (r.mp ? ((r.medios || { mp: true }).mp ? '<button class="block" data-mp="mp">⚡ Pagar ' + plata(r.abono_monto) + ' con Mercado Pago</button>' : '') +
+          ((r.medios || {}).flow ? '<button class="block" data-mp="flow">💳 Pagar ' + plata(r.abono_monto) + ' con Webpay</button>' : '') + '<p class="muted" style="margin:4px 0 10px;text-align:center;font-size:13px">Se confirma solo: sin comprobante.</p>' : '') +
         (r.pagar_url ? '<a class="btn block' + (r.mp ? ' alt' : '') + '" target="_blank" rel="noopener" id="bPagar" href="' + esc(r.pagar_url) + '">1️⃣ Pagar abono ' + (r.mp ? 'con el link' : 'en Mercado Pago') + '</a>' : '') +
         '<label for="fComp" class="btn alt block" style="margin-top:10px;color:var(--brand)">' + (r.pagar_url ? '2️⃣ Subir foto del comprobante' : '¿Pagaste de otra forma? Sube el comprobante') + '</label>' +
         '<input type="file" id="fComp" accept="image/*" class="hidden">' +
@@ -131,14 +132,14 @@
         if (!s) { clearInterval(reloj); cargar(); }
       };
       tic(); reloj = setInterval(tic, 1000);
-      if ($('bMp')) $('bMp').onclick = async () => {
-        const bt = $('bMp'); bt.disabled = true; $('cErr').textContent = '';
+      document.querySelectorAll('[data-mp]').forEach((bt) => { bt.onclick = async () => {
+        bt.disabled = true; $('cErr').textContent = '';
         try {
-          const x = await App.rpc('reserva_mp_pagar', { p_token: token, p_volver: location.origin + location.pathname + '?t=' + encodeURIComponent(token) + '&mp=1' });
-          if (!x || !x.ok) throw new Error((x && x.error) || 'No se pudo abrir Mercado Pago');
+          const x = await App.rpc('reserva_mp_pagar', { p_token: token, p_volver: location.origin + location.pathname + '?t=' + encodeURIComponent(token) + '&mp=1', ...(bt.dataset.mp === 'flow' ? { p_medio: 'flow' } : {}) });
+          if (!x || !x.ok) throw new Error((x && x.error) || 'No se pudo abrir el pago');
           location.href = x.url;
         } catch (err) { $('cErr').textContent = err.message; bt.disabled = false; }
-      };
+      }; });
       // Volvió de Mercado Pago: revisa cada 8 s hasta que se confirme (el servidor también revisa cada 1 min).
       if (r.mp && new URLSearchParams(location.search).get('mp')) sondeo = setInterval(async () => {
         try { const n = await App.rpc('reserva_mp_revisar', { p_token: token }); if (n && n.estado !== r.estado) { r = n; pintar(); } } catch (e) { /* sin red */ }
