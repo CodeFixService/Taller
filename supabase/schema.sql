@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.64'::text $$;
+language sql immutable as $$ select '2.65'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -9153,6 +9153,14 @@ end $$;
 -- Solo si siguen los de fábrica: si Josué ya los cambió en el Centro de Mando, no se tocan.
 update public.cfx_config set valor = jsonb_set(valor, '{packs}', '{}'::jsonb)
 where clave = 'modulos_venta' and valor #>> '{packs,crecer,modulos,4}' = 'carrito';
+-- G112 b: 3 packs iguales en todas las apps (🌱 Básico · ⭐ Normal · 💎 Completo), propios del taller. Solo si sigue sin packs (G59).
+update public.cfx_config set valor = jsonb_set(valor, '{packs}', jsonb_build_object(
+    'basico',   jsonb_build_object('nombre', '🌱 Básico', 'detalle', 'Presupuestos claros y avisos al cliente', 'precio', 1490,
+                                   'modulos', jsonb_build_array('presupuesto', 'aviso_lista', 'mantencion')),
+    'crecer',   jsonb_build_object('nombre', '⭐ Normal', 'detalle', 'Que el cliente vuelva y confíe', 'precio', 2490, 'destacado', true,
+                                   'modulos', jsonb_build_array('presupuesto', 'aviso_lista', 'mantencion', 'stock', 'garantias', 'resenas', 'promos')),
+    'completo', jsonb_build_object('nombre', '💎 Completo', 'detalle', 'Todos los módulos, también los nuevos', 'precio', 3490, 'modulos', '*')))
+where clave = 'modulos_venta' and valor -> 'packs' = '{}'::jsonb;
 
 -- G65 🏭 Servicios de fábrica: todo taller parte con los trabajos más pedidos (solo ajusta precios). FREE opera completo (G39) → 40 servicios.
 update public.planes set limites = jsonb_set(limites, '{servicios}', '40') where codigo = 'taller_free' and (limites ->> 'servicios')::int = 5;
