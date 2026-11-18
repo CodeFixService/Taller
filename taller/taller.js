@@ -982,13 +982,24 @@
   const CAJA_M = [['efectivo', '💵 Efectivo'], ['transferencia', '🏦 Transferencia'], ['tarjeta', '💳 Tarjeta']];
   const medioDe = (m) => (CAJA_M.find((x) => x[0] === m) || ['', m])[1];
   // Elegir cómo pagó (3 botones grandes) → fn(medio)
-  function elegirMedio(titulo, fn) {
+  // G32 e 📲 Tarjeta en el celular (núcleo tap.js): se cobra en la app del proveedor y queda como 💳 Tarjeta.
+  const cargarTap = () => window.CFX_TAP ? Promise.resolve(window.CFX_TAP) : new Promise((ok) => {
+    const sc = document.createElement('script'); sc.src = App.ROOT + 'shared/tap.js'; sc.onload = () => ok(window.CFX_TAP || null); sc.onerror = () => ok(null); document.head.appendChild(sc); });
+  function elegirMedio(titulo, fn, monto) {
     const d = modal('<h2>' + titulo + '</h2><p class="sub" style="margin-top:0">¿Cómo pagó?</p><div class="btns" style="flex-direction:column">' +
-      CAJA_M.map((m) => '<button type="button" data-medio="' + m[0] + '">' + m[1] + '</button>').join('') + '<button class="ghost" data-cerrar>Cancelar</button></div><p class="err" id="meErr"></p>');
+      CAJA_M.map((m) => '<button type="button" data-medio="' + m[0] + '">' + m[1] + '</button>').join('') + (monto != null ? '<button type="button" data-medio="tap">📲 Tarjeta (celular)</button>' : '') +
+      '<button class="ghost" data-cerrar>Cancelar</button></div><p class="err" id="meErr"></p>');
     d.onclick = async (e) => {
       const b = e.target.closest('[data-medio]'); if (!b) return;
       d.querySelectorAll('[data-medio]').forEach((x) => { x.disabled = true; });
-      try { await fn(b.dataset.medio); d.close(); }
+      let m = b.dataset.medio;
+      if (m === 'tap') {
+        const T = await cargarTap(), r = T && await T.cobrar(monto, { titulo: titulo.replace(/^💵 /, '') });
+        if (!T) d.querySelector('#meErr').textContent = 'Sin conexión: intenta de nuevo';
+        if (!r) { d.querySelectorAll('[data-medio]').forEach((x) => { x.disabled = false; }); return; }
+        m = 'tarjeta';
+      }
+      try { await fn(m); d.close(); }
       catch (err) { d.querySelectorAll('[data-medio]').forEach((x) => { x.disabled = false; }); d.querySelector('#meErr').textContent = err.message; }
     };
   }
@@ -997,7 +1008,7 @@
       const x = await rpc('taller_caja_cobrar', { p_reserva: id, p_medio: m });
       sb.functions.invoke('servidor').catch(() => {});
       toast('✅ Cobrado ' + plata(x.monto) + ' · ' + medioDe(m)); if (luego) luego();
-    });
+    }, monto);
   }
   let cajaF = null;
   async function verCaja() {
@@ -1111,7 +1122,7 @@
       elegirMedio('💵 Cobrar ' + plata(tot()), async (m) => {
         await rpc('taller_caja_vender', { p_items: l.map((it) => ({ nombre: String(it.nombre).trim(), cant: Math.max(+it.cant || 1, 1), precio: Math.max(Math.round(+it.precio || 0), 0) })), p_medio: m, p_nombre: d.querySelector('#vN').value });
         d.close(); toast('✅ Venta cobrada · ' + medioDe(m)); if (luego) luego();
-      });
+      }, tot());
     };
     pintar();
   }
