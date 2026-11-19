@@ -6,6 +6,7 @@
   const sb = global.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
     auth: { persistSession: true, autoRefreshToken: true, storageKey: 'bt-auth', detectSessionInUrl: true }
   });
+  global.CFX_NUBE_SB = sb; // G122 🖼️ fotos de vitrina a Storage (núcleo fotos.js)
   const ROOT = (() => {
     const s = document.querySelector('script[src*="shared/app.js"]');
     return s ? s.src.replace(/shared\/app\.js.*$/, '') : location.origin + '/';

@@ -1376,12 +1376,16 @@
       const p = { id: id || null, titulo: q1('#uT').value, talla: q1('#uTa').value, anio: App.numero(q1('#uA').value) || null, precio: App.numero(q1('#uP').value),
         garantia: +q1('#uG').value, nota: q1('#uN').value, informe: inf, estado };
       if (fotosCambio || !id) {
-        p.fotos = fotos;
-        p.mini = '';
-        if (fotos.length && window.CFX_ACHICAR) { try { p.mini = await window.CFX_ACHICAR(fotos[0], 'logo'); } catch (e) { p.mini = ''; } }
+        const dato = (f) => /^data:image\//.test(f || '');
+        if (!fotos.length) p.mini = '';
+        else if (dato(fotos[0])) { p.mini = ''; if (window.CFX_ACHICAR) { try { p.mini = await window.CFX_ACHICAR(fotos[0], 'logo'); } catch (e) { p.mini = ''; } } }
+        // (si la 1.ª ya está en la nube, la miniatura que tenía se mantiene)
+        p.fotos = window.CFX_NUBE ? await Promise.all(fotos.map((f) => window.CFX_NUBE.subir(f))) : fotos; // G122 🖼️ a Storage (si no se puede, base64)
+        fotos = p.fotos.slice();
       }
       try {
         const nid = await rpc('taller_usada_guardar', { p });
+        if (p.fotos && window.CFX_NUBE) (x.fotos || []).filter((f) => !p.fotos.includes(f)).forEach((f) => window.CFX_NUBE.borrar(f)); // G122: la que quitó sale de Storage
         d.close(); toast(estado === 'publicada' ? '📣 Publicada en tu página' : estado === 'vendida' ? '✅ Marcada como vendida' : '💾 Guardado'); verUsadas();
         return nid;
       } catch (err) { toast(err.message); return null; }

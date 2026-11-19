@@ -110,3 +110,4 @@
 - 🎬 G112 d · Estudio de contenido = 🧩 módulo 'estudio' (núcleo estudio.sql/estudio.js; ayuda.js lo carga al abrir: CFX_ESTUDIO.montar(zona, { rpc, probar, nombre })). Datos en cfx_estudio (solo el dueño por funciones). Entra en ⭐ Normal (si sigue de fábrica) y 💎 Completo. Dónde: Más → 🎬 Estudio de contenido (data-m="estudio").
 - G113 (núcleo 3.21): ☰ Más en páginas que se deslizan de lado (pestañas + ⇅ ordenar/renombrar por persona), ≥ 900 px opciones en grilla pareja, 🗂️ CFX_CAJA y CFX_DIALOGO { lista } disponibles para elegir entre muchas opciones / mostrar listas.
 - 📊 G118 (3.36): Más → Servicios → 📊 Cargar o actualizar muchos (núcleo CFX_RESPALDO.planilla; insert/update en servicios con RLS + limites_catalogo).
+- 🖼️ G122 (3.37 · bd 2.68): fotos de bicis usadas → Storage (núcleo CFX_NUBE; taller_usada_guardar acepta la URL; la que se quita se borra). Miniatura sigue en base64. Viejas pasan solas (cfx_fotos_viejas/cfx_foto_pasar sobre bicis_usadas.fotos).

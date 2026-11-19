@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.67'::text $$;
+language sql immutable as $$ select '2.68'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -3332,7 +3332,7 @@ begin
   if fs is not null then
     if jsonb_typeof(fs) <> 'array' or jsonb_array_length(fs) > 4 then raise exception 'Máximo 4 fotos'; end if;
     for f in select jsonb_array_elements_text(fs) loop
-      if f !~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' or length(f) > 160000 then raise exception 'Foto no válida o muy pesada'; end if;
+      if not public.cfx_foto_nube(f) and (f !~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' or length(f) > 160000) then raise exception 'Foto no válida o muy pesada'; end if; -- G122: o de la nube
     end loop;
   end if;
   if mi is not null and mi <> '' and (mi !~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' or length(mi) > 60000) then raise exception 'Foto no válida'; end if;
@@ -3389,6 +3389,29 @@ revoke all on function public.usada_revisados(jsonb), public.usada_json(public.b
   public.taller_usada_guardar(jsonb), public.taller_usada_borrar(uuid), public.usadas_publicas(text), public.usada_ver(text) from public, anon, authenticated;
 grant execute on function public.taller_usadas(), public.taller_usada(uuid), public.taller_usada_guardar(jsonb), public.taller_usada_borrar(uuid) to authenticated;
 grant execute on function public.usadas_publicas(text), public.usada_ver(text) to anon, authenticated;
+
+-- G122 🖼️ Fotos viejas (base64) de las bicis usadas → Storage: núcleo fotos.js (CFX_NUBE.pasarViejas) pide 10 y las cambia por su URL.
+-- Solo el taller; solo si esa foto sigue igual (mismo lugar y largo) y la URL nueva es de SU carpeta. Si algo falla, queda igual.
+create or replace function public.cfx_fotos_viejas() returns table (t text, id text, i int, foto text)
+language plpgsql stable security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid());
+begin
+  if tid is null then return; end if;
+  return query select 'usada'::text, b.id::text, (e.n - 1)::int, e.f from public.bicis_usadas b, jsonb_array_elements_text(b.fotos) with ordinality e(f, n)
+    where b.taller_id = tid and jsonb_typeof(b.fotos) = 'array' and e.f like 'data:image/%' limit 10;
+end $$;
+create or replace function public.cfx_foto_pasar(p_t text, p_id text, p_i int, p_largo int, p_nueva text) returns boolean
+language plpgsql security definer set search_path = '' as $$
+declare tid uuid := public.taller_de(auth.uid()); k uuid;
+begin
+  if tid is null or p_t <> 'usada' or p_i < 0 or not public.cfx_foto_nube(p_nueva, auth.uid()) then return false; end if;
+  begin k := p_id::uuid; exception when others then return false; end;
+  update public.bicis_usadas set fotos = jsonb_set(fotos, array[p_i::text], to_jsonb(p_nueva))
+  where id = k and taller_id = tid and jsonb_typeof(fotos) = 'array' and fotos ->> p_i like 'data:image/%' and length(fotos ->> p_i) = p_largo;
+  return found;
+end $$;
+revoke all on function public.cfx_fotos_viejas(), public.cfx_foto_pasar(text, text, int, int, text) from public, anon;
+grant execute on function public.cfx_fotos_viejas(), public.cfx_foto_pasar(text, text, int, int, text) to authenticated;
 
 -- ---------- G59f 🧩 🪪 Pasaporte de la bici (sticker QR en el cuadro: historial, dueño, robo reportado → ficha /p/) ----------
 -- token = el QR (público: lo escanea cualquiera) · clave = del dueño (va en su link /p/?t=..&c=..): con ella reporta 🚨 robo o ✅ recuperada.
@@ -9378,6 +9401,38 @@ end $$;
 revoke all on function public.cfx_estudio_negocio(), public.cfx_estudio_puede(uuid), public.cfx_estudio_fila(public.cfx_estudio) from public, anon, authenticated;
 revoke all on function public.cfx_estudio_mio(), public.cfx_estudio_guardar(jsonb), public.cfx_estudio_borrar(uuid[]) from public, anon;
 grant execute on function public.cfx_estudio_mio(), public.cfx_estudio_guardar(jsonb), public.cfx_estudio_borrar(uuid[]) to authenticated;
+-- ===================== G122 🖼️ Fotos a Storage (núcleo) =====================
+-- Bucket público 'vitrina': cada uno sube SOLO a su carpeta (<su id>/<uuid>.webp), hasta 700 KB, solo imágenes. Nadie lista lo ajeno.
+-- Las apps aceptan en sus fotos de vitrina el texto base64 de siempre O una URL de este bucket (cfx_foto_ok). Lo viejo sigue igual.
+do $$ begin
+  if to_regclass('storage.buckets') is not null then
+    insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    values ('vitrina', 'vitrina', true, 716800, array['image/webp', 'image/jpeg', 'image/png'])
+    on conflict (id) do update set public = true, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+    drop policy if exists cfx_vitrina_subir on storage.objects;
+    drop policy if exists cfx_vitrina_ver on storage.objects;
+    drop policy if exists cfx_vitrina_borrar on storage.objects;
+    create policy cfx_vitrina_subir on storage.objects for insert to authenticated
+      with check (bucket_id = 'vitrina' and (storage.foldername(name))[1] = (select auth.uid())::text);
+    create policy cfx_vitrina_ver on storage.objects for select to authenticated
+      using (bucket_id = 'vitrina' and (storage.foldername(name))[1] = (select auth.uid())::text);
+    create policy cfx_vitrina_borrar on storage.objects for delete to authenticated
+      using (bucket_id = 'vitrina' and (storage.foldername(name))[1] = (select auth.uid())::text);
+  end if;
+end $$;
+
+-- ¿Es una foto de la nube (bucket vitrina de Supabase)? Con p_uid: además, ¿la subió esa persona?
+create or replace function public.cfx_foto_nube(t text, p_uid uuid default null) returns boolean
+language sql immutable set search_path = '' as $$
+  select coalesce(t, '') ~ '^https://[a-z0-9-]+\.supabase\.co/storage/v1/object/public/vitrina/[0-9a-f-]{36}/[0-9a-f-]{36}\.(webp|jpg|png)$'
+    and (p_uid is null or split_part(split_part(t, '/vitrina/', 2), '/', 1) = p_uid::text)
+$$;
+-- Foto de vitrina válida: vacía, base64 liviano (≤ maxlen) o de la nube.
+create or replace function public.cfx_foto_ok(t text, maxlen int) returns boolean
+language sql immutable set search_path = '' as $$
+  select coalesce(t, '') = '' or (t ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' and length(t) <= maxlen) or public.cfx_foto_nube(t)
+$$;
+grant execute on function public.cfx_foto_nube(text, uuid), public.cfx_foto_ok(text, int) to authenticated, anon;
 -- <<< CFX núcleo
 
 -- G95 🎁 Prueba por botón: los talleres de antes ya partieron con días de Premium de regalo → su correo queda anotado (no se borra).
