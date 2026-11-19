@@ -884,6 +884,34 @@
       (s.adicional ? ' <span class="pill info">Adicional</span>' : '') + '<div class="sub">' + (s.adicional ? '' : '⏱️ ' + s.duracion_min + ' min') + (s.descripcion ? ' · ' + esc(s.descripcion) : '') + (s.activo ? '' : ' · pausado') + '</div></div>' +
       '<button class="small ghost" data-e="' + s.id + '">✏️</button></li>').join('') : '<li class="muted">Agrega lo que ofreces: mantención, pinchazo, ajuste de frenos…</li>';
     $('sNuevo').onclick = () => editarServicio(null);
+    // G118 📊 Planilla única (núcleo CFX_RESPALDO.planilla): crea o ACTUALIZA servicios por nombre (la base valida: RLS, límites y largos).
+    body().insertAdjacentHTML('beforeend', '<div class="card"><details><summary style="cursor:pointer;font-weight:700">📊 Cargar o actualizar muchos (planilla)</summary><div id="planSer" style="margin-top:8px"></div></details></div>');
+    if (window.CFX_RESPALDO && CFX_RESPALDO.planilla) {
+      const mismo = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+      CFX_RESPALDO.planilla(body().querySelector('#planSer'), { que: 'servicios', archivo: 'planilla-servicios', max: 200, rubro: 'taller de bicicletas', clave: 'nombre',
+        cols: [{ k: 'nombre', t: 'Nombre', req: true, max: 80, al: /^(servicio|trabajo)/ }, { k: 'precio', t: 'Precio', tipo: 'plata', req: true, tope: 10000000, al: /^valor/ },
+          { k: 'duracion_min', t: 'Duración (min)', tipo: 'entero', tope: 480, al: /^(duracion|minutos|tiempo)/, ayuda: 'minutos, entre 10 y 480' },
+          { k: 'descripcion', t: 'Descripción', max: 300, al: /^detalle/ }, { k: 'activo', t: 'Disponible', tipo: 'si_no', ayuda: 'sí = se puede reservar' },
+          { k: 'adicional', t: 'Adicional', tipo: 'si_no', ayuda: 'sí = se suma a otro servicio' }],
+        ejemplos: [{ nombre: 'Mantención básica', precio: 25000, duracion_min: 60, descripcion: 'Ajuste de cambios y frenos, lubricación', activo: 'sí', adicional: 'no' },
+          { nombre: 'Mantención completa', precio: 45000, duracion_min: 120, activo: 'sí', adicional: 'no' }, { nombre: 'Cambio de cámara', precio: 5000, duracion_min: 15, activo: 'sí', adicional: 'sí' }],
+        existe: (f) => servicios.some((x) => mismo(x.nombre, f.nombre)),
+        guardar: async (filas) => {
+          let creados = 0, actualizados = 0; const errores = [];
+          for (const f of filas) {
+            const s = servicios.find((x) => mismo(x.nombre, f.nombre)), row = {};
+            ['precio', 'descripcion', 'activo', 'adicional'].forEach((k) => { if (f[k] != null) row[k] = f[k]; });
+            if (f.duracion_min != null) row.duracion_min = Math.min(Math.max(f.duracion_min, 10), 480);
+            try {
+              if (s) { await q(sb.from('servicios').update(row).eq('id', s.id)); actualizados++; }
+              else { await q(sb.from('servicios').insert(Object.assign({ taller_id: T, nombre: String(f.nombre).slice(0, 80) }, row))); creados++; }
+            } catch (e) { errores.push({ fila: f._fila, msg: e.message }); }
+          }
+          await cargarCatalogo(); await cargarPanel();
+          return { creados, actualizados, errores };
+        },
+        listo: (r) => { if (!(r.errores || []).length) { verServicios(); toast('✅ ' + r.creados + ' creados · ' + r.actualizados + ' actualizados'); } } });
+    }
     $('sLista').onclick = (e) => { const b = e.target.closest('[data-e]'); if (b) editarServicio(servicios.find((s) => s.id === b.dataset.e)); };
     const st = $('sTipicos');
     if (st) st.onclick = async () => {
