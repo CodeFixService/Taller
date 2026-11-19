@@ -111,3 +111,4 @@
 - G113 (núcleo 3.21): ☰ Más en páginas que se deslizan de lado (pestañas + ⇅ ordenar/renombrar por persona), ≥ 900 px opciones en grilla pareja, 🗂️ CFX_CAJA y CFX_DIALOGO { lista } disponibles para elegir entre muchas opciones / mostrar listas.
 - 📊 G118 (3.36): Más → Servicios → 📊 Cargar o actualizar muchos (núcleo CFX_RESPALDO.planilla; insert/update en servicios con RLS + limites_catalogo).
 - 🖼️ G122 (3.37 · bd 2.68): fotos de bicis usadas → Storage (núcleo CFX_NUBE; taller_usada_guardar acepta la URL; la que se quita se borra). Miniatura sigue en base64. Viejas pasan solas (cfx_fotos_viejas/cfx_foto_pasar sobre bicis_usadas.fotos).
+- 💬 G128 b (3.41): orden con cliente con cuenta → #dChat abre App.abrirChat(T, cliente_id). Aviso sin medios: ya estaba en Hoy → Para empezar. Prueba: SaaS/pruebas/g128b.js.

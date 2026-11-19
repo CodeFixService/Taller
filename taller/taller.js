@@ -461,6 +461,7 @@
       (r.motivo ? '<div class="sub">Motivo: ' + esc(r.motivo) + '</div>' : '') +
       '<div class="btns">' + (r.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(r.telefono, 'Hola ' + r.nombre.split(' ')[0] + ' 👋 Te escribimos de ' + P.taller.nombre + ': ' +
         (msgCliente || '') + '\nTu reserva: ' + link) + '">📲 WhatsApp</a>' : '') +
+      (r.cliente_id ? '<button class="small ghost" id="dChat" type="button">💬 Chat</button>' : '') +  // G128 b: chat de la reserva (el mismo de Mensajes)
       '<button class="small ghost" id="dLink">🔗 Enlace del cliente</button>' + (tiene('domicilio') && !['completada', 'rechazada', 'expirada', 'cancelada', 'no_asistio'].includes(r.estado) ? '<button class="small ghost" id="dDom" type="button">🚐 ' + (r.domicilio ? 'Domicilio' : 'A domicilio') + '</button>' : '') + (tiene('pasaporte') ? '<button class="small ghost" id="dPas">🪪 Pasaporte</button>' : P.venta && r.bici ? '<button class="small ghost" type="button" data-sin-atras data-ofrecer="pasaporte">🪪 Pasaporte</button>' : '') + (r.estado === 'completada' && r.telefono && tiene('resenas') && P.taller.google_resenas ? '<a class="btn small ghost" id="dGoo" target="_blank" rel="noopener" href="' + esc(App.wa(r.telefono, 'Hola ' + String(r.nombre || '').split(' ')[0] + ' 👋 Gracias por confiar en ' + P.taller.nombre + ' 🚲 ¿Nos ayudas con una reseña en Google? Es 1 minuto: ' + P.taller.google_resenas)) + '">⭐ Pedir reseña</a>' : '') + (['lista', 'completada'].includes(r.estado) ? (tiene('garantias') ? '<button class="small ghost" id="dGar" type="button">🛡️ Garantía</button>' : P.venta ? '<button class="small ghost" type="button" data-sin-atras data-ofrecer="garantias">🛡️ Garantía</button>' : '') : '') + (r.tiene_comprobante ? '<button class="small ghost" data-comp="' + r.id + '">👁️ Comprobante</button>' : '') + '</div>' +
       (r.estado === 'en_revision' ? botonesRevisar(r) : '') +
       (r.estado === 'lista' && !tiene('aviso_lista') && P.venta ? '<div class="aviso" style="margin-top:12px"><div class="grow">🔔 Avísale solo con el total y el link, y recuérdale si no la retira.</div><button class="small" type="button" data-sin-atras data-ofrecer="aviso_lista">🧩 Ver</button></div>' : '') +
@@ -490,6 +491,7 @@
           '<input id="dCalTxt" maxlength="300" placeholder="Comentario privado (opcional)" style="margin-top:8px">') + '</div>' : '');
     show('detalle');
     $('dVolver').onclick = () => history.length > 1 ? show(volverA) : show('reservas');
+    if ($('dChat')) $('dChat').onclick = () => App.abrirChat(T, r.cliente_id, r.nombre);
     $('dLink').onclick = () => { navigator.clipboard.writeText(link).then(() => toast('🔗 Enlace copiado')); };
     const dom = $('dDom'); if (dom) dom.onclick = () => editarDomicilio(r, () => abrirDetalle(r.id));  // G59g
     const gar = $('dGar'); if (gar) gar.onclick = () => editarGarantia(null, { reserva: r.id, nombre: r.nombre, telefono: r.telefono, bici: r.bici || r.servicio_nombre, detalle: r.servicio_nombre }, () => abrirDetalle(r.id));  // G59h
