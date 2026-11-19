@@ -107,3 +107,4 @@
 - G107 (3.24 · bd 2.63): 💳 abono con el Flow (Webpay) del taller: reserva_mp_pagar(token, volver, p_medio) · reserva_ver.medios · r/ botones [data-mp="mp"|"flow"] (ya no #bMp) · dueño: Más → 💳 Abono (#aMp + tarjeta Flow debajo). Prueba: SaaS/pruebas/g107.js.
 
 - 🧩 G112 b · Packs 🌱 Básico · ⭐ Normal (clave `crecer`, destacado) · 💎 Completo, iguales en las 6; precios y módulos: SaaS/LANZAMIENTO.md (Módulos, paso 3). Solo cambian si siguen de fábrica.
+- 🎬 G112 d · Estudio de contenido = 🧩 módulo 'estudio' (núcleo estudio.sql/estudio.js; ayuda.js lo carga al abrir: CFX_ESTUDIO.montar(zona, { rpc, probar, nombre })). Datos en cfx_estudio (solo el dueño por funciones). Entra en ⭐ Normal (si sigue de fábrica) y 💎 Completo. Dónde: Más → 🎬 Estudio de contenido (data-m="estudio").
