@@ -12,7 +12,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.69'::text $$;
+language sql immutable as $$ select '2.70'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -528,6 +528,8 @@ create table if not exists public.links_pago (
 );
 create unique index if not exists links_pago_uni on public.links_pago (coalesce(taller_id, '00000000-0000-0000-0000-000000000000'::uuid), tipo, slot);
 alter table public.links_pago enable row level security;
+-- G128 c 🏦 Abono por transferencia: datos de banco del taller (solo abono; también sirve sin link).
+alter table public.links_pago add column if not exists banco text not null default '' check (length(banco) <= 400);
 -- v1.8: en los Premium el espacio 1 es el precio normal y el 2 la promoción (con fecha de término opcional).
 alter table public.links_pago add column if not exists hasta date;
 alter table public.links_pago drop constraint if exists links_pago_tipo_check;
@@ -554,7 +556,7 @@ begin
     select public.cfx_mp_neg_activo(t.owner_id) into mp from public.talleres t where t.id = p_taller;
   end if;
   select * into l from public.links_pago
-  where tipo = p_tipo and taller_id is not distinct from p_taller and activo and (url <> '' or coalesce(mp, false)) and monto > 0
+  where tipo = p_tipo and taller_id is not distinct from p_taller and activo and (url <> '' or coalesce(mp, false) or (p_taller is not null and btrim(banco) <> '')) and monto > 0
     and (hasta is null or hasta >= (now() at time zone 'America/Santiago')::date)
   order by case when p_taller is null then -slot else slot end limit 1;
   return l;
@@ -1161,6 +1163,7 @@ begin
     'reagendar', (r.estado = 'confirmada' and cita - now() >= make_interval(hours => hrs))
               or (r.estado = 'cancelada' and r.abono_estado = 'saldo' and r.saldo_hasta > now()),
     'pagar_url', case when r.estado = 'por_pagar' then l.url end,
+    'pagar_banco', case when r.estado = 'por_pagar' and btrim(coalesce(l.banco, '')) <> '' then l.banco end,  -- G128 c 🏦
     'mp', r.estado = 'por_pagar' and r.abono_monto > 0 and public.cfx_mp_neg_activo(c.owner_id),  -- G98 ⚡
     'medios', case when r.estado = 'por_pagar' and r.abono_monto > 0 then public.cfx_mp_neg_medios(c.owner_id) end,  -- G107 ⚡ MP / 💳 Flow
     'calificada', exists (select 1 from public.calificaciones where reserva_id = r.id and autor = 'cliente'),
@@ -1347,7 +1350,7 @@ begin
                  'rol', p.rol, 'suspendido', p.suspendido, 'visto_at', p.visto_at) order by p.rol desc, p.created_at), '[]')
                from public.perfiles p where p.taller_id = tid and p.rol in ('taller', 'equipo')),
     'links', case when dueno then (select coalesce(jsonb_agg(jsonb_build_object('slot', l.slot, 'monto', l.monto, 'url', l.url,
-                 'texto', l.texto, 'activo', l.activo) order by l.slot), '[]') from public.links_pago l where l.taller_id = tid and l.tipo = 'abono') end,
+                 'texto', l.texto, 'banco', l.banco, 'activo', l.activo) order by l.slot), '[]') from public.links_pago l where l.taller_id = tid and l.tipo = 'abono') end,
     'abono_ok', (public.link_activo(tid, 'abono')).id is not null,  -- G100 ⚡ con link o con Mercado Pago conectado
     'pago_pendiente', (select jsonb_build_object('id', id, 'monto', monto, 'created_at', created_at) from public.pagos
                        where taller_id = tid and tipo = 'premium_taller' and estado = 'en_revision' order by created_at desc limit 1),
@@ -1419,11 +1422,12 @@ end $$;
 
 -- Links de pago del abono (2 espacios, uno activo).
 drop function if exists public.link_guardar(text, int, int, text, text, boolean);
+drop function if exists public.link_guardar(text, int, int, text, text, boolean, date);
 create or replace function public.link_guardar(p_tipo text, p_slot int, p_monto int, p_url text, p_texto text, p_activar boolean,
-  p_hasta date default null)
+  p_hasta date default null, p_banco text default null)
 returns void
 language plpgsql security definer set search_path = '' as $$
-declare tid uuid;
+declare tid uuid; bco text;
 begin
   if p_tipo = 'abono' then
     tid := public.taller_de(auth.uid());
@@ -1435,14 +1439,18 @@ begin
   if p_slot not in (1, 2) then raise exception 'Espacio no válido'; end if;
   if coalesce(p_url, '') <> '' and p_url !~ '^https://' then raise exception 'El link debe empezar con https://'; end if;
   if p_activar and coalesce(p_monto, 0) <= 0 then raise exception 'Para activarlo pon el monto'; end if;
-  -- G100 ⚡ Abono sin link: vale si el taller tiene su Mercado Pago conectado.
-  if p_activar and coalesce(p_url, '') = '' and (tid is null or not exists (select 1 from public.talleres t where t.id = tid and public.cfx_mp_neg_activo(t.owner_id))) then
-    raise exception 'Para activarlo pon el link (o conecta ⚡ Mercado Pago abajo)'; end if;
-  insert into public.links_pago (taller_id, tipo, slot, monto, url, texto, activo, hasta)
+  -- G128 c 🏦 datos de banco (solo abono). null = se dejan como estaban (app vieja).
+  bco := case when tid is null then '' when p_banco is null then coalesce((select l.banco from public.links_pago l where l.taller_id = tid and l.tipo = p_tipo and l.slot = p_slot), '')
+              else btrim(p_banco) end;
+  if length(bco) > 400 then raise exception 'Los datos de banco son muy largos'; end if;
+  -- G100 ⚡ Abono sin link: vale si el taller tiene su Mercado Pago conectado (o 🏦 datos de banco, G128 c).
+  if p_activar and coalesce(p_url, '') = '' and bco = '' and (tid is null or not exists (select 1 from public.talleres t where t.id = tid and public.cfx_mp_neg_activo(t.owner_id))) then
+    raise exception 'Para activarlo pon el link, tus datos de banco o conecta ⚡ Mercado Pago abajo'; end if;
+  insert into public.links_pago (taller_id, tipo, slot, monto, url, texto, activo, hasta, banco)
   values (tid, p_tipo, p_slot, greatest(coalesce(p_monto, 0), 0), coalesce(p_url, ''), left(coalesce(p_texto, ''), 300), coalesce(p_activar, false),
-          case when tid is null and p_slot = 2 then p_hasta end)
+          case when tid is null and p_slot = 2 then p_hasta end, bco)
   on conflict (coalesce(taller_id, '00000000-0000-0000-0000-000000000000'::uuid), tipo, slot)
-  do update set monto = excluded.monto, url = excluded.url, texto = excluded.texto, activo = excluded.activo, hasta = excluded.hasta, updated_at = now();
+  do update set monto = excluded.monto, url = excluded.url, texto = excluded.texto, activo = excluded.activo, hasta = excluded.hasta, banco = excluded.banco, updated_at = now();
   -- Abono: un solo espacio activo. Premium: el normal y la promoción conviven (gana la promoción vigente).
   if p_activar and tid is not null then
     update public.links_pago set activo = false where tipo = p_tipo and taller_id is not distinct from tid and slot <> p_slot;
@@ -2251,7 +2259,7 @@ to anon, authenticated;
 grant execute on function
   public.is_admin(), public.taller_de(uuid), public.mi_taller(), public.es_dueno(uuid), public.ocupa_hora(public.reservas),
   public.mi_cuenta(), public.registrar_visto(), public.mi_perfil_guardar(text, text), public.cliente_inicio(),
-  public.taller_panel(), public.taller_guardar(jsonb), public.link_guardar(text, int, int, text, text, boolean, date),
+  public.taller_panel(), public.taller_guardar(jsonb), public.link_guardar(text, int, int, text, text, boolean, date, text),
   public.taller_reservas(date, date, text[], uuid), public.taller_comprobante(uuid), public.taller_revisar(uuid, boolean, text),
   public.taller_estado(uuid, text), public.taller_trabajo(uuid, jsonb, text, text, uuid, date),
   public.taller_reserva_manual(date, text, uuid, text, text, text, text, boolean), public.taller_devuelto(uuid),
@@ -9535,6 +9543,42 @@ language sql immutable set search_path = '' as $$
   select coalesce(t, '') = '' or (t ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' and length(t) <= maxlen) or public.cfx_foto_nube(t)
 $$;
 grant execute on function public.cfx_foto_nube(text, uuid), public.cfx_foto_ok(text, int) to authenticated, anon;
+
+-- G122 b 🧹 Fotos huérfanas: de una lista de MIS archivos (<uuid>.webp de mi carpeta), ¿cuáles NO aparecen en ninguna tabla?
+-- Busca en TODAS las columnas de texto/json/arreglo de la app (también respaldos), así nunca se borra una foto en uso.
+-- Ante cualquier duda (nombre raro, error al leer una tabla) devuelve vacío: no se borra nada.
+create or replace function public.cfx_fotos_libres(p_nombres text[]) returns text[]
+language plpgsql security definer set search_path = '' as $$
+declare u uuid := auth.uid(); pat text; r record; txt text; n text; usados text[] := '{}'; libres text[] := '{}';
+begin
+  if u is null or coalesce(array_length(p_nombres, 1), 0) = 0 or array_length(p_nombres, 1) > 1000 then return '{}'; end if;
+  foreach n in array p_nombres loop
+    if n is null or n !~ '^[0-9a-f-]{36}\.(webp|jpg|png)$' then return '{}'; end if;
+  end loop;
+  pat := '%/vitrina/' || u::text || '/%';
+  for r in select c.table_schema s, c.table_name t, c.column_name col
+      from information_schema.columns c join information_schema.tables tb on tb.table_schema = c.table_schema and tb.table_name = c.table_name
+      where tb.table_type = 'BASE TABLE' and c.data_type in ('text', 'character varying', 'jsonb', 'json', 'ARRAY')
+        and c.table_schema not in ('storage', 'auth', 'information_schema', 'vault', 'pgsodium', 'pgsodium_masks', 'realtime', '_realtime',
+          'supabase_functions', 'supabase_migrations', 'extensions', 'graphql', 'graphql_public', 'net', 'cron', 'pgbouncer', '_analytics')
+        and c.table_schema !~ '^pg_' loop
+    begin
+      execute format('select string_agg(%I::text, '' '') from %I.%I where %I::text like $1', r.col, r.s, r.t, r.col) into txt using pat;
+    exception when others then return '{}';
+    end;
+    if txt is not null then
+      foreach n in array p_nombres loop
+        if position(u::text || '/' || n in txt) > 0 then usados := usados || n; end if;
+      end loop;
+    end if;
+  end loop;
+  foreach n in array p_nombres loop
+    if not (n = any(usados)) then libres := libres || n; end if;
+  end loop;
+  return libres;
+end $$;
+revoke all on function public.cfx_fotos_libres(text[]) from public, anon;
+grant execute on function public.cfx_fotos_libres(text[]) to authenticated;
 -- <<< CFX núcleo
 
 -- G95 🎁 Prueba por botón: los talleres de antes ya partieron con días de Premium de regalo → su correo queda anotado (no se borra).

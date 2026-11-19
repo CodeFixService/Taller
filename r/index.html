@@ -121,7 +121,9 @@
         (r.mp ? ((r.medios || { mp: true }).mp ? '<button class="block" data-mp="mp">⚡ Pagar ' + plata(r.abono_monto) + ' con Mercado Pago</button>' : '') +
           ((r.medios || {}).flow ? '<button class="block" data-mp="flow">💳 Pagar ' + plata(r.abono_monto) + ' con Webpay</button>' : '') + '<p class="muted" style="margin:4px 0 10px;text-align:center;font-size:13px">Se confirma solo: sin comprobante.</p>' : '') +
         (r.pagar_url ? '<a class="btn block' + (r.mp ? ' alt' : '') + '" target="_blank" rel="noopener" id="bPagar" href="' + esc(r.pagar_url) + '">1️⃣ Pagar abono ' + (r.mp ? 'con el link' : 'en Mercado Pago') + '</a>' : '') +
-        '<label for="fComp" class="btn alt block" style="margin-top:10px;color:var(--brand)">' + (r.pagar_url ? '2️⃣ Subir foto del comprobante' : '¿Pagaste de otra forma? Sube el comprobante') + '</label>' +
+        (r.pagar_banco ? '<p style="margin:10px 0 0">🏦 <b>' + (r.pagar_url ? 'O transfiere ' : '1️⃣ Transfiere ') + plata(r.abono_monto) + ':</b></p><p class="muted" style="white-space:pre-line;margin:4px 0 6px">' + esc(r.pagar_banco) + '</p>' +
+          '<button type="button" class="alt small" data-cfx-copiar="' + esc(r.pagar_banco) + '">📋 Copiar datos</button>' : '') +  // G128 c
+        '<label for="fComp" class="btn alt block" style="margin-top:10px;color:var(--brand)">' + (r.pagar_url || r.pagar_banco ? '2️⃣ Subir foto del comprobante' : '¿Pagaste de otra forma? Sube el comprobante') + '</label>' +
         '<input type="file" id="fComp" accept="image/*" class="hidden">' +
         '<div class="prev" id="prev"></div><button class="block hidden" id="bEnviar" style="margin-top:10px">Enviar comprobante</button><p class="err" id="cErr"></p>' +
         '<div class="btns"><button class="danger small" id="bCancelar">Cancelar reserva</button></div>';
