@@ -113,3 +113,4 @@
 - 🖼️ G122 (3.37 · bd 2.68): fotos de bicis usadas → Storage (núcleo CFX_NUBE; taller_usada_guardar acepta la URL; la que se quita se borra). Miniatura sigue en base64. Viejas pasan solas (cfx_fotos_viejas/cfx_foto_pasar sobre bicis_usadas.fotos).
 - 🏦 G128 c (3.42, bd 2.70): abono con solo datos de banco (links_pago.banco; link_guardar p_banco; reserva_ver.pagar_banco; /r/ Transfiere + 📋). Prueba: SaaS/pruebas/g128c.js.
 - 💬 G128 b (3.41): orden con cliente con cuenta → #dChat abre App.abrirChat(T, cliente_id). Aviso sin medios: ya estaba en Hoy → Para empezar. Prueba: SaaS/pruebas/g128b.js.
+- G140 (núcleo 3.36): Mi perfil → 🎨 Personalizar (ex Color y modo): temas listos, barra de abajo (tipo/tamaño/nombres), ↩️ de fábrica; se guarda en public.cfx_personal (nucleo/sql/personal.sql). Prueba: SaaS/pruebas/g140.js.
