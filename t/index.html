@@ -148,7 +148,7 @@
   $('contacto').innerHTML = (t.telefono ? '<a class="btn small alt" target="_blank" rel="noopener" href="' + App.wa(t.telefono, 'Hola ' + t.nombre + ' 👋') + '">📲 WhatsApp</a>' : '') +
     (t.direccion ? '<a class="btn small ghost" target="_blank" rel="noopener" href="https://maps.google.com/?q=' + encodeURIComponent(t.direccion + ' ' + t.comuna) + '">📍 Cómo llegar</a>' : '');
   // G141 a 🔗 redes con ícono (núcleo): las de 🔗 Mis redes; si aún no hay, el Instagram de antes.
-  if (window.CodeFixVitrina && CodeFixVitrina.redes) CodeFixVitrina.redes.publico($('redes'), { rpc: (f, x) => App.rpc(f, x), llave: slug, titulo: '',
+  if (window.CodeFixVitrina && CodeFixVitrina.redes) CodeFixVitrina.redes.publico($('redes'), { rpc: (f, x) => App.rpc(f, x), llave: slug, titulo: '', viejo: $('contacto').querySelector('a[href*="wa.me"]'),  // G144 d
     respaldo: t.instagram ? [{ red: 'instagram', url: 'https://instagram.com/' + String(t.instagram).replace(/^@/, '').replace(/[^\w.]/g, '') }] : [] });
   else if (t.instagram) $('contacto').insertAdjacentHTML('beforeend', '<a class="btn small ghost" target="_blank" rel="noopener" href="https://instagram.com/' + esc(t.instagram.replace(/^@/, '')) + '">📷 Instagram</a>');
   $('promos').innerHTML = t.promos.map((p) => '<div class="card promo"><b>🏷️ ' + esc(p.titulo) + '</b>' +

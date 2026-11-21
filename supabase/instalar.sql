@@ -16,7 +16,7 @@ create or replace function public.admin_email() returns text
 language sql immutable as $$ select 'juanjosuecastilloloyola@gmail.com'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.75'::text $$;
+language sql immutable as $$ select '2.76'::text $$;
 
 -- Teléfono normalizado (solo números; celulares chilenos con 56 adelante).
 create or replace function public.tel_norm(t text) returns text
@@ -3021,6 +3021,12 @@ language sql stable security definer set search_path = '' as $$
   select t.owner_id from public.talleres t where t.slug = lower(trim(coalesce(p_llave, '')))
 $$;
 revoke all on function public.cfx_redes_llave_app(text) from public, anon, authenticated;
+-- G144 d 💬 WhatsApp del registro → pasa solo a 📱 Mis redes (núcleo cfx_redes_wa).
+create or replace function public.cfx_whatsapp_app(p_negocio uuid) returns text
+language sql stable security definer set search_path = '' as $$
+  select nullif(trim(t.telefono), '') from public.talleres t where t.owner_id = p_negocio limit 1
+$$;
+revoke all on function public.cfx_whatsapp_app(uuid) from public, anon, authenticated;
 -- G96 b 📣 Promos en la app (núcleo anuncios.sql): el cliente ve las del taller al que pertenece (perfiles.taller_id).
 create or replace function public.cfx_promo_negocios_app(u uuid) returns jsonb
 language sql stable security definer set search_path = '' as $$
@@ -9714,6 +9720,8 @@ create table if not exists public.cfx_redes (
 );
 alter table public.cfx_redes enable row level security;
 revoke all on public.cfx_redes from anon, authenticated;
+-- G144 d: sin_wa = el dueño QUITÓ a propósito el WhatsApp del registro (no se vuelve a poner solo).
+alter table public.cfx_redes add column if not exists sin_wa boolean not null default false;
 
 -- Dominio permitido por red ('web' = cualquier https).
 create or replace function public.cfx_red_ok(p_red text, p_url text) returns boolean
@@ -9733,13 +9741,39 @@ language sql immutable set search_path = '' as $$
     else false end
 $$;
 
+-- G144 d 💬 El WhatsApp del registro pasa solo a las redes: gancho por app cfx_whatsapp_app(negocio) → número (sin gancho → nada;
+--   Estaciona no lo tiene: son personas, su número no se publica). Nunca lanza error.
+create or replace function public.cfx_redes_wa(p_negocio uuid) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare t text;
+begin
+  if p_negocio is null or to_regprocedure('public.cfx_whatsapp_app(uuid)') is null then return null; end if;
+  execute 'select public.cfx_whatsapp_app($1)' into t using p_negocio;
+  t := regexp_replace(coalesce(t, ''), '\D', '', 'g');
+  if t ~ '^9\d{8}$' then t := '56' || t; end if;
+  if t !~ '^\d{10,15}$' then return null; end if;
+  return jsonb_build_object('red', 'whatsapp', 'url', 'https://wa.me/' || t);
+exception when others then return null;
+end $$;
+-- Lista guardada + el WhatsApp del registro si no hay uno (y el dueño no lo quitó).
+create or replace function public.cfx_redes_con_wa(p_negocio uuid) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare l jsonb; sw boolean; w jsonb;
+begin
+  select r.lista, r.sin_wa into l, sw from public.cfx_redes r where r.negocio = p_negocio;
+  l := coalesce(l, '[]'::jsonb);
+  if coalesce(sw, false) or exists (select 1 from jsonb_array_elements(l) e where e ->> 'red' = 'whatsapp') or jsonb_array_length(l) >= 12 then return l; end if;
+  w := public.cfx_redes_wa(p_negocio);
+  return case when w is null then l else jsonb_build_array(w) || l end;
+exception when others then return coalesce(l, '[]'::jsonb);
+end $$;
+
 create or replace function public.cfx_redes_mias() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 declare n uuid := public.cfx_negocio_cuenta(auth.uid());
 begin
   if n is null then return jsonb_build_object('lista', '[]'::jsonb, 'dueno', false); end if;
-  return jsonb_build_object('lista', coalesce((select r.lista from public.cfx_redes r where r.negocio = n), '[]'::jsonb),
-    'dueno', public.cfx_negocio_dueno(n) = auth.uid());
+  return jsonb_build_object('lista', public.cfx_redes_con_wa(n), 'dueno', public.cfx_negocio_dueno(n) = auth.uid());
 end $$;
 
 -- G142 c: validar una lista (la usan las redes del negocio y las de cada persona). Lanza error con el link malo.
@@ -9752,6 +9786,10 @@ begin
   for x in select * from jsonb_array_elements(p_lista) loop
     r := lower(coalesce(x ->> 'red', '')); u := trim(coalesce(x ->> 'url', ''));
     if not public.cfx_red_ok(r, u) then raise exception 'Link no válido para %: %', r, left(u, 80); end if;
+    -- G144 d: un solo WhatsApp por lista.
+    if r = 'whatsapp' and exists (select 1 from jsonb_array_elements(out) y where y ->> 'red' = 'whatsapp' and y ->> 'url' <> u) then
+      raise exception 'Ya tienes un WhatsApp en tus redes: deja uno solo.';
+    end if;
     if not exists (select 1 from jsonb_array_elements(out) y where y ->> 'url' = u) then
       out := out || jsonb_build_array(jsonb_build_object('red', r, 'url', u));
     end if;
@@ -9766,8 +9804,10 @@ begin
   if auth.uid() is null then raise exception 'Inicia sesión para guardar.'; end if;
   if n is null or public.cfx_negocio_dueno(n) is distinct from auth.uid() then raise exception 'Solo el dueño del negocio cambia sus redes.'; end if;
   out := public.cfx_redes_limpiar(p_lista);
-  insert into public.cfx_redes (negocio, lista, cambiado) values (n, out, now())
-  on conflict (negocio) do update set lista = excluded.lista, cambiado = now();
+  -- G144 d: si guarda sin WhatsApp habiendo uno en el registro, es porque lo quitó → no se vuelve a poner solo.
+  insert into public.cfx_redes (negocio, lista, cambiado, sin_wa) values (n, out, now(),
+    not exists (select 1 from jsonb_array_elements(out) y where y ->> 'red' = 'whatsapp') and public.cfx_redes_wa(n) is not null)
+  on conflict (negocio) do update set lista = excluded.lista, cambiado = now(), sin_wa = excluded.sin_wa;
   return jsonb_build_object('ok', true, 'lista', out);
 end $$;
 
@@ -9820,10 +9860,11 @@ begin
   if coalesce(p_llave, '') = '' or length(p_llave) > 120 or to_regprocedure('public.cfx_redes_llave_app(text)') is null then return '[]'::jsonb; end if;
   begin execute 'select public.cfx_redes_llave_app($1)' into n using p_llave; exception when others then return '[]'::jsonb; end;
   if n is null then return '[]'::jsonb; end if;
-  return coalesce((select r.lista from public.cfx_redes r where r.negocio = n), '[]'::jsonb);
+  return public.cfx_redes_con_wa(n);
 end $$;
 
 revoke all on function public.cfx_red_ok(text, text), public.cfx_redes_mias(), public.cfx_redes_guardar(jsonb), public.cfx_redes_publicas(text) from public, anon, authenticated;
+revoke all on function public.cfx_redes_wa(uuid), public.cfx_redes_con_wa(uuid) from public, anon, authenticated;
 revoke all on function public.cfx_redes_limpiar(jsonb), public.cfx_redes_persona_mias(), public.cfx_redes_persona_guardar(jsonb), public.cfx_redes_equipo(text) from public, anon, authenticated;
 grant execute on function public.cfx_redes_persona_mias(), public.cfx_redes_persona_guardar(jsonb) to authenticated;
 grant execute on function public.cfx_redes_equipo(text) to anon, authenticated;
