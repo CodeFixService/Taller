@@ -213,20 +213,106 @@
     const c = e.target.closest('[data-r]'); if (c) abrirDetalle(c.dataset.r);
   });
   // G74a 🧾 Orden rápida y presupuesto (FREE): sin hora, el cliente está en el mesón.
+  // G142 b 📋 Ingreso completo (núcleo CFX_INGRESO + CFX_CATALOGO): ficha con autocompletar, lo que trae, cómo llega, N° de serie, fotos, firma.
+  const ING = {
+    ficha: [{ k: 'tipo', t: 'Tipo', lista: 'bici_tipo', ph: 'MTB, ruta…' }, { k: 'aro', t: 'Aro', lista: 'aro', ph: '29' }, { k: 'talla', t: 'Talla', lista: 'talla', ph: 'M' },
+      { k: 'grupo', t: 'Grupo / cambios', lista: 'grupo', ph: 'Shimano Deore' }, { k: 'frenos', t: 'Frenos', lista: 'frenos', ph: 'Disco hidráulico' }, { k: 'color', t: 'Color', lista: 'color', ph: 'Negro' }],
+    etiquetas: { bici: 'Bici', tipo: 'Tipo', aro: 'Aro', talla: 'Talla', grupo: 'Grupo', frenos: 'Frenos', color: 'Color' },
+    accesorios: ['Luces', 'Candado', 'Bombín', 'Porta botella', 'Caramagiola', 'Parrilla', 'Computador / GPS', 'Pedales de clip', 'Bolso', 'Timbre', 'Soporte celular', 'Guardabarros', 'Pata lateral', 'Cargador (e-bike)', 'Llave del candado'],
+    zonas: ['Marco', 'Horquilla / suspensión', 'Rueda delantera', 'Rueda trasera', 'Frenos', 'Cambios', 'Transmisión', 'Dirección', 'Manubrio y puños', 'Asiento', 'Pedales', 'Batería (e-bike)']
+  };
+  const ingresoListo = () => !!(window.CFX_INGRESO && window.CFX_CATALOGO);
+  const montarIngreso = (el, datos, firma) => CFX_INGRESO.montar(el, { rpc, datos, ficha: ING.ficha, accesorios: ING.accesorios, zonas: ING.zonas, serie: true, fotos: 4, firma,
+    textoFirma: 'El cliente firma con el dedo: deja la bici con lo marcado arriba en ' + P.taller.nombre + '.' });
+  async function subirFotosIngreso(id, fotos) {
+    let n = 0;
+    for (const f of fotos) { try { await rpc('taller_foto_subir', { p_reserva: id, p_tipo: 'antes', p_imagen: f }); n++; } catch (e) { toast(e.message); break; } }
+    return n;
+  }
   function ordenNueva(pres) {
-    const d = modal('<h2>' + (pres ? '🧾 Presupuesto' : '＋ Nueva orden') + '</h2><p class="sub" style="margin-top:0">' + (pres ? 'Anota la bici y después agrega los arreglos con su precio para mandárselo.' : 'Para la bici que llega al taller. Queda 🚲 Recibida y se abre la orden.') + '</p>' +
+    const completo = ingresoListo();
+    const d = modal('<h2>' + (pres ? '🧾 Presupuesto' : '🚲 Recibir bici') + '</h2><p class="sub" style="margin-top:0">' + (pres ? 'Anota la bici y después agrega los arreglos con su precio para mandárselo.' : 'Para la bici que llega al taller. Queda "Recibida" y la sigues en el tablero.') + '</p>' +
       '<div class="row"><div><label for="oN">Nombre</label><input id="oN" maxlength="80" autocomplete="off"></div><div><label for="oT">WhatsApp</label><input id="oT" inputmode="tel" maxlength="30"></div></div>' +
-      '<label for="oB">Bici</label><input id="oB" maxlength="120" placeholder="Elige o escribe: Trek Marlin 5…"><label for="oO">¿Qué trae?</label><input id="oO" maxlength="500" placeholder="Ej: frena mal, cambios saltan">' +
-      '<div class="btns"><button class="ghost" data-cerrar>Cancelar</button><button id="oOk">' + (pres ? '🧾 Armar presupuesto' : '✅ Crear orden') + '</button></div><p class="err" id="oErr"></p>');
-    if (window.CFX_FABRICA) { CFX_FABRICA.bici(d.querySelector('#oB')); CFX_FABRICA.notas(d.querySelector('#oO')); }
+      '<label for="oE">Correo <span class="sub">(opcional)</span></label><input id="oE" type="email" inputmode="email" maxlength="120" autocomplete="off" placeholder="Si se registra con este correo, ve su bici">' +
+      '<label for="oB">Bici (marca y modelo)</label><input id="oB" maxlength="120" placeholder="Escribe: tre ma → Trek Marlin">' +
+      '<label for="oO">¿Qué trae? / ¿Qué pide?</label><input id="oO" maxlength="500" placeholder="Ej: frena mal, cambios saltan">' +
+      (completo ? '<details id="oIngD"' + (pres ? '' : ' open') + ' style="margin-top:10px"><summary><b>📋 Ingreso completo</b> <span class="sub">tipo, aro, lo que trae, cómo llega, serie, fotos y firma</span></summary><div id="oIng" style="margin-top:8px"></div></details>' : '') +
+      '<div class="btns"><button class="ghost" data-cerrar>Cancelar</button><button id="oOk">' + (pres ? '🧾 Armar presupuesto' : '✅ Recibir bici') + '</button></div><p class="err" id="oErr"></p>');
+    const oB = d.querySelector('#oB');
+    if (window.CFX_CATALOGO) CFX_CATALOGO.campo(oB, 'bici', { rpc }); else if (window.CFX_FABRICA) CFX_FABRICA.bici(oB);
+    if (window.CFX_FABRICA) CFX_FABRICA.notas(d.querySelector('#oO'));
+    const F = completo ? montarIngreso(d.querySelector('#oIng'), {}, !pres) : null;
     d.querySelector('#oOk').onclick = async (e) => {
       e.target.disabled = true;
+      const base = { nombre: d.querySelector('#oN').value, telefono: d.querySelector('#oT').value, email: d.querySelector('#oE').value.trim(), bici: oB.value, nota: d.querySelector('#oO').value, presupuesto: !!pres };
       try {
-        const id = await rpc('taller_orden_nueva', { p_nombre: d.querySelector('#oN').value, p_telefono: d.querySelector('#oT').value, p_bici: d.querySelector('#oB').value, p_nota: d.querySelector('#oO').value, p_presupuesto: !!pres });
-        d.close(); toast(pres ? '🧾 Agrega los arreglos y envíalo' : '🚲 Orden creada'); volverA = 'hoy'; await abrirDetalle(id);
+        let id;
+        const ing = F ? F.datos() : null;
+        if (ing) { ing.ficha.bici = oB.value.trim().slice(0, 60); if (!ing.ficha.bici) delete ing.ficha.bici; }
+        try { id = await rpc('taller_ingreso_nueva', { p: Object.assign({}, base, { ingreso: ing || {} }) }); }
+        catch (x) {  // 🛡️ base vieja (sin G142): la orden se crea igual como antes
+          if (!/taller_ingreso_nueva|function|schema cache/i.test(x.message || '')) throw x;
+          id = await rpc('taller_orden_nueva', { p_nombre: base.nombre, p_telefono: base.telefono, p_bici: base.bici, p_nota: base.nota, p_presupuesto: !!pres });
+        }
+        const fotos = F ? F.fotos() : [];
+        if (fotos.length) await subirFotosIngreso(id, fotos);
+        d.close(); toast(pres ? '🧾 Agrega los arreglos y envíalo' : '🚲 Bici recibida'); volverA = 'hoy'; await abrirDetalle(id);
         const it = $('dItems'); if (it) it.scrollIntoView({ block: 'center' });
       } catch (err) { e.target.disabled = false; d.querySelector('#oErr').textContent = err.message; }
     };
+  }
+  // ✏️ Editar el ingreso de una orden que ya existe.
+  function editarIngreso(r) {
+    if (!ingresoListo()) return;
+    const d = modal('<h2>📋 Ingreso de la bici</h2><label for="iB">Bici (marca y modelo)</label><input id="iB" maxlength="60" value="' + esc((r.ingreso && r.ingreso.ficha && r.ingreso.ficha.bici) || r.bici || '') + '">' +
+      '<div id="iIng" style="margin-top:8px"></div><div class="btns"><button class="ghost" data-cerrar>Cancelar</button><button id="iOk">💾 Guardar</button></div><p class="err" id="iErr"></p>');
+    const iB = d.querySelector('#iB'); if (window.CFX_CATALOGO) CFX_CATALOGO.campo(iB, 'bici', { rpc });
+    const F = montarIngreso(d.querySelector('#iIng'), r.ingreso || {}, true);
+    d.querySelector('#iOk').onclick = async (e) => {
+      e.target.disabled = true;
+      try {
+        const ing = F.datos(); ing.ficha.bici = iB.value.trim().slice(0, 60); if (!ing.ficha.bici) delete ing.ficha.bici;
+        await rpc('taller_ingreso_guardar', { p_id: r.id, p: ing });
+        const fotos = F.fotos(); if (fotos.length) await subirFotosIngreso(r.id, fotos);
+        d.close(); toast('📋 Ingreso guardado'); await abrirDetalle(r.id);
+      } catch (err) { e.target.disabled = false; d.querySelector('#iErr').textContent = err.message; }
+    };
+  }
+  // 🧾 Orden de trabajo / 💰 Presupuesto como documento: imprimir o guardar PDF (ventana aparte) y compartir el link del cliente.
+  function documentoOrden(r) {
+    const pres = r.servicio_nombre === 'Presupuesto' || (r.presupuesto && r.presupuesto.estado);
+    const lista = (detalle && detalle.id === r.id ? items : (r.items || [])).filter((it) => String(it.nombre || '').trim());
+    const sub = lista.filter((it) => it.aprob !== 'no').reduce((s, it) => s + Math.max(+it.cant || 0, 0) * Math.max(+it.precio || 0, 0), 0);
+    const pd = r.plan_desc || 0, tot = sub - Math.floor(sub * pd / 100);
+    const ab = ['pagado', 'aplicado'].includes(r.abono_estado) ? r.abono_monto : 0;
+    const n = String(r.id).slice(0, 8).toUpperCase(), T = P.taller, link = App.ROOT + 'r/?t=' + r.token;
+    const AP = { si: '✅ Aprobado', no: '❌ Rechazado', pend: '⏳ Por responder' };
+    const titulo = (pres ? '💰 Presupuesto' : '🧾 Orden de trabajo') + ' N° ' + n;
+    const cuerpo = '<div class="doc-cab">' + (T.logo ? '<img src="' + esc(T.logo) + '" alt="" class="doc-logo">' : '') + '<div><h1>' + esc(T.nombre) + '</h1><div class="sub">' + esc([T.direccion, T.comuna, T.telefono].filter(Boolean).join(' · ')) + '</div></div></div>' +
+      '<h2>' + esc(titulo.replace(/^\S+\s/, '')) + '</h2><div class="sub">' + esc(App.fLarga(r.fecha)) + ' · ' + esc(r.hora) + ' · ' + esc((ESTADOS[r.estado] || [r.estado])[0]) + '</div>' +
+      '<table><tr><th>Cliente</th><td>' + esc(r.nombre) + '</td></tr>' + (r.telefono ? '<tr><th>WhatsApp</th><td>' + esc(r.telefono) + '</td></tr>' : '') + (r.email ? '<tr><th>Correo</th><td>' + esc(r.email) + '</td></tr>' : '') +
+      (r.bici ? '<tr><th>Bici</th><td>' + esc(r.bici) + '</td></tr>' : '') + (r.nota ? '<tr><th>Pidió</th><td>' + esc(r.nota) + '</td></tr>' : '') + (r.mecanico ? '<tr><th>Mecánico</th><td>' + esc(r.mecanico) + '</td></tr>' : '') + '</table>' +
+      (r.ingreso && Object.keys(r.ingreso).length && window.CFX_INGRESO ? '<h3>📋 Ingreso</h3>' + CFX_INGRESO.acta(r.ingreso, { etiquetas: ING.etiquetas }) : '') +
+      '<h3>🔧 Trabajos y repuestos</h3>' + (lista.length ? '<table class="it"><tr><th>Detalle</th><th>Cant.</th><th>Precio</th><th>Total</th>' + (pres ? '<th>Estado</th>' : '') + '</tr>' +
+        lista.map((it) => '<tr' + (it.aprob === 'no' ? ' class="no"' : '') + '><td>' + esc(it.nombre) + '</td><td>' + esc(it.cant || 1) + '</td><td>' + esc(plata(+it.precio || 0)) + '</td><td>' + esc(plata(Math.max(+it.cant || 0, 0) * Math.max(+it.precio || 0, 0))) + '</td>' +
+          (pres ? '<td>' + esc(AP[it.aprob] || '') + '</td>' : '') + '</tr>').join('') + '</table>' : '<p class="sub">Todavía sin ítems.</p>') +
+      '<p class="tot">Total: <b>' + esc(plata(tot)) + '</b>' + (pd ? ' <span class="sub">(🔁 plan −' + pd + '%)</span>' : '') + (ab ? '<br><span class="sub">Abono ' + esc(plata(ab)) + ' · a pagar ' + esc(plata(Math.max(tot - ab, 0))) + '</span>' : '') + '</p>' +
+      (r.diagnostico ? '<h3>🩺 Diagnóstico</h3><p>' + esc(r.diagnostico) + '</p>' : '') +
+      '<p class="sub">Sigue tu bici' + (pres ? ' y aprueba cada arreglo' : '') + ' en: ' + esc(link) + '</p>';
+    const CSS = 'body{font-family:system-ui,sans-serif;margin:20px;color:#0f172a;font-size:13px}h1{font-size:18px;margin:0}h2{font-size:16px;margin:14px 0 2px}h3{font-size:14px;margin:14px 0 6px}' +
+      'table{border-collapse:collapse;width:100%;margin-top:6px}th,td{border:1px solid #cbd5e1;padding:5px 7px;text-align:left;vertical-align:top}th{background:#f1f5f9;width:1%;white-space:nowrap}.it th{width:auto;white-space:normal}td{word-break:break-word}tr.no td{text-decoration:line-through;color:#94a3b8}' +
+      '.sub{color:#475569;font-size:12px}.tot{font-size:15px;text-align:right}.doc-cab{display:flex;gap:10px;align-items:center}.doc-logo{width:54px;height:54px;object-fit:contain;border-radius:10px}' +
+      '.cfxi-acta p{margin:4px 0}.cfxi-fir{max-width:260px;max-height:90px;border-bottom:1px solid #94a3b8}@media print{.np{display:none}}';
+    const dd = modal('<h2>' + esc(titulo) + '</h2><p class="sub" style="margin-top:0">Para imprimir, guardar en PDF o mandarle al cliente.</p>' +
+      '<div class="doc-prev" style="max-height:52vh;overflow:auto;border:1px solid var(--cfx-borde,#cbd5e1);border-radius:12px;padding:10px;background:#fff;color:#0f172a"><style>' + CSS.replace(/body\{[^}]*\}/, '') + '</style>' + cuerpo + '</div>' +
+      '<div class="btns"><button id="docPdf" type="button">🖨️ Imprimir / PDF</button><button class="alt" id="docComp" type="button">📤 Compartir</button><button class="ghost" data-cerrar>Cerrar</button></div>');
+    dd.querySelector('#docPdf').onclick = () => {
+      const w = window.open('', '_blank'); if (!w) { toast('Permite las ventanas emergentes para imprimir'); return; }
+      w.document.write('<!doctype html><html lang="es"><head><meta charset="utf-8"><title>' + esc(titulo + ' · ' + T.nombre) + '</title><style>' + CSS + '</style></head><body>' + cuerpo +
+        '<p class="np"><button onclick="window.print()">🖨️ Imprimir o guardar como PDF</button></p><script>window.onload=function(){setTimeout(function(){window.print()},400)}<\/script></body></html>');
+      w.document.close();
+    };
+    dd.querySelector('#docComp').onclick = () => compartir(link, (pres ? '💰 Tu presupuesto' : '🧾 Tu orden de trabajo') + ' N° ' + n + ' en ' + T.nombre + ' · Total ' + plata(tot));
   }
   $('hOrden').onclick = () => ordenNueva(false);
   $('hPres').onclick = () => ordenNueva(true);
@@ -467,6 +553,10 @@
       (r.estado === 'lista' && !tiene('aviso_lista') && P.venta ? '<div class="aviso" style="margin-top:12px"><div class="grow">🔔 Avísale solo con el total y el link, y recuérdale si no la retira.</div><button class="small" type="button" data-sin-atras data-ofrecer="aviso_lista">🧩 Ver</button></div>' : '') +
       (r.abono_estado === 'devolver' ? '<div class="aviso warn" style="margin-top:12px"><div class="grow">Devuelve el abono de ' + plata(r.abono_monto) + ' al cliente.</div><button class="small okb" data-devuelto="' + r.id + '">✓ Ya lo devolví</button></div>' : '') +
       '</div>' +
+      (trabajando || r.estado === 'completada' ? '<div class="card" id="dIngC"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><h2 class="grow" style="margin:0">📋 Ingreso de la bici</h2>' +
+        (ingresoListo() ? '<button class="small ghost" id="dIng" type="button">' + (r.ingreso && r.ingreso.at ? '✏️ Editar' : '＋ Completar') + '</button>' : '') +
+        '<button class="small alt" id="dDoc" type="button">🧾 ' + (r.servicio_nombre === 'Presupuesto' ? 'Presupuesto' : 'Orden de trabajo') + '</button></div>' +
+        (r.ingreso && r.ingreso.at && window.CFX_INGRESO ? CFX_INGRESO.acta(r.ingreso, { etiquetas: ING.etiquetas }) : '<p class="sub" style="margin:6px 0 0">Sin ingreso: marca lo que trae, cómo llega, N° de serie y firma.</p>') + '</div>' : '') +
       (trabajando ? '<div class="card"><h2>🔧 Estado del trabajo</h2><div class="btns" style="margin-top:0">' + (sig ? '<button id="dSig" data-e="' + sig[0] + '">' + sig[1] + '</button>' : '') +
         (['recibida', 'en_reparacion'].includes(r.estado) ? '<button class="alt" data-e="esperando_repuesto">📦 Esperando repuesto</button>' : '') +
         (r.estado === 'lista' ? '<button class="okb" type="button" id="dCobrar">💵 Cobrar y entregar</button>' : '') +
@@ -495,6 +585,8 @@
     $('dLink').onclick = () => { navigator.clipboard.writeText(link).then(() => toast('🔗 Enlace copiado')); };
     const dom = $('dDom'); if (dom) dom.onclick = () => editarDomicilio(r, () => abrirDetalle(r.id));  // G59g
     const gar = $('dGar'); if (gar) gar.onclick = () => editarGarantia(null, { reserva: r.id, nombre: r.nombre, telefono: r.telefono, bici: r.bici || r.servicio_nombre, detalle: r.servicio_nombre }, () => abrirDetalle(r.id));  // G59h
+    if ($('dIng')) $('dIng').onclick = () => editarIngreso(r);  // G142 b
+    if ($('dDoc')) $('dDoc').onclick = () => documentoOrden(r);
     const pas = $('dPas'); if (pas) pas.onclick = () => editarPasaporte(r.pasaporte_id || null, { bici: r.bici, dueno: r.nombre, telefono: r.telefono, reserva: r.id }, () => abrirDetalle(r.id));  // G59f
     $('v-detalle').onclick = async (ev) => {
       if (await accionesComunes(ev)) return;
@@ -595,7 +687,7 @@
     el.innerHTML = '<p class="sub" style="margin-top:0">Hasta 2 al llegar y 2 al entregar. Te cuidan si hay reclamos y el cliente las ve en su enlace.</p>' +
       (fotos.length ? '<div class="fotos">' + fotos.map((f) => '<figure><img alt="Foto ' + f.tipo + '" src="' + f.imagen + '"><figcaption>' + (f.tipo === 'antes' ? 'Llegada' : 'Entrega') + '</figcaption>' +
         '<button class="small danger" type="button" data-fx="' + f.id + '" aria-label="Borrar foto">✕</button></figure>').join('') + '</div>' : '') +
-      '<div class="btns">' + ['antes', 'despues'].map((t) => n(t) < 2 ? '<label class="btn alt" style="margin:0;color:var(--brand)">📷 ' + (t === 'antes' ? 'Llegada' : 'Entrega') +
+      '<div class="btns">' + ['antes', 'despues'].map((t) => n(t) < (t === 'antes' ? 4 : 2) ? '<label class="btn alt" style="margin:0;color:var(--brand)">📷 ' + (t === 'antes' ? 'Llegada' : 'Entrega') +
         '<input type="file" accept="image/*" capture="environment" data-ft="' + t + '" hidden></label>' : '').join('') + '</div>';
     el.onchange = async (e) => {
       const i = e.target.closest('[data-ft]'); if (!i || !i.files[0]) return;
@@ -684,16 +776,16 @@
   let subMas = null;
   $('mSeg').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { history.pushState(null, '', '#mas/' + b.dataset.m); verMas(b.dataset.m); } };
   // Más = menú común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (body() dibuja dentro de ella).
-  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', misredes: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', promoapp: 'Ventas y clientes', estudio: 'Ventas y clientes', equipo: 'Tu taller', stock: 'Tu taller', caja: 'Ventas y clientes', boleta: 'Ventas y clientes', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes', pasaporte: 'Ventas y clientes', domicilio: 'Tu taller', garantias: 'Ventas y clientes', planes: 'Ventas y clientes',
+  const GRUPO = { chat: 'Tu taller', compartir: 'Tu taller', perfil: 'Tu taller', misredes: 'Tu taller', horario: 'Tu taller', servicios: 'Tu taller', abono: 'Tu taller', promos: 'Tu taller', promoapp: 'Ventas y clientes', estudio: 'Ventas y clientes', equipo: 'Tu taller', stock: 'Tu taller', ordenes: 'Ventas y clientes', caja: 'Ventas y clientes', boleta: 'Ventas y clientes', usadas: 'Ventas y clientes', tradein: 'Ventas y clientes', pasaporte: 'Ventas y clientes', domicilio: 'Tu taller', garantias: 'Ventas y clientes', planes: 'Ventas y clientes',
     stats: 'Ventas y clientes', recordar: 'Ventas y clientes', plan: 'Tu plan', modulos: 'Tu plan', cuenta: 'Configuración' };
   const K2 = { plan: 'premium', cuenta: 'micuenta', chat: 'mensajes' };
-  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', misredes: '📱', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', promoapp: '📣', estudio: '🎬', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', caja: '💵', boleta: '🧾', usadas: '🏷️', tradein: '🔄', pasaporte: '🪪', domicilio: '🚐', garantias: '🛡️', planes: '🔁', cuenta: '👤' };
+  const ICO = { chat: '💬', compartir: '📣', perfil: '🏪', misredes: '📱', horario: '⏰', servicios: '🛠️', abono: '💳', promos: '🏷️', promoapp: '📣', estudio: '🎬', plan: '⭐', equipo: '👥', stats: '📊', recordar: '🔔', modulos: '🧩', stock: '📦', ordenes: '🧾', caja: '💵', boleta: '🧾', usadas: '🏷️', tradein: '🔄', pasaporte: '🪪', domicilio: '🚐', garantias: '🛡️', planes: '🔁', cuenta: '👤' };
   let hojaMas = null;
   function abrirSec(m) {
     if (m === 'chat') { $('chatBtn').click(); return; }
     const b = $('mSeg').querySelector('[data-m="' + m + '"]'); if (!b || b.classList.contains('hidden')) return;
     const F = { misredes: () => window.CodeFixVitrina && CodeFixVitrina.redes && CodeFixVitrina.redes.editor(body(), { rpc, viejas: (P.taller || {}).instagram ? [{ red: 'instagram', url: 'https://instagram.com/' + String(P.taller.instagram).replace(/^@/, '').replace(/[^\w.]/g, '') }] : [] }),  // G141 a (núcleo)
-      boleta: verBoleta, perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, promoapp: () => window.CFX_ANUNCIOS && CFX_ANUNCIOS.promos(body(), { rpc, probar: ofrecer }), estudio: () => window.CFX_ESTUDIO && CFX_ESTUDIO.montar(body(), { rpc, probar: ofrecer, nombre: (P.taller || {}).nombre || '' }), plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, caja: verCaja, usadas: verUsadas, tradein: verTradein, pasaporte: verPasaportes, domicilio: verDomicilio, garantias: verGarantias, planes: verPlanes };
+      boleta: verBoleta, perfil: verPerfil, horario: verHorario, servicios: verServicios, abono: verAbono, promos: verPromos, promoapp: () => window.CFX_ANUNCIOS && CFX_ANUNCIOS.promos(body(), { rpc, probar: ofrecer }), estudio: () => window.CFX_ESTUDIO && CFX_ESTUDIO.montar(body(), { rpc, probar: ofrecer, nombre: (P.taller || {}).nombre || '' }), plan: verPlan, equipo: verEquipo, stats: verStats, recordar: verRecordar, cuenta: verCuenta, compartir: verCompartir, modulos: verModulos, stock: verStock, caja: verCaja, ordenes: verOrdenes, usadas: verUsadas, tradein: verTradein, pasaporte: verPasaportes, domicilio: verDomicilio, garantias: verGarantias, planes: verPlanes };
     if (!hojaMas || hojaMas.m !== m || !hojaMas.h.d.isConnected) {
       const h = window.CFX_MENU.hoja((ICO[m] || '') + ' ' + esc(b.textContent.replace(/\d+$/, '').replace(/^[^\p{L}]+/u, '').trim()), () => { if (hojaMas && hojaMas.h === h) { hojaMas = null; subMas = null; } });
       hojaMas = { m, h };
@@ -1043,6 +1135,19 @@
     }, monto);
   }
   let cajaF = null;
+  // G142 b 🧾 Órdenes y presupuestos (Más): recibir bici, armar presupuesto y ver las que están en el taller (tocar = abrir).
+  async function verOrdenes() {
+    body().innerHTML = '<div class="card"><div class="btns" style="margin-top:0"><button type="button" data-on="o">🚲 Recibir bici</button><button type="button" class="alt" data-on="p">💰 Presupuesto</button></div></div><div id="oLista"><p class="empty">Cargando…</p></div>';
+    body().querySelectorAll('[data-on]').forEach((b) => { b.onclick = () => ordenNueva(b.dataset.on === 'p'); });
+    let L = [];
+    try { L = await rpc('taller_reservas', { p_desde: App.sumarDias(P.hoy, -120), p_hasta: P.hoy, p_estados: EN_TALLER, p_id: null }); }
+    catch (e) { $('oLista').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    L = (L || []).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    $('oLista').innerHTML = '<div class="card"><h2>En el taller (' + L.length + ')</h2>' + (L.length ? L.map((r) => '<button type="button" class="fila-o" data-oid="' + r.id + '" style="display:block;width:100%;text-align:left;margin-top:6px">' +
+      '<b>' + esc(r.nombre) + '</b> · ' + esc((ESTADOS[r.estado] || [r.estado])[0]) + '<div class="sub">' + esc(r.servicio_nombre) + (r.bici ? ' · 🚲 ' + esc(r.bici) : '') + (r.total ? ' · ' + plata(r.total) : '') + (r.ingreso && r.ingreso.at ? ' · 📋 Ingreso' : '') + '</div></button>').join('')
+      : '<p class="sub">No hay bicis en el taller.</p>') + '</div>';
+    $('oLista').querySelectorAll('[data-oid]').forEach((b) => { b.onclick = () => { if (hojaMas && hojaMas.h) try { hojaMas.h.cerrar(); } catch (x) { /* ya cerrada */ } volverA = 'hoy'; abrirDetalle(b.dataset.oid); }; });
+  }
   async function verCaja() {
     body().innerHTML = '<p class="empty">Cargando…</p>';
     let c;
@@ -1498,12 +1603,13 @@
       '<div class="btns">' + (id && P.dueno ? '<button class="danger" id="paX" type="button">🗑️ Borrar</button>' : '') +
         (id ? '<button class="' + (x.robada ? 'okb' : 'danger') + '" id="paR" type="button">' + (x.robada ? '✅ La recuperó' : '🚨 Reportar robo') + '</button>' : '') +
         '<button id="paG" type="button">💾 ' + (id ? 'Guardar' : 'Crear pasaporte') + '</button></div>' +
-      (id ? '<div class="btns"><button class="alt" id="paQ" type="button">🖨️ Sticker QR</button>' + (x.telefono ? '<a class="btn alt" id="paW" target="_blank" rel="noopener" href="' + App.wa(x.telefono, 'Hola ' + x.dueno.split(' ')[0] +
+      (id ? '<div class="btns"><button class="alt" id="paQ" type="button">🖨️ Sticker QR</button>' + (window.CFX_INGRESO && CFX_INGRESO.puedeNFC() ? '<button class="alt" id="paN" type="button">📲 Grabar etiqueta NFC</button>' : '') + (x.telefono ? '<a class="btn alt" id="paW" target="_blank" rel="noopener" href="' + App.wa(x.telefono, 'Hola ' + x.dueno.split(' ')[0] +
         ' 👋 Te escribimos de ' + P.taller.nombre + ': este es el 🪪 pasaporte de tu ' + x.bici + '. Ahí ves su historial y, si te la roban, la reportas en 1 toque 👉 ' + linkPas(x, true)) + '">📲 Enviar al dueño</a>' : '') +
         '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(linkPas(x)) + '">👀 Ver ficha</a></div>' : ''));
     const q1 = (s) => d.querySelector(s);
     App.mapas(d);  // G91 📍 mapa Leaflet con el recorrido
     const pk = q1('#paK'); if (pk) pk.onclick = () => App.constancia(x, P.taller);  // G91 📄
+    const pn = q1('#paN'); if (pn) pn.onclick = async () => { if (await CFX_INGRESO.nfc(linkPas(x))) toast('📲 Etiqueta grabada: al acercar un teléfono abre el pasaporte'); };  // G142 d
     const pav = q1('#paAv'); if (pav) pav.onclick = async () => {  // G91 📲 al dueño sin cuenta: la última ubicación y su link para seguirla
       let y = x; try { y = await rpc('taller_pasaporte', { p_id: id }); } catch (e) { /* usa lo que ya tenía */ }
       const u = (y.rastros || []).find((r) => r.lat != null);

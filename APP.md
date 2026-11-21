@@ -115,3 +115,5 @@
 - 💬 G128 b (3.41): orden con cliente con cuenta → #dChat abre App.abrirChat(T, cliente_id). Aviso sin medios: ya estaba en Hoy → Para empezar. Prueba: SaaS/pruebas/g128b.js.
 - G140 (núcleo 3.36): Mi perfil → 🎨 Personalizar (ex Color y modo): temas listos, barra de abajo (tipo/tamaño/nombres), ↩️ de fábrica; se guarda en public.cfx_personal (nucleo/sql/personal.sql). Prueba: SaaS/pruebas/g140.js.
 - 📱 G141 (núcleo 3.37): 🔗 Mis redes (CodeFixVitrina.redes + nucleo/sql/redes.sql, gancho cfx_redes_llave_app en instalar/schema) y 🎬 Estudio por link + 📸 pantallazo + 📊 gráficos + 💡 ideas sin base (nucleo/est-links.js). Pruebas: SaaS/pruebas/g141.js, g141b.js.
+- 🚲 G142 b (3.48 · bd 2.75 · núcleo 3.38): 📋 ingreso completo (núcleo CFX_INGRESO + CFX_CATALOGO; reservas.ingreso; taller_ingreso_nueva/guardar; fotos de llegada 4) · 🧾 documento de la orden (documentoOrden) · Más → 🧾 Órdenes y presupuestos (verOrdenes) · 👤 cfx_reclamar_app (al confirmar el correo). Prueba: SaaS/pruebas/g142b.js.
+- 📱📲 G142 c/d: equipo_redes (app.js) → 📱 Mis redes personales del dueño y mecánicos · pasaporte → 📲 Grabar etiqueta NFC (CFX_INGRESO.nfc).
