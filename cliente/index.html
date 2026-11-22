@@ -91,7 +91,7 @@
   async function cargar() {
     D = await rpc('cliente_inicio');
     const t = D.taller;
-    App.tema(D.premium && yo.color ? yo.color : t.color); App.pintarLogo($('hLogo'), D.premium && (yo.foto || yo.icono) ? { logo: yo.foto, icono: yo.icono || t.icono } : t); App.pintarLogo($('tLogo'), t);
+    App.tema(D.premium && yo.color ? yo.color : t.color); App.pintarLogo($('hLogo'), D.premium && yo.foto ? { logo: yo.foto, icono: t.icono } : t); App.pintarLogo($('tLogo'), t);
     $('hNombre').textContent = t.nombre; $('tNombre').textContent = t.nombre;
     $('tNota').innerHTML = App.nota(t.nota);
     $('tDir').textContent = [t.direccion, t.comuna].filter(Boolean).join(', ');

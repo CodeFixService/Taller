@@ -119,3 +119,4 @@
 - 📱📲 G142 c/d: equipo_redes (app.js) → 📱 Mis redes personales del dueño y mecánicos · pasaporte → 📲 Grabar etiqueta NFC (CFX_INGRESO.nfc).
 - 📱 G147 (3.52): App.verQR({ rpc }) muestra "Síguenos" (núcleo redes.bajoQR) y lo pasa al 🖨️ afiche.
 - 🛡️ G144 (núcleo 3.40): sin fila "Panel de administración" ni limpieza/respaldo dentro de la app (todo en CM → Apps) · .cfx-num/.cfx-redondo (círculo perfecto) · 🎤/⬜ = íconos de línea · 💬 WhatsApp del registro → Mis redes (cfx_redes_con_wa; gancho cfx_whatsapp_app donde aplica; uno solo, el botón antiguo se oculta con redes.unWa) · .assetsignore: notas, SQL y pruebas NO se publican.
+- 🙂 G148 (3.53, núcleo 3.43): perfiles sin ícono → foto o la letra del nombre (el ícono guardado se conserva, no se muestra).

@@ -245,7 +245,7 @@
         colores: ['#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#db2777', '#dc2626', '#ea580c', '#d97706', '#334155', '#111827'], libre: false,
         color: () => cuenta.color || '', guardarColor: async (x) => { await estilo({ p_color: x }); tema(x); },
         bloqueo: (que) => (prem() ? '' : 'Personalizar tu perfil'),
-        mejorar: () => { toast('⭐ Con Premium eliges tus colores, tu ícono o tu foto y una descripción'); location.hash = 'plan'; }
+        mejorar: () => { toast('⭐ Con Premium eliges tus colores, tu foto y una descripción'); location.hash = 'plan'; }
       });
     }
     if (c.rol === 'admin') {
