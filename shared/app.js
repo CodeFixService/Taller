@@ -521,24 +521,26 @@
   function qrImagen(url, celda) {
     try { const qr = global.qrcode(0, 'M'); qr.addData(url); qr.make(); return qr.createDataURL(celda || 8, 8); } catch (e) { return ''; }
   }
-  // d = { url, titulo, archivo, afiche: { titulo, texto } }
+  // d = { url, titulo, archivo, afiche: { titulo, texto }, rpc (G147: "Síguenos" con las redes del taller) }
   function verQR(d) {
     const img = qrImagen(d.url);
     const m = modal('<h2>📱 ' + esc(d.titulo || 'Código QR') + '</h2><div class="qr" style="text-align:center"><img alt="QR" src="' + img + '"></div><p class="sub" style="text-align:center">' + esc(d.url) +
       '</p><div class="btns"><button class="ghost" data-cerrar>Cerrar</button><button class="alt" data-copiar>📋 Copiar link</button><button data-bajar>⬇️ Descargar</button>' +
       (d.afiche ? '<button class="alt" data-afiche>🖨️ Afiche</button>' : '') + '</div>');
+    const sig = m.querySelector('.qr'), nodo = document.createElement('p'); nodo.className = 'sub'; nodo.style.textAlign = 'center'; nodo.hidden = true;
+    if (sig && d.rpc && global.CodeFixVitrina && CodeFixVitrina.redes.bajoQR) { sig.after(nodo); CodeFixVitrina.redes.bajoQR(nodo, { rpc: d.rpc }); }
     m.querySelector('[data-bajar]').onclick = () => descargar(img, d.archivo || 'qr.gif');
     m.querySelector('[data-copiar]').onclick = () => { navigator.clipboard.writeText(d.url).then(() => toast('🔗 Link copiado'), () => toast(d.url)); };
     const af = m.querySelector('[data-afiche]');
-    if (af) af.onclick = () => afiche(d.url, d.afiche.titulo, d.afiche.texto);
+    if (af) af.onclick = () => afiche(d.url, d.afiche.titulo, d.afiche.texto, nodo.hidden ? '' : nodo.textContent);
   }
   // Hoja para imprimir y pegar en el mesón o en la vitrina.
-  function afiche(url, titulo, texto) {
+  function afiche(url, titulo, texto, redes) {
     const w = window.open('', '_blank');
     if (!w) { toast('Permite las ventanas emergentes para imprimir'); return; }
     w.document.write('<!doctype html><html lang="es"><head><meta charset="utf-8"><title>' + esc(titulo) + '</title><style>body{font-family:system-ui,sans-serif;text-align:center;padding:40px 24px;color:#0f172a}' +
       'h1{font-size:40px;margin:0 0 12px}p{font-size:22px;margin:0 auto 28px;max-width:560px}img{width:340px;height:340px;image-rendering:pixelated}small{display:block;margin-top:18px;font-size:15px;color:#475569;word-break:break-all}</style></head><body>' +
-      '<h1>' + esc(titulo) + '</h1><p>' + esc(texto) + '</p><img alt="QR" src="' + qrImagen(url, 12) + '"><small>' + esc(url) + '</small>' +
+      '<h1>' + esc(titulo) + '</h1><p>' + esc(texto) + '</p><img alt="QR" src="' + qrImagen(url, 12) + '"><small>' + esc(url) + '</small>' + (redes ? '<p style="font-size:20px;margin:22px auto 0">' + esc(redes) + '</p>' : '') +
       '<script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>');
     w.document.close();
   }

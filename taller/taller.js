@@ -318,7 +318,7 @@
   $('hPres').onclick = () => ordenNueva(true);
   $('hCompartir').onclick = () => compartir(linkReservas(), '🚲 Reserva tu hora en ' + P.taller.nombre);
   $('hQR').onclick = () => App.verQR({ url: linkReservas(), titulo: 'QR de tu página de reservas', archivo: 'qr-' + P.taller.slug + '.gif',
-    afiche: { titulo: '🚲 ' + P.taller.nombre, texto: 'Escanea y reserva tu hora online. Sigue el estado de tu bici desde el celular.' } });
+    afiche: { titulo: '🚲 ' + P.taller.nombre, texto: 'Escanea y reserva tu hora online. Sigue el estado de tu bici desde el celular.' }, rpc });
   const compartir = (url, texto) => App.compartir(url, texto, P.taller.nombre);
 
   // Referidos: el dueño invita a otros talleres y gana días de Premium cuando el invitado paga su primer Premium.
