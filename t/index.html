@@ -180,7 +180,7 @@
           '<span class="sub">' + (!x.hay ? '⛔ Agotado' : x.quedan ? '⚡ Quedan ' + x.quedan : '✅ Disponible') + '</span>' +
           (x.hay && t.telefono ? '<div class="ct">' + (carro[x.id] ? '<button type="button" class="ghost" data-tq="' + x.id + '" aria-label="Quitar uno">−</button><span>' + carro[x.id] + '</span>' : '') +
             '<button type="button" class="' + (carro[x.id] ? 'alt' : '') + '" data-ta="' + x.id + '" aria-label="Agregar ' + esc(x.nombre) + '">' + (carro[x.id] ? '+' : '🛒 Agregar') + '</button></div>' : '') + '</div></div>').join('') + '</div>' +
-        (n ? '<div class="carro"><div class="grow"><b>🛒 ' + n + (n === 1 ? ' producto' : ' productos') + '</b> · <b>' + plata(tot) + '</b></div><a class="btn okb" id="tPedir" target="_blank" rel="noopener" href="' +
+        (n ? '<div class="carro" data-cfx-sobre-menu><div class="grow"><b>🛒 ' + n + (n === 1 ? ' producto' : ' productos') + '</b> · <b>' + plata(tot) + '</b></div><a class="btn okb" id="tPedir" target="_blank" rel="noopener" href="' +
           esc(App.wa(t.telefono, 'Hola ' + t.nombre + ' 👋 Quiero pedir de su tienda:\n' + sel.map((x) => '• ' + carro[x.id] + ' × ' + x.nombre + ' (' + plata(x.precio * carro[x.id]) + ')').join('\n') +
           '\nTotal: ' + plata(tot) + '\n¿Lo tienen para retirar? 🙌')) + '">📲 Pedir por WhatsApp</a></div>' : '') + '</div>';
     };
