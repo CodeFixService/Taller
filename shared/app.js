@@ -342,15 +342,19 @@
     }
     btn.onclick = () => {
       const d = modal('<div style="display:flex;align-items:center;gap:8px"><h2 style="flex:1;margin:0">🔔 Avisos</h2><button class="small ghost" data-cerrar>Cerrar</button></div>' +
-        '<div id="btAvisos" style="max-height:65vh;overflow:auto;margin-top:6px">' + (avisos.length ? avisos.map((a) =>
-          '<div class="notif' + (a.leida ? '' : ' nueva') + '" data-url="' + esc(a.url) + '" style="position:relative;padding-right:34px"><b>' + esc(a.titulo) + '</b><div class="sub">' + esc(a.cuerpo) + '</div><div class="sub">' + hace(a.created_at) + '</div>' +
+        '<div id="btAvisos" style="max-height:65vh;overflow:auto;margin-top:6px">' + (avisos.length ? avisos.map((a, i) =>
+          '<div class="notif' + (a.leida ? '' : ' nueva') + '" data-i="' + i + '" data-url="' + esc(a.url || '') + '" style="position:relative;padding-right:34px"><b>' + esc(a.titulo) + '</b><div class="sub">' + esc(a.cuerpo) + '</div><div class="sub">' + hace(a.created_at) + '</div>' +
           '<button type="button" class="small ghost" data-quitar="' + a.id + '" aria-label="Borrar aviso" style="position:absolute;top:6px;right:4px;padding:2px 8px;min-height:0">✕</button></div>').join('')
           : '<p class="empty">Sin avisos por ahora.</p>') + '</div>' +
         (avisos.length ? '<div class="btns"><button class="small ghost" data-borrar>Borrar todos</button></div><p class="sub">Los avisos y mensajes se borran solos a los 30 días.</p>' : '') + '<div id="btPush"></div>');
       d.querySelector('#btAvisos').onclick = async (e) => {
         const q1 = e.target.closest('[data-quitar]');
         if (q1) { e.stopPropagation(); q1.parentNode.remove(); await sb.from('notificaciones').delete().eq('id', q1.dataset.quitar); cargar(); return; }
-        const n = e.target.closest('[data-url]'); if (!n || !n.dataset.url) return;
+        const n = e.target.closest('[data-url]'), a = n && avisos[+n.dataset.i]; if (!n) return;
+        // G154: el núcleo abre lo que es suyo (🔄 versión → ventana con la versión, 💬 soporte → chat, sin destino → el texto); lo demás va a su pantalla.
+        const C = window.CFX_AYUDA;
+        if (C && C.tocarAviso && a) { d.close(); if (C.tocarAviso({ titulo: a.titulo, cuerpo: a.cuerpo, fecha: a.created_at, url: a.url })) return; }
+        if (!n.dataset.url) return;
         d.close(); irA(n.dataset.url);
       };
       const bb = d.querySelector('[data-borrar]');
