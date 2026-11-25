@@ -972,7 +972,7 @@
   // ---- Servicios
   function verServicios() {
     const lim = P.plan.limites.servicios;
-    body().innerHTML = '<div class="card"><h2>🛠️ Servicios <span class="pill">' + servicios.length + ' de ' + lim + '</span></h2><ul class="list" id="sLista"></ul>' +
+    body().innerHTML = '<div class="card"><h2>🛠️ Servicios <span class="pill">' + servicios.length + ' de ' + lim + '</span></h2>' + (window.CFX_TIPO ? '<p class="sub" style="margin-top:0">' + CFX_TIPO.chip('servicio') + ' en el taller · sin stock ni envío</p>' : '') + '<ul class="list" id="sLista"></ul>' +
       '<p class="sub" style="margin:8px 0 0">Vienen los trabajos más pedidos: toca ✏️ para cambiar el precio o pausar.</p>' +
       '<div class="btns"><button id="sNuevo">＋ Nuevo servicio</button><button class="alt" id="sTipicos">✨ Servicios de fábrica</button></div></div>';
     $('sLista').innerHTML = servicios.length ? servicios.map((s) => '<li' + (s.activo ? '' : ' style="opacity:.55"') + '><div class="grow"><b>' + esc(s.nombre) + '</b> <span class="precio">' + plata(s.precio) + '</span>' +
@@ -1286,7 +1286,7 @@
     ST = s;
     const bajos = porPedir(), f = (body().querySelector('#rBuscar') || {}).value || '';
     body().innerHTML = (bajos.length ? '<div class="aviso warn"><div class="grow">⚠️ ' + bajos.length + ' repuesto' + (bajos.length === 1 ? '' : 's') + ' por pedir.</div><button class="small" id="rPedido" type="button">🛒 Armar pedido</button></div>' : '') +
-      '<div class="card"><h2>📦 Repuestos <span class="pill">' + s.repuestos.length + '</span></h2><p class="sub" style="margin-top:0">Baja solo al entregar la orden (si el nombre es igual). Usa ➖ ➕ para corregir. ✏️ → 🛒 para mostrarlo en tu tienda.</p>' +
+      '<div class="card"><h2>📦 Repuestos <span class="pill">' + s.repuestos.length + '</span></h2><p class="sub" style="margin-top:0">' + (window.CFX_TIPO ? CFX_TIPO.chip('producto') + ' ' : '') + 'Baja solo al entregar la orden (si el nombre es igual). Usa ➖ ➕ para corregir. ✏️ → 🛒 para mostrarlo en tu tienda.</p>' +
       (s.repuestos.some((x) => x.tienda) ? '<div class="aviso" style="margin-bottom:10px"><div class="grow">🛒 ' + s.repuestos.filter((x) => x.tienda).length + ' en tu tienda (tu página de reservas).</div><a class="btn small alt" target="_blank" rel="noopener" href="' + esc(App.ROOT + 't/?s=' + encodeURIComponent(P.taller.slug) + '#tienda') + '">👀 Ver</a></div>' : '') +
       (s.repuestos.length > 8 ? '<input id="rBuscar" placeholder="🔎 Buscar repuesto" value="' + esc(f) + '">' : '') + '<ul class="list" id="rLista"></ul>' +
       '<div class="btns">' + (P.dueno ? '<button id="rNuevo" type="button">＋ Nuevo repuesto</button><button class="alt" id="rFab" type="button">✨ Repuestos de fábrica</button>' : '') +
