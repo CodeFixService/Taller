@@ -1437,7 +1437,8 @@
     const inf = Object.assign({}, x.informe || {}); let fotos = (x.fotos || []).slice(), fotosCambio = false;
     const cuenta = () => Object.values(inf).filter((v) => INF_EST()[v]).length;
     const INF_EST = () => (window.CFX_FABRICA ? CFX_FABRICA.INF_EST : {});
-    const d = modal('<h2>' + (id ? '🏷️ ' + esc(x.titulo) : '＋ Nueva bici usada') + '</h2>' +
+    // 🐞 BiciTaller #9: la hoja es larga → ✕ arriba y Cancelar abajo.
+    const d = modal('<button class="small ghost" type="button" data-cerrar data-sin-atras aria-label="Cerrar" style="float:right;margin:0 0 6px 8px;min-width:44px;min-height:44px">✕</button><h2>' + (id ? '🏷️ ' + esc(x.titulo) : '＋ Nueva bici usada') + '</h2>' +
       '<label for="uT">Marca y modelo</label><input id="uT" maxlength="100" value="' + esc(x.titulo) + '" placeholder="Ej: Trek Marlin 7">' +
       '<div class="row"><div><label for="uTa">Talla</label><input id="uTa" maxlength="20" value="' + esc(x.talla) + '" placeholder="M · 54 · aro 29"></div><div><label for="uA">Año</label><input id="uA" inputmode="numeric" maxlength="4" value="' + (x.anio || '') + '"></div></div>' +
       '<div class="row"><div><label for="uP">Precio de venta</label><input id="uP" inputmode="numeric" value="' + (x.precio || '') + '"></div><div><label for="uG">🛡️ Garantía</label><select id="uG">' +
@@ -1446,7 +1447,7 @@
       '<h3>📸 Fotos <span class="sub">(hasta 4)</span></h3><p class="sub" style="margin-top:0">De lado completo, con fondo blanco o pared lisa.</p><div id="uFotos" style="display:flex;gap:8px;flex-wrap:wrap"></div><input type="file" accept="image/*" id="uF" class="hidden">' +
       '<h3>🔍 Informe de 50 puntos <span class="pill" id="uCont"></span></h3><p class="sub" style="margin-top:0">Toca cada punto: ⬜ → ✅ Bien → 🔧 Ajustado → 🔁 Cambiado.</p>' +
       '<div id="uInf"></div><div class="btns"><button class="small ghost" id="uTodo" type="button" data-sin-atras>✅ Todo bien en lo que falta</button></div>' +
-      '<div class="btns">' + (id && P.dueno ? '<button class="danger" id="uB" type="button">🗑️ Borrar</button>' : '') +
+      '<div class="btns"><button class="ghost" type="button" data-cerrar data-sin-atras>Cancelar</button>' + (id && P.dueno ? '<button class="danger" id="uB" type="button">🗑️ Borrar</button>' : '') +
         (x.estado !== 'borrador' && x.token ? '<button class="ghost" id="uC" type="button">📲 Compartir</button>' : '') +
         '<button class="ghost" id="uG2" type="button">💾 Guardar</button>' +
         (x.estado === 'publicada' ? '<button class="okb" id="uV" type="button">✅ Se vendió</button>' : '<button id="uPub" type="button">📣 Publicar</button>') + '</div>');
