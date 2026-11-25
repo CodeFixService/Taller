@@ -34,6 +34,7 @@
       <div class="btns"><a class="btn" id="bReservar">📅 Reservar hora</a><a class="btn alt" id="bWsp" target="_blank" rel="noopener">📲 WhatsApp</a></div>
     </div>
     <div id="promos"></div>
+    <div class="card" id="recurrentes" hidden></div>
     <div class="card"><h2>📅 Mis reservas</h2><div class="grid" id="activas"></div></div>
     <div class="card" id="cBicis"><h2>🚲 Mis bicis <span class="pill ok">🪪 Seguridad gratis</span></h2>
       <p class="sub" style="margin-top:0">Pega el QR en el cuadro. Si te la roban, la reportas aquí: quien la escanee nos manda su ubicación y la sigues en el mapa.</p>
@@ -96,6 +97,7 @@
     $('tNota').innerHTML = App.nota(t.nota);
     $('tDir').textContent = [t.direccion, t.comuna].filter(Boolean).join(', ');
     $('tHorario').textContent = '🕐 ' + App.horarioTxt(t);
+    if (window.CFX_RECURRENTE) CFX_RECURRENTE.mias($('recurrentes'), { rpc }).catch(() => {});  // G162 🔁 (núcleo)
     $('bReservar').href = '../t/?s=' + encodeURIComponent(t.slug);
     $('bWsp').classList.toggle('hidden', !t.telefono);
     if (t.telefono) $('bWsp').href = App.wa(t.telefono, 'Hola 👋 Soy ' + yo.nombre + '.');
