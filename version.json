@@ -1,6 +1,6 @@
 {
-  "version": "3.68",
+  "version": "3.69",
   "bd": "2.80",
-  "notas": "🐞 G165 (núcleo 3.58): bici usada con ✕ arriba y Cancelar abajo · sin globito de mensajes en Más · un solo botón ↺ de fábrica con aire arriba. 🧩 G163 (núcleo 3.57): en 🧩 Módulos, lo que todavía no funciona se ve 🔜 deshabilitado con su nota (no se compra ni se prueba). Lo que ya tienes sigue a la vista.",
+  "notas": "🐞 G167 (núcleo 3.59): las casillas (✓) de Ajustes y formularios quedan derechitas al lado de su texto · «Cómo llega» alineado a la izquierda. 🐞 G165 (núcleo 3.58): bici usada con ✕ arriba y Cancelar abajo · sin globito de mensajes en Más · un solo botón ↺ de fábrica con aire arriba. 🧩 G163 (núcleo 3.57): en 🧩 Módulos, lo que todavía no funciona se ve 🔜 deshabilitado con su nota (no se compra ni se prueba). Lo que ya tienes sigue a la vista.",
   "funcion": "2.4"
 }
