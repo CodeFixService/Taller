@@ -1,6 +1,6 @@
 {
-  "version": "3.71",
-  "bd": "2.80",
-  "notas": "G169 (núcleo 3.61): el selector de hora marca el horario del día y parte en la hora de apertura (si la app se lo indica).",
+  "version": "3.72",
+  "bd": "2.81",
+  "notas": "📱 G164 (núcleo 3.62): tu cuenta se usa en máximo 3 equipos a la vez (el tope lo fija CodeFix). Si entras en uno más, eliges cuál cerrar. Ves y cierras tus equipos en Mi perfil → Avanzado → 📱 Mis equipos.",
   "funcion": "2.4"
 }
